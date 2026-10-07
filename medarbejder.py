@@ -1,0 +1,1 @@
+### medarbejder.py indeholder selve medarbejderobjektet og logikken omkring medarbejdere.

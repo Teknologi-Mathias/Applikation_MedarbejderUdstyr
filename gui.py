@@ -1,0 +1,1 @@
+#### gui.py håndterer PySide6-vinduet og brugerinput
