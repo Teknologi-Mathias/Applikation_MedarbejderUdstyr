@@ -1,0 +1,30 @@
+[
+    {
+        "loennr": "123123",
+        "navn": "1231",
+        "fratraedelsesdato": "2026-10-08",
+        "status": "Afventer Udstyr",
+        "kommentar": "321123"
+    },
+    {
+        "loennr": "123123",
+        "navn": "1231",
+        "fratraedelsesdato": "2026-10-08",
+        "status": "Afventer Udstyr",
+        "kommentar": "321123"
+    },
+    {
+        "loennr": "123321",
+        "navn": "Person",
+        "fratraedelsesdato": "2026-10-08",
+        "status": "Delvist afleveret",
+        "kommentar": "123123"
+    },
+    {
+        "loennr": "asd",
+        "navn": "asd",
+        "fratraedelsesdato": "2026-10-08",
+        "status": "Afventer Udstyr",
+        "kommentar": "asd"
+    }
+]
