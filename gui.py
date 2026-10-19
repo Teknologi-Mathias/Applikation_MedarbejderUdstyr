@@ -1,4 +1,4 @@
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -16,6 +16,10 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QTabWidget,
+    QGridLayout,
+    QFrame,
+    QListWidget,
 )
 
 from medarbejder import Medarbejder
@@ -71,11 +75,13 @@ class MedarbejderDialog(QDialog):
             if index >= 0:
                 self.status_input.setCurrentIndex(index)
 
-    def hent_data(self):
-        """Returnerer indtastningerne.
+            self.kommentar_input.setText(str(medarbejder.kommentar))
 
-        TODO: Du kan senere placere mere inputvalidering her.
-        """
+
+    def hent_data(self):
+
+        ### TODO: Senere mere inputvalidering her.
+
         return {
             "loennr": self.loennr_input.text().strip(),
             "navn": self.navn_input.text().strip(),
@@ -96,23 +102,214 @@ class MainWindow(QMainWindow):
         ### Dette er programmets aktive liste.
         self.medarbejdere_liste = data_manager.hent_medarbejdere()
         ### Dette er programmets aktive arkiv.
-        self.medarbejdere_liste_arkiv = []
+        self.medarbejdere_liste_arkiv = data_manager.hent_arkiverede_medarbejdere()
 
         self.opbyg_gui()
-        # self.indlaes_testdata()
+         ### TIMER TIL OPDATERING AUTOMATISK
+        self.opdaterings_timer = QTimer(self)
+
+        self.opdaterings_timer.timeout.connect(
+            self.opdater_alle_visninger
+        )
+
+        # Opdater hvert 60. sekund.
+        self.opdaterings_timer.start(60_000)
+
 
     def opbyg_gui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
+        self.faner = QTabWidget()
+        self.setCentralWidget(self.faner)
 
+        self.hovedside = QWidget()
+        self.arkivside = QWidget()
+        self.dashboard_side = QWidget()
+
+        self.faner.addTab(self.hovedside, "Hovedside")
+        self.faner.addTab(self.arkivside, "Arkiv")
+        self.faner.addTab(self.dashboard_side, "Dashboard")
+
+        self.central = self.hovedside
+
+        self.opbyg_hovedside()
+        self.opbyg_arkivside()
+        self.opbyg_dashboard()
+
+        # Alle widgets eksisterer nu.
+        self.opdater_alle_visninger()
+
+        self.faner.currentChanged.connect(self.fane_skiftet)
+
+
+
+    def opdater_tabel(self, visning, indholdliste):
+
+        if visning == "tabel":
+            self.tabel.setRowCount(0)
+
+
+            for medarbejder in indholdliste:
+                row = self.tabel.rowCount()
+                self.tabel.insertRow(row)
+
+                self.tabel.setItem(row, 0, QTableWidgetItem(str(medarbejder.loennr)))
+                self.tabel.setItem(row, 1, QTableWidgetItem(medarbejder.navn))
+
+                dato = QDate.fromString(medarbejder.fratraedelsesdato, "yyyy-MM-dd")
+                vis_dato = dato.toString("dd-MM-yyyy") if dato.isValid() else medarbejder.fratraedelsesdato
+                self.tabel.setItem(row, 2, QTableWidgetItem(vis_dato))
+                self.tabel.setItem(row, 3, QTableWidgetItem(medarbejder.status))
+                self.tabel.setItem(row, 4, QTableWidgetItem(medarbejder.kommentar)) ### Vender omvendt, grundet medarbejder klassen standard variabel værdi i initialiseringen
+
+
+                item = self.tabel.item(row, 3)
+                if item and item.text() == "Afventer Udstyr":
+                    item.setForeground(QColor("white"))
+                    item.setBackground(QColor("red"))
+                if item and item.text() == "Delvist afleveret":
+                    item.setForeground(QColor("black"))
+                    item.setBackground(QColor("yellow"))              
+                if item and item.text() == "Afviklet":
+                    item.setForeground(QColor("white"))
+                    item.setBackground(QColor("green"))
+        elif visning == "tabel_arkiv":
+            self.tabel_arkiv.setRowCount(0)
+
+
+            for medarbejder in indholdliste:
+                row = self.tabel_arkiv.rowCount()
+                self.tabel_arkiv.insertRow(row)
+
+                self.tabel_arkiv.setItem(row, 0, QTableWidgetItem(str(medarbejder.loennr)))
+                self.tabel_arkiv.setItem(row, 1, QTableWidgetItem(medarbejder.navn))
+
+                dato = QDate.fromString(medarbejder.fratraedelsesdato, "yyyy-MM-dd")
+                vis_dato = dato.toString("dd-MM-yyyy") if dato.isValid() else medarbejder.fratraedelsesdato
+                self.tabel_arkiv.setItem(row, 2, QTableWidgetItem(vis_dato))
+                self.tabel_arkiv.setItem(row, 3, QTableWidgetItem(medarbejder.status))
+                self.tabel_arkiv.setItem(row, 4, QTableWidgetItem(medarbejder.kommentar)) ### Vender omvendt, grundet medarbejder klassen standard variabel værdi i initialiseringen
+
+
+                item = self.tabel_arkiv.item(row, 3)
+                if item and item.text() == "Afventer Udstyr":
+                    item.setForeground(QColor("white"))
+                    item.setBackground(QColor("red"))
+                if item and item.text() == "Delvist afleveret":
+                    item.setForeground(QColor("black"))
+                    item.setBackground(QColor("yellow"))              
+                if item and item.text() == "Afviklet":
+                    item.setForeground(QColor("white"))
+                    item.setBackground(QColor("green"))
+
+    def valgt_medarbejder(self, visning):
+
+        ### TODO: Koble tabelrækken til objektet på en sikker måde.
+        if visning == "tabel":
+            row = self.tabel.currentRow()
+            if row < 0:
+                return None
+
+            if row >= len(self.medarbejdere_liste):
+                return None
+
+            return self.medarbejdere_liste[row]
+        elif visning == "tabel_arkiv":
+            row = self.tabel_arkiv.currentRow()
+            if row < 0:
+                return None
+
+            if row >= len(self.medarbejdere_liste_arkiv):
+                return None
+
+            return self.medarbejdere_liste_arkiv[row]
+
+    def opret_medarbejder(self):
+        dialog = MedarbejderDialog(self)
+
+        if dialog.exec():
+            data = dialog.hent_data()
+
+            loennr = data["loennr"]
+            navn = data["navn"]
+            fratraedelsesdato = data["fratraedelsesdato"]
+            status = data["status"]
+            kommentar = data["kommentar"]
+
+            ny_medarbejder = Medarbejder(loennr, navn, fratraedelsesdato, status, kommentar)
+            self.medarbejdere_liste.append(ny_medarbejder)
+            data_manager.gem_medarbejdere(self.medarbejdere_liste)  
+
+            self.opdater_alle_visninger()
+
+
+    def rediger_medarbejder(self):
+        medarbejder = self.valgt_medarbejder("tabel")
+        if medarbejder is None:
+            QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
+            return
+
+        dialog = MedarbejderDialog(self, medarbejder)
+
+        if dialog.exec():
+            data = dialog.hent_data()
+
+            medarbejder.loennr = data["loennr"]
+            medarbejder.navn = data["navn"]
+            medarbejder.fratraedelsesdato = data["fratraedelsesdato"] 
+            medarbejder.status = data["status"] 
+            medarbejder.kommentar = data["kommentar"]
+
+
+
+            data_manager.gem_medarbejdere(self.medarbejdere_liste)  
+            self.opdater_alle_visninger()
+
+    def skift_status(self):
+        medarbejder = self.valgt_medarbejder("tabel")
+        if medarbejder is None:
+            QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
+            return
+
+        if medarbejder.status == "Afventer Udstyr":
+            medarbejder.status = "Delvist afleveret"
+            data_manager.gem_medarbejdere(self.medarbejdere_liste)  
+            self.opdater_alle_visninger()
+        elif medarbejder.status == "Delvist afleveret":
+            medarbejder.status = "Afviklet"
+            data_manager.gem_medarbejdere(self.medarbejdere_liste)  
+            self.opdater_alle_visninger()
+        else: 
+            medarbejder.status = "Afventer Udstyr"
+            data_manager.gem_medarbejdere(self.medarbejdere_liste)  
+            self.opdater_alle_visninger()
+
+        #TODO: Denne ændring skal også afspejles i JSON filerne. 
+
+
+    def arkiver_medarbejder(self):
+        medarbejder = self.valgt_medarbejder("tabel")
+        if medarbejder is None:
+            QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
+            return
+
+        svar = QMessageBox.question(self, "Arkiver medarbejder", f"Vil du arkivere {medarbejder.navn}?",)
+
+        if svar == QMessageBox.Yes:
+
+            data_manager.arkiver_medarbejder(medarbejder)
+
+            self.medarbejdere_liste_arkiv.append(medarbejder)
+            self.medarbejdere_liste.remove(medarbejder)
+
+            self.opdater_alle_visninger()
+
+
+    def opbyg_hovedside(self):
         hoved_layout = QVBoxLayout()
 
         titel = QLabel("Medarbejderafvikling")
         titel.setStyleSheet("font-size: 24px; font-weight: bold;")
 
-        info = QLabel(
-            "V0.2"
-        )
+        info = QLabel("V0.3") ### VERSION
 
         knap_layout = QHBoxLayout()
 
@@ -147,148 +344,217 @@ class MainWindow(QMainWindow):
         self.tabel.horizontalHeader().setStretchLastSection(True)
         self.tabel.setAlternatingRowColors(True)
 
-        ### Reserveret område til dashboard senere.
-        dashboard_note = QLabel("Dashboard: kommer i en senere version")
-        dashboard_note.setAlignment(Qt.AlignCenter)
-        dashboard_note.setMinimumHeight(60)
-
         hoved_layout.addWidget(titel)
         hoved_layout.addWidget(info)
         hoved_layout.addLayout(knap_layout)
         hoved_layout.addWidget(self.tabel)
-        hoved_layout.addWidget(dashboard_note)
+            
 
-        central.setLayout(hoved_layout)
-
-    # def indlaes_testdata(self):
-    #     """Midlertidig testdata, så GUI'en har noget at vise."""
-    #     self.medarbejdere_liste = [
-    #         Medarbejder("10025", "Jens Jensen", "2026-10-15", "Test 1"),
-    #         Medarbejder("10118", "Anna Hansen", "2026-10-20", "Test 2 Test 2 Test 2 Test 2 Test 2 Test 2 Test 2 "),
-    #         Medarbejder("10344", "Peter Nielsen", "2026-09-15", ""),
-    #     ]
-
-        self.opdater_tabel()
-
-    def opdater_tabel(self):
-
-        self.tabel.setRowCount(0)
+            
+        self.central.setLayout(hoved_layout)
 
 
-        for medarbejder in self.medarbejdere_liste:
-            row = self.tabel.rowCount()
-            self.tabel.insertRow(row)
+    def opbyg_arkivside(self):
+        arkiv_layout = QVBoxLayout(self.arkivside)
 
-            self.tabel.setItem(row, 0, QTableWidgetItem(str(medarbejder.loennr)))
-            self.tabel.setItem(row, 1, QTableWidgetItem(medarbejder.navn))
+        titel_arkiv = QLabel("Arkiverede medarejdere")
+        titel_arkiv.setStyleSheet("font-size: 24px; font-weight: bold;")
 
-            dato = QDate.fromString(medarbejder.fratraedelsesdato, "yyyy-MM-dd")
-            vis_dato = dato.toString("dd-MM-yyyy") if dato.isValid() else medarbejder.fratraedelsesdato
-            self.tabel.setItem(row, 2, QTableWidgetItem(vis_dato))
-            self.tabel.setItem(row, 4, QTableWidgetItem(medarbejder.kommentar)) ### Vender omvendt, grundet medarbejder klassen standard variabel værdi i initialiseringen
-            self.tabel.setItem(row, 3, QTableWidgetItem(medarbejder.status))
+        knap_layout = QHBoxLayout()
 
-            item = self.tabel.item(row, 3)
-            if item and item.text() == "Afventer Udstyr":
-                item.setForeground(QColor("white"))
-                item.setBackground(QColor("red"))
-            if item and item.text() == "Delvist afleveret":
-                item.setForeground(QColor("black"))
-                item.setBackground(QColor("yellow"))              
-            if item and item.text() == "Afviklet":
-                item.setForeground(QColor("white"))
-                item.setBackground(QColor("green"))
+        self.goer_aktiv_knap = QPushButton("Gør medarbejder aktiv")
+        self.slet_knap = QPushButton("Slet medarbejder")
 
-    def valgt_medarbejder(self):
+        self.goer_aktiv_knap.clicked.connect(self.aktiver_medarbejder)
+        self.slet_knap.clicked.connect(self.slet_medarbejder)
 
-        ### TODO: Koble tabelrækken til objektet på en sikker måde.
+        knap_layout.addWidget(self.goer_aktiv_knap)
+        knap_layout.addWidget(self.slet_knap)
 
-        row = self.tabel.currentRow()
-        if row < 0:
-            return None
+        self.tabel_arkiv = QTableWidget()
+        self.tabel_arkiv.setColumnCount(5)
+        self.tabel_arkiv.setHorizontalHeaderLabels([
+            "Lønnr.",
+            "Medarbejdernavn",
+            "Fratrædelsesdato",
+            "Status",
+            "Kommentar",
+        ])
+        self.tabel_arkiv.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabel_arkiv.setSelectionMode(QTableWidget.SingleSelection)
+        self.tabel_arkiv.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabel_arkiv.horizontalHeader().setStretchLastSection(True)
+        self.tabel_arkiv.setAlternatingRowColors(True)
 
-        if row >= len(self.medarbejdere_liste):
-            return None
-
-        return self.medarbejdere_liste[row]
-
-    def opret_medarbejder(self):
-        dialog = MedarbejderDialog(self)
-
-        if dialog.exec():
-            data = dialog.hent_data()
-
-            loennr = data["loennr"]
-            navn = data["navn"]
-            fratraedelsesdato = data["fratraedelsesdato"]
-            status = data["status"]
-            kommentar = data["kommentar"]
-
-            ny_medarbejder = Medarbejder(loennr, navn, fratraedelsesdato, status, kommentar)
-            self.medarbejdere_liste.append(ny_medarbejder)
-            data_manager.gem_medarbejdere(self.medarbejdere_liste)  
-
-            self.opdater_tabel()
+        arkiv_layout.addWidget(titel_arkiv)
+        arkiv_layout.addLayout(knap_layout)
+        arkiv_layout.addWidget(self.tabel_arkiv)
 
 
-    def rediger_medarbejder(self):
-        medarbejder = self.valgt_medarbejder()
+
+    def aktiver_medarbejder(self):
+        medarbejder = self.valgt_medarbejder("tabel_arkiv")
         if medarbejder is None:
             QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
             return
 
-        dialog = MedarbejderDialog(self, medarbejder)
-
-        if dialog.exec():
-            data = dialog.hent_data()
-
-            medarbejder.loennr = data["loennr"]
-            medarbejder.navn = data["navn"]
-            medarbejder.fratraedelsesdato = data["fratraedelsesdato"]
-            medarbejder.kommentar = data["kommentar"] 
-            medarbejder.status = data["status"] 
-
-
-            data_manager.gem_medarbejdere(self.medarbejdere_liste)  
-            self.opdater_tabel()
-
-    def skift_status(self):
-        medarbejder = self.valgt_medarbejder()
-        if medarbejder is None:
-            QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
-            return
-
-        if medarbejder.status == "Afventer Udstyr":
-            medarbejder.status = "Delvist afleveret"
-            self.opdater_tabel()
-        elif medarbejder.status == "Delvist afleveret":
-            medarbejder.status = "Afviklet"
-            self.opdater_tabel()
-        else: 
-            medarbejder.status = "Afventer Udstyr"
-            self.opdater_tabel()
-
-        #TODO: Denne ændring skal også afspejles i JSON filerne. 
-
-
-    def arkiver_medarbejder(self):
-        medarbejder = self.valgt_medarbejder()
-        if medarbejder is None:
-            QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
-            return
-
-        svar = QMessageBox.question(self, "Arkiver medarbejder", f"Vil du arkivere {medarbejder.navn}?",)
+        svar = QMessageBox.question(self, "Aktiver medarbejder", f"Vil du aktiver {medarbejder.navn} igen?",)
 
         if svar == QMessageBox.Yes:
 
-            data_manager.arkiver_medarbejder(medarbejder)
+            data_manager.aktiver_medarbejder(medarbejder)
 
-            self.medarbejdere_liste_arkiv.append(medarbejder)
-            self.medarbejdere_liste.remove(medarbejder)
+            self.medarbejdere_liste_arkiv.remove(medarbejder)
+            self.medarbejdere_liste.append(medarbejder)
 
-            self.opdater_tabel()
-        
-            
+            self.opdater_alle_visninger()
 
-            
+    def slet_medarbejder(self):
+        pass
 
+
+    def opbyg_dashboard(self):
+        dashboard_layout = QVBoxLayout(self.dashboard_side)
+
+        titel = QLabel("Dashboard")
+        titel.setStyleSheet("font-size: 24px; font-weight: bold;")
+        dashboard_layout.addWidget(titel)
+
+        kort_layout = QGridLayout()
+        kort_layout.setSpacing(12)
+
+        self.kort_aktive = self.opret_statistik_kort(
+            kort_layout, "Aktive medarbejdere", 0, 0
+        )
+
+        self.kort_afventer = self.opret_statistik_kort(
+            kort_layout, "Afventer Udstyr", 0, 1
+        )
+
+        self.kort_delvist = self.opret_statistik_kort(
+            kort_layout, "Delvist afleveret", 0, 2
+        )
+
+        self.kort_afviklet = self.opret_statistik_kort(
+            kort_layout, "Afviklet", 1, 0
+        )
+
+        self.kort_arkiverede = self.opret_statistik_kort(
+            kort_layout, "Arkiverede medarbejdere", 1, 1
+        )
+
+        dashboard_layout.addLayout(kort_layout)
+
+        notifikation_titel = QLabel("Kræver opmærksomhed")
+        notifikation_titel.setStyleSheet("font-size: 18px; font-weight: bold;")
+
+        self.notifikations_liste = QListWidget()
+
+        dashboard_layout.addWidget(notifikation_titel)
+        dashboard_layout.addWidget(self.notifikations_liste)
+
+
+
+    def opret_statistik_kort(self, layout, titel, raekke, kolonne):
+        kort = QFrame()
+        kort.setFrameShape(QFrame.Shape.StyledPanel)
+
+        kort_layout = QVBoxLayout(kort)
+
+        titel_label = QLabel(titel)
+        vaerdi_label = QLabel("0")
+        vaerdi_label.setStyleSheet("font-size: 26px; font-weight: bold;")
+
+        kort_layout.addWidget(titel_label)
+        kort_layout.addWidget(vaerdi_label)
+
+        layout.addWidget(kort, raekke, kolonne)
+
+        return vaerdi_label
+    
+
+    def opdater_dashboard(self):
+        aktive = self.medarbejdere_liste
+        arkiv = self.medarbejdere_liste_arkiv
+
+        antal_aktive = len(aktive)
+
+        antal_afventer = sum(
+            1 for medarbejder in aktive
+            if medarbejder.status == "Afventer Udstyr"
+        )
+
+        antal_delvist = sum(
+            1 for medarbejder in aktive
+            if medarbejder.status == "Delvist afleveret"
+        )
+
+        antal_afviklet = sum(
+            1 for medarbejder in aktive
+            if medarbejder.status == "Afviklet"
+        )
+
+        antal_arkiverede = len(arkiv)
+
+        self.kort_aktive.setText(str(antal_aktive))
+        self.kort_afventer.setText(str(antal_afventer))
+        self.kort_delvist.setText(str(antal_delvist))
+        self.kort_afviklet.setText(str(antal_afviklet))
+        self.kort_arkiverede.setText(str(antal_arkiverede))
+
+    def opdater_notifikationer(self):
+        self.notifikations_liste.clear()
+
+        i_dag = QDate.currentDate()
+        antal_notifikationer = 0
+
+        for medarbejder in self.medarbejdere_liste:
+
+            if medarbejder.status != "Afventer Udstyr":
+                continue
+
+            dato = QDate.fromString(
+                medarbejder.fratraedelsesdato,
+                "yyyy-MM-dd"
+            )
+
+            if not dato.isValid():
+                continue
+
+            dage_siden = dato.daysTo(i_dag)
+
+            if dage_siden >= 14:
+                tekst = (
+                    f"{medarbejder.navn} "
+                    f"(lønnr. {medarbejder.loennr}) - "
+                    f"fratrådt {dato.toString('dd-MM-yyyy')} - "
+                    f"{dage_siden} dage siden"
+                )
+
+                self.notifikations_liste.addItem(tekst)
+                antal_notifikationer += 1
+
+        if antal_notifikationer == 0:
+            self.notifikations_liste.addItem(
+                "Ingen medarbejdere kræver opmærksomhed."
+            )
+
+    def fane_skiftet(self, index):
+        if self.faner.widget(index) == self.dashboard_side:
+            self.opdater_dashboard_visning()
+           
+
+    def opdater_dashboard_visning(self):
+        self.opdater_dashboard()
+        self.opdater_notifikationer()
+    
+    def opdater_alle_visninger(self):
+        # Hovedside
+        self.opdater_tabel("tabel", self.medarbejdere_liste)
+
+        # Arkiv
+        self.opdater_tabel("tabel_arkiv",self.medarbejdere_liste_arkiv)
+
+        # Dashboard
+        self.opdater_dashboard()
+        self.opdater_notifikationer()

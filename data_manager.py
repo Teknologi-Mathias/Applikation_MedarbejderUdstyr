@@ -47,6 +47,17 @@ def hent_medarbejdere():
 
     return medarbejdere
 
+def hent_arkiverede_medarbejdere():
+    data = _hent_json(ARKIV_FIL)
+
+    medarbejdere = []
+
+    for medarbejder_data in data:
+        medarbejder = Medarbejder.fra_dict(medarbejder_data)
+        medarbejdere.append(medarbejder)
+
+    return medarbejdere
+
 
 def gem_medarbejdere(medarbejdere):
     data = []
@@ -75,6 +86,16 @@ def arkiver_medarbejder(medarbejder):
 
     arkiv.append(medarbejder.til_dict())
     data.remove(medarbejder.til_dict())
+
+    _gem_json(data, AKTIVE_FIL)
+    _gem_json(arkiv, ARKIV_FIL)
+
+def aktiver_medarbejder(medarbejder):
+    arkiv = _hent_json(ARKIV_FIL)
+    data = _hent_json(AKTIVE_FIL)
+
+    arkiv.remove(medarbejder.til_dict())
+    data.append(medarbejder.til_dict())
 
     _gem_json(data, AKTIVE_FIL)
     _gem_json(arkiv, ARKIV_FIL)
