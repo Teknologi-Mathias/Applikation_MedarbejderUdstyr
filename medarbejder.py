@@ -1,26 +1,36 @@
 class Medarbejder:
+    STATUS_AFVENTER = "Afventer Udstyr"
+    STATUS_DELVIST = "Delvist afleveret"
+    STATUS_AFVIKLET = "Afviklet"
+
     STATUSER = (
-        "Afventer Udstyr",
-        "Delvist afleveret",
-        "Afviklet",
+        STATUS_AFVENTER,
+        STATUS_DELVIST,
+        STATUS_AFVIKLET,
     )
 
-    def __init__(self, loennr, navn, fratraedelsesdato, status, kommentar):
-        self.loennr = loennr
+    def __init__(self, loennr, navn, fratraedelsesdato, status, kommentar=""):
+        self.loennr = str(loennr).strip()
         self.navn = navn
         self.fratraedelsesdato = fratraedelsesdato
-        self.status = status
-        self.kommentar = kommentar        
+        self.status = self.normaliser_status(status)
+        self.kommentar = "" if kommentar is None else kommentar
 
+    @classmethod
+    def normaliser_status(cls, status):
+        """Sikrer at status altid er en af de tilladte værdier.
 
+        Ukendte eller manglende statuser bliver til "Afventer Udstyr", som er
+        den sikreste standard: medarbejderen dukker op på dashboardet i stedet
+        for at forsvinde stille.
+        """
+        for tilladt in cls.STATUSER:
+            if str(status).strip().lower() == tilladt.lower():
+                return tilladt
+        return cls.STATUS_AFVENTER
 
     def til_dict(self):
-        """Gør objektet klar til JSON.
-
-        TODO:
-        - Beslut præcis hvilke felter der skal gemmes.
-        - Overvej hvad der skal ske, hvis status ikke er en af de 3 tilladte.
-        """
+        """Gør objektet klar til JSON."""
         return {
             "loennr": self.loennr,
             "navn": self.navn,
@@ -31,14 +41,11 @@ class Medarbejder:
 
     @classmethod
     def fra_dict(cls, data):
-        """Opretter en Medarbejder ud fra et dictionary.
-
-        Dette er et godt sted at øve dig i at læse JSON-data og bygge objekter.
-        """
+        """Opretter en Medarbejder ud fra et dictionary (fx fra JSON)."""
         return cls(
             data["loennr"],
-            data["navn"],
-            data["fratraedelsesdato"],
-            data.get("status", "Afventer Udstyr"),
-            data["kommentar"],
+            data.get("navn", ""),
+            data.get("fratraedelsesdato", ""),
+            data.get("status", cls.STATUS_AFVENTER),
+            data.get("kommentar", ""),
         )
