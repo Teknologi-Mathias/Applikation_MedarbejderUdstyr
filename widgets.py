@@ -1,5 +1,3 @@
-"""Egne widgets: donutdiagram, søjlediagram, status-piller og sorterbare celler."""
-
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -18,7 +16,6 @@ SORT_ROLE = Qt.ItemDataRole.UserRole + 1        # nøgle til korrekt sortering
 
 
 class SortItem(QTableWidgetItem):
-    """Tabelcelle der sorterer på en skjult nøgle (fx ISO-dato eller tal)."""
 
     def __lt__(self, other):
         a = self.data(SORT_ROLE)
@@ -32,7 +29,6 @@ class SortItem(QTableWidgetItem):
 
 
 class StatusDelegate(QStyledItemDelegate):
-    """Tegner status som en afrundet farvet pille i stedet for en hel farvet celle."""
 
     def paint(self, painter, option, index):
         opt = QStyleOptionViewItem(option)
@@ -82,7 +78,6 @@ class StatusDelegate(QStyledItemDelegate):
 
 
 class DonutChart(QWidget):
-    """Donutdiagram med et tal i midten."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -156,7 +151,6 @@ class DonutChart(QWidget):
 
 
 class BarChart(QWidget):
-    """Enkelt søjlediagram: antal fratrædelser pr. dag."""
 
     def __init__(self, parent=None):
         super().__init__(parent)

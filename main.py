@@ -1,7 +1,6 @@
 import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
-
 from data_manager import DataFejl
 from gui import MainWindow
 from theme import anvend_tema

@@ -23,7 +23,6 @@ def _sikre_data_mappe():
 
 
 def _hent_json(fil):
-    """Læser en JSON-liste. Manglende eller tom fil giver en tom liste."""
     _sikre_data_mappe()
 
     if not fil.exists():
@@ -51,7 +50,6 @@ def _hent_json(fil):
 
 
 def _gem_json(data, fil):
-    """Skriver atomisk: først til en midlertidig fil, så omdøbes den."""
     _sikre_data_mappe()
 
     fd, tmp_sti = tempfile.mkstemp(
@@ -78,7 +76,6 @@ def _uden_loennr(data, loennr):
 
 
 def fil_signatur():
-    """Et lille fingeraftryk af begge filer, så GUI'en kan se om de er ændret."""
     signatur = []
     for fil in (AKTIVE_FIL, ARKIV_FIL):
         try:
@@ -97,7 +94,6 @@ def hent_arkiverede_medarbejdere():
     return _til_medarbejdere(_hent_json(ARKIV_FIL))
 
 
-# Gammelt navn, bevaret så eksisterende kald stadig virker.
 hent_arkiv = hent_arkiverede_medarbejdere
 
 
@@ -123,7 +119,6 @@ def arkiver_medarbejder(medarbejder):
 
 
 def aktiver_medarbejder(medarbejder):
-    """Flytter en medarbejder fra arkiv tilbage til aktive (matcher på lønnr.)."""
     arkiv = _uden_loennr(_hent_json(ARKIV_FIL), medarbejder.loennr)
     aktive = _uden_loennr(_hent_json(AKTIVE_FIL), medarbejder.loennr)
 
@@ -132,8 +127,6 @@ def aktiver_medarbejder(medarbejder):
     _gem_json(aktive, AKTIVE_FIL)
     _gem_json(arkiv, ARKIV_FIL)
 
-
 def slet_fra_arkiv(medarbejder):
-    """Fjerner en medarbejder permanent fra arkivet."""
     arkiv = _uden_loennr(_hent_json(ARKIV_FIL), medarbejder.loennr)
     _gem_json(arkiv, ARKIV_FIL)

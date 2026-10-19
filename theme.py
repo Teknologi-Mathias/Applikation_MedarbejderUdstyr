@@ -1,5 +1,3 @@
-"""Farver og globalt stylesheet (QSS) til et moderne, lyst udseende."""
-
 from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QPalette

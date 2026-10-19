@@ -30,7 +30,6 @@ class Medarbejder:
         return cls.STATUS_AFVENTER
 
     def til_dict(self):
-        """Gør objektet klar til JSON."""
         return {
             "loennr": self.loennr,
             "navn": self.navn,
@@ -41,7 +40,6 @@ class Medarbejder:
 
     @classmethod
     def fra_dict(cls, data):
-        """Opretter en Medarbejder ud fra et dictionary (fx fra JSON)."""
         return cls(
             data["loennr"],
             data.get("navn", ""),

@@ -59,10 +59,6 @@ def laes_dato(tekst):
     return QDate.fromString(str(tekst), "yyyy-MM-dd")
 
 
-# ---------------------------------------------------------------------------
-# Små hjælpefunktioner til at bygge UI
-# ---------------------------------------------------------------------------
-
 def lav_knap(tekst, variant=None, tooltip=None):
     knap = QPushButton(tekst)
     if variant:
@@ -98,7 +94,6 @@ def lav_sidehoved(titel, undertitel):
 
 
 def lav_raekke(titel, undertitel, badge, badge_bg, badge_tekst):
-    """En række i dashboardets lister: farvet badge + to linjer tekst."""
     widget = QWidget()
     layout = QHBoxLayout(widget)
     layout.setContentsMargins(4, 9, 4, 9)
@@ -260,7 +255,7 @@ class MainWindow(QMainWindow):
         self.opdaterings_timer.timeout.connect(self.opdater_alle_visninger)
         self.opdaterings_timer.start()
 
-    # ----- data -----------------------------------------------------------
+    ### ----- data -----------------------------------------------------------
 
     def _laes_data(self):
         aktive = data_manager.hent_medarbejdere()
@@ -297,7 +292,7 @@ class MainWindow(QMainWindow):
             if str(m.loennr) != str(undtagen)
         }
 
-    # ----- opbygning ------------------------------------------------------
+    ### ----- opbygning ------------------------------------------------------
 
     def opbyg_gui(self):
         central = QWidget()
@@ -506,7 +501,7 @@ class MainWindow(QMainWindow):
         )
         layout.addLayout(hoved)
 
-        # --- statistikkort ---
+        ### --- statistikkort ---
         kort_raekke = QHBoxLayout()
         kort_raekke.setSpacing(14)
         self.kort = {}
@@ -522,7 +517,7 @@ class MainWindow(QMainWindow):
             kort_raekke.addWidget(kort, 1)
         layout.addLayout(kort_raekke)
 
-        # --- diagrammer ---
+        ### --- diagrammer ---
         diagram_raekke = QHBoxLayout()
         diagram_raekke.setSpacing(14)
 
@@ -562,7 +557,7 @@ class MainWindow(QMainWindow):
         diagram_raekke.addWidget(soejle_kort, 7)
         layout.addLayout(diagram_raekke)
 
-        # --- lister ---
+        ### --- lister ---
         lister = QHBoxLayout()
         lister.setSpacing(14)
 
@@ -640,7 +635,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(liste, 1)
         return kort, liste, antal_label
 
-    # ----- tabeller -------------------------------------------------------
+    ### ----- tabeller -------------------------------------------------------
 
     def _tabel_for(self, visning):
         if visning == "tabel":
@@ -747,7 +742,7 @@ class MainWindow(QMainWindow):
         loennr = self.valgt_loennr(self._tabel_for(visning))
         return None if loennr is None else self._find(liste, loennr)
 
-    # ----- handlinger -----------------------------------------------------
+    ### ----- handlinger -----------------------------------------------------
 
     def _vaelg_foerst(self):
         QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
@@ -931,7 +926,7 @@ class MainWindow(QMainWindow):
         self._laes_data()
         self.opdater_alle_visninger()
 
-    # ----- dashboard ------------------------------------------------------
+    ### ----- dashboard ------------------------------------------------------
 
     def opdater_dashboard(self):
         aktive = self.medarbejdere_liste
