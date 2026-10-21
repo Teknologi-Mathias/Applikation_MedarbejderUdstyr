@@ -1,4 +1,5 @@
 import json
+import sys
 import os
 import shutil
 import tempfile
@@ -8,8 +9,17 @@ from pathlib import Path
 from medarbejder import Medarbejder
 
 
-BASE_MAPPE = Path(__file__).resolve().parent
-DATA_MAPPE = BASE_MAPPE / "Data"
+if getattr(sys, "frozen", False):
+    # Den færdige Windows-app gemmer data i brugerens AppData
+    DATA_MAPPE = (
+        Path(os.environ.get("APPDATA", str(Path.home())))
+        / "MedarbejderUdstyr"
+        / "Data"
+    )
+else:
+    # Under udvikling beholdes den eksisterende Data-mappe
+    DATA_MAPPE = Path(__file__).resolve().parent / "Data"
+
 AKTIVE_FIL = DATA_MAPPE / "medarbejdere.json"
 ARKIV_FIL = DATA_MAPPE / "arkiv.json"
 

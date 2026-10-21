@@ -1,0 +1,26 @@
+{
+  "file_hashes": {
+    "data_manager.py": "89d6c01fe0fe7880e31cadc1614cabab1d2c5539a8bda42c9a74ad0796d84991",
+    "gui.py": "20a9111978656528ea5ced721a6c66fc389476dcc3054b183b52a7534385b1a6",
+    "main.py": "87b9768598e48199b251f296de101cf836feee4030051fcc2a22444ab0a8af8a",
+    "medarbejder.py": "b978c697bfe1da9679db15bf7d896eeb721c5a5e3a99d665f6193c1f22b031e9",
+    "theme.py": "b9926b3a9719111164d1eb5a30d5b7c76eedaded8dd39cf688f2b983a5c28dfd",
+    "widgets.py": "f94d73310f5c33f8d7e7b9351deaaa7e25c92f84cab995f9fd85305645a9e26b"
+  },
+  "indexed_at_commit": "360178ef6e39b2d06d5a91a631fa23da114264dc",
+  "indexed_at_timestamp": "2026-10-21T18:24:03.153075700+00:00",
+  "languages": {
+    "python": {
+      "calls": 127,
+      "nodes": 85
+    }
+  },
+  "parser_version": "3.3.2",
+  "schema_version": 3,
+  "stats": {
+    "total_edges": 202,
+    "total_files": 6,
+    "total_nodes": 85
+  },
+  "vexp_version": "3.3.7"
+}

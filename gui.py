@@ -366,8 +366,12 @@ class MainWindow(QMainWindow):
         self.sidst_opdateret_label.setObjectName("sidebarFod")
         version_label = QLabel(f"{VERSION} · opdaterer hvert minut")
         version_label.setObjectName("sidebarFod")
+
+        self.skaber_label = QLabel("")
+        self.skaber_label.setObjectName("sidebarFod")
         layout.addWidget(self.sidst_opdateret_label)
         layout.addWidget(version_label)
+        layout.addWidget(self.skaber_label)
 
         return sidebar
 
@@ -1104,6 +1108,5 @@ class MainWindow(QMainWindow):
         self.opdater_tabel("tabel", self.medarbejdere_liste)
         self.opdater_tabel("tabel_arkiv", self.medarbejdere_liste_arkiv)
         self.opdater_dashboard_visning()
-        self.sidst_opdateret_label.setText(
-            f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}"
-        )
+        self.sidst_opdateret_label.setText(f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}")
+        self.skaber_label.setText("© MASAN")
