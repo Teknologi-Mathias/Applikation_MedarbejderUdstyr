@@ -1,80 +1,9 @@
-from PySide6.QtCore import QRectF, QSize, Qt
+"""Egne tegnede diagrammer til dashboardet."""
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import (
-    QApplication,
-    QStyle,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
-    QTableWidgetItem,
-    QWidget,
-)
+from PySide6.QtWidgets import QWidget
 
-from theme import FARVER, STATUS_STIL
-
-LOENNR_ROLE = Qt.ItemDataRole.UserRole          # lønnr. på hver celle i rækken
-SORT_ROLE = Qt.ItemDataRole.UserRole + 1        # nøgle til korrekt sortering
-
-
-class SortItem(QTableWidgetItem):
-
-    def __lt__(self, other):
-        a = self.data(SORT_ROLE)
-        b = other.data(SORT_ROLE)
-        if a is not None and b is not None:
-            try:
-                return a < b
-            except TypeError:
-                pass
-        return super().__lt__(other)
-
-
-class StatusDelegate(QStyledItemDelegate):
-
-    def paint(self, painter, option, index):
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        tekst = opt.text
-        opt.text = ""
-
-        widget = opt.widget
-        stil_objekt = widget.style() if widget else QApplication.style()
-        # Tegner baggrund og markering, men uden tekst.
-        stil_objekt.drawControl(
-            QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget
-        )
-
-        stil = STATUS_STIL.get(tekst)
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        font = QFont(painter.font())
-        font.setPixelSize(12)
-        font.setBold(True)
-        painter.setFont(font)
-
-        bredde = painter.fontMetrics().horizontalAdvance(tekst) + 26
-        hoejde = 24
-        rect = QRectF(
-            opt.rect.left() + 10,
-            opt.rect.center().y() - hoejde / 2 + 0.5,
-            bredde,
-            hoejde,
-        )
-
-        if stil:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(stil["bg"]))
-            painter.drawRoundedRect(rect, hoejde / 2, hoejde / 2)
-            painter.setPen(QColor(stil["tekst"]))
-        else:
-            painter.setPen(QColor(FARVER["text"]))
-
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, tekst)
-        painter.restore()
-
-    def sizeHint(self, option, index):
-        hint = super().sizeHint(option, index)
-        return QSize(max(hint.width(), 190), hint.height())
+from app.ui.theme import FARVER
 
 
 class DonutChart(QWidget):

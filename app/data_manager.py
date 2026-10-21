@@ -1,32 +1,66 @@
+"""Læsning og skrivning af JSON-filerne med aktive og arkiverede medarbejdere."""
 import json
-import sys
 import os
 import shutil
 import tempfile
 from datetime import datetime
-from pathlib import Path
 
-from medarbejder import Medarbejder
-
-
-if getattr(sys, "frozen", False):
-    # Den færdige Windows-app gemmer data i brugerens AppData
-    DATA_MAPPE = (
-        Path(os.environ.get("APPDATA", str(Path.home())))
-        / "MedarbejderUdstyr"
-        / "Data"
-    )
-else:
-    # Under udvikling beholdes den eksisterende Data-mappe
-    DATA_MAPPE = Path(__file__).resolve().parent / "Data"
-
-AKTIVE_FIL = DATA_MAPPE / "medarbejdere.json"
-ARKIV_FIL = DATA_MAPPE / "arkiv.json"
+from app.medarbejder import Medarbejder
+from app.stier import (
+    AKTIVE_FIL,
+    ARKIV_FIL,
+    DATA_MAPPE,
+    ER_FROSSET,
+    GAMMEL_DATA_MAPPE,
+)
 
 
 class DataFejl(Exception):
-    """Datafilen kan ikke læses (fx ødelagt JSON)."""
+    """Datafilen kan ikke læses eller skrives (fx ødelagt JSON)."""
 
+
+### ----- opstart -------------------------------------------------------------
+
+def klargoer_data_mappe():
+    """Kaldes én gang ved opstart.
+
+    Opretter Data-mappen, kopierer evt. data fra den gamle placering i
+    %APPDATA% og tjekker at programmet må skrive i mappen.
+    """
+    try:
+        DATA_MAPPE.mkdir(parents=True, exist_ok=True)
+        _kopier_gamle_data()
+        _tjek_skriveadgang()
+    except OSError as fejl:
+        raise DataFejl(
+            f"Programmet kan ikke skrive i datamappen:\n{DATA_MAPPE}\n\n"
+            f"({fejl})\n\n"
+            "Ligger programmet i C:\\Program Files, kræver det "
+            "administratorrettigheder. Flyt i stedet programmet til en mappe "
+            "som C:\\MedarbejderUdstyr."
+        ) from fejl
+
+
+def _kopier_gamle_data():
+    """Kopierer data fra %APPDATA% første gang den nye version startes.
+
+    Der kopieres (ikke flyttes), så de gamle filer bliver liggende som backup.
+    """
+    if not ER_FROSSET or GAMMEL_DATA_MAPPE == DATA_MAPPE:
+        return
+    for fil in (AKTIVE_FIL, ARKIV_FIL):
+        gammel = GAMMEL_DATA_MAPPE / fil.name
+        if gammel.exists() and not fil.exists():
+            shutil.copy2(gammel, fil)
+
+
+def _tjek_skriveadgang():
+    fd, sti = tempfile.mkstemp(dir=DATA_MAPPE, prefix=".skrivetest-")
+    os.close(fd)
+    os.remove(sti)
+
+
+### ----- filhåndtering ------------------------------------------------------
 
 def _sikre_data_mappe():
     DATA_MAPPE.mkdir(parents=True, exist_ok=True)
@@ -86,6 +120,7 @@ def _uden_loennr(data, loennr):
 
 
 def fil_signatur():
+    """Ændrer sig, når en af datafilerne ændres (bruges til synkronisering)."""
     signatur = []
     for fil in (AKTIVE_FIL, ARKIV_FIL):
         try:
@@ -96,15 +131,14 @@ def fil_signatur():
     return tuple(signatur)
 
 
+### ----- offentlige funktioner ----------------------------------------------
+
 def hent_medarbejdere():
     return _til_medarbejdere(_hent_json(AKTIVE_FIL))
 
 
 def hent_arkiverede_medarbejdere():
     return _til_medarbejdere(_hent_json(ARKIV_FIL))
-
-
-hent_arkiv = hent_arkiverede_medarbejdere
 
 
 def gem_medarbejdere(medarbejdere):
@@ -129,6 +163,7 @@ def arkiver_medarbejder(medarbejder):
 
 
 def aktiver_medarbejder(medarbejder):
+    """Flytter en medarbejder fra arkiv tilbage til aktive."""
     arkiv = _uden_loennr(_hent_json(ARKIV_FIL), medarbejder.loennr)
     aktive = _uden_loennr(_hent_json(AKTIVE_FIL), medarbejder.loennr)
 
@@ -136,6 +171,7 @@ def aktiver_medarbejder(medarbejder):
 
     _gem_json(aktive, AKTIVE_FIL)
     _gem_json(arkiv, ARKIV_FIL)
+
 
 def slet_fra_arkiv(medarbejder):
     arkiv = _uden_loennr(_hent_json(ARKIV_FIL), medarbejder.loennr)

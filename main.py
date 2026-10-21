@@ -1,9 +1,11 @@
 import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
-from data_manager import DataFejl
-from gui import MainWindow
-from theme import anvend_tema
+
+from app import data_manager
+from app.data_manager import DataFejl
+from app.ui.hovedvindue import MainWindow
+from app.ui.theme import anvend_tema
 
 
 def main():
@@ -11,6 +13,7 @@ def main():
     anvend_tema(app)
 
     try:
+        data_manager.klargoer_data_mappe()
         window = MainWindow()
     except DataFejl as fejl:
         QMessageBox.critical(None, "Datafejl", str(fejl))

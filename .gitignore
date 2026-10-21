@@ -8,3 +8,10 @@ Data/
 __pycache__/
 *.pyc
 .vscode/
+
+manifest.json
+vexp-hint.sh
+vexp-restore.sh
+.vexp
+.venv
+.claude

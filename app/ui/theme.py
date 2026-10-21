@@ -1,11 +1,11 @@
-from pathlib import Path
-
+"""Farver, stylesheet og palette for hele programmet."""
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-from medarbejder import Medarbejder
+from app.medarbejder import Medarbejder
+from app.stier import ASSETS_MAPPE
 
-CHEVRON = (Path(__file__).resolve().parent / "assets" / "chevron.svg").as_posix()
+CHEVRON = (ASSETS_MAPPE / "chevron.svg").as_posix()
 
 FARVER = {
     "bg": "#F4F6FA",
@@ -34,6 +34,19 @@ STATUS_STIL = {
         "farve": "#10B981", "bg": "#D1FAE5", "tekst": "#047857",
     },
 }
+
+INTET_STIL = {"farve": "#94A3B8", "bg": "#F1F5F9", "tekst": "#64748B"}
+
+
+def udstyr_stil(afleveret, total):
+    """Farve til udstyrs-pillen: rød = intet afleveret, gul = noget, grøn = alt."""
+    if total == 0:
+        return INTET_STIL
+    if afleveret == 0:
+        return STATUS_STIL[Medarbejder.STATUS_AFVENTER]
+    if afleveret < total:
+        return STATUS_STIL[Medarbejder.STATUS_DELVIST]
+    return STATUS_STIL[Medarbejder.STATUS_AFVIKLET]
 
 _QSS = """
 QWidget { color: @TEXT; font-size: 13px; }
@@ -71,6 +84,10 @@ QPushButton[nav="true"]:checked { background: @PRIMARY; color: white; }
 #statValue { font-size: 32px; font-weight: 700; }
 #statSub { color: @MUTED; font-size: 12px; }
 #feltFejl { color: #B91C1C; font-size: 12px; }
+#sektionTitel { font-size: 14px; font-weight: 700; padding-top: 6px; }
+#hjaelpTekst { color: @MUTED; font-size: 12px; }
+QCheckBox { spacing: 8px; background: transparent; }
+QCheckBox:disabled { color: #94A3B8; }
 
 /* ---------- Knapper ---------- */
 QPushButton {
@@ -96,6 +113,7 @@ QLineEdit, QDateEdit, QComboBox {
     padding: 8px 10px; selection-background-color: @PRIMARY;
     selection-color: white;
 }
+QLineEdit:disabled { background: #F8FAFC; color: #94A3B8; }
 QLineEdit:focus, QDateEdit:focus, QComboBox:focus {
     border: 1px solid @PRIMARY;
 }
