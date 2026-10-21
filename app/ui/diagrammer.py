@@ -37,7 +37,7 @@ class DonutChart(QWidget):
             side - tykkelse,
         )
 
-        pen = QPen(QColor("#EEF2F7"), tykkelse)
+        pen = QPen(QColor(FARVER["border"]), tykkelse)
         pen.setCapStyle(Qt.PenCapStyle.FlatCap)
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
@@ -121,7 +121,7 @@ class BarChart(QWidget):
                 bar_h = plot_h * 0.88 * antal / maks
                 rect = QRectF(x, basis - bar_h, bar_w, bar_h)
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor(FARVER["primary"] if er_i_dag else "#A5B4FC"))
+                p.setBrush(QColor(FARVER["primary"] if er_i_dag else FARVER["soejle"]))
                 p.drawRoundedRect(rect, 6, 6)
 
                 font = QFont(self.font())
@@ -136,12 +136,12 @@ class BarChart(QWidget):
                 )
             else:
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor("#E2E8F0"))
+                p.setBrush(QColor(FARVER["border"]))
                 p.drawRoundedRect(QRectF(x, basis - 3, bar_w, 3), 1.5, 1.5)
 
             # Dagnummer og ugedag under søjlen.
-            farve = FARVER["primary"] if er_i_dag else (
-                "#94A3B8" if er_weekend else FARVER["text"]
+            farve = FARVER["primary_hover"] if er_i_dag else (
+                FARVER["dim"] if er_weekend else FARVER["text"]
             )
             font = QFont(self.font())
             font.setPixelSize(12)
@@ -156,7 +156,7 @@ class BarChart(QWidget):
             font.setPixelSize(11)
             font.setBold(False)
             p.setFont(font)
-            p.setPen(QColor("#94A3B8"))
+            p.setPen(QColor(FARVER["dim"]))
             p.drawText(
                 QRectF(x - 10, basis + 22, bar_w + 20, 16),
                 Qt.AlignmentFlag.AlignCenter,

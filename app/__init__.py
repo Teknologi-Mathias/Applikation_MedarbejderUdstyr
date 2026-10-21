@@ -1,3 +1,10 @@
-"""Medarbejderafvikling – holder styr på udstyr ved fratrædelse."""
+"""IN-BASE – interne processer, samlet ét sted."""
 
-VERSION = "V0.5.4"
+VERSION = "V0.6"
+
+APP_NAVN = "IN-BASE"
+APP_SLOGAN = "Interne processer, samlet ét sted."
+APP_BESKRIVELSE = (
+    "Et fælles sted til opfølgning, automatisering, dokumentation og "
+    "sammenhæng mellem virksomhedens eksisterende systemer."
+)

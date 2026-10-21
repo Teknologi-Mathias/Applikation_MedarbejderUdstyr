@@ -66,20 +66,26 @@ def _sikre_data_mappe():
     DATA_MAPPE.mkdir(parents=True, exist_ok=True)
 
 
-def hent_json(fil):
+def hent_json(fil, forventet=list):
+    """Læser en JSON-fil. forventet = list, dict eller en tuple af typer.
+
+    En manglende eller tom fil giver en tom værdi af den forventede type
+    (None, hvis flere typer er tilladt).
+    """
     _sikre_data_mappe()
+    tom = forventet() if isinstance(forventet, type) else None
 
     if not fil.exists():
-        return []
+        return tom
 
     tekst = fil.read_text(encoding="utf-8")
     if not tekst.strip():
-        return []
+        return tom
 
     try:
         data = json.loads(tekst)
-        if not isinstance(data, list):
-            raise ValueError("Forventede en liste af medarbejdere.")
+        if not isinstance(data, forventet):
+            raise ValueError("Filen har ikke det forventede indhold.")
         return data
     except ValueError as fejl:
         # Gem en kopi, så intet går tabt, og stop i stedet for at overskrive.

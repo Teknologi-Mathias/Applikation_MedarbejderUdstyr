@@ -19,10 +19,15 @@ else:
     PROGRAM_MAPPE = Path(__file__).resolve().parent.parent
     RESSOURCE_MAPPE = PROGRAM_MAPPE
 
-DATA_MAPPE = PROGRAM_MAPPE / "Data"
+# Miljøvariablen INBASE_DATA kan pege på en anden datamappe (fx til test).
+DATA_MAPPE = Path(os.environ.get("INBASE_DATA") or PROGRAM_MAPPE / "Data")
 AKTIVE_FIL = DATA_MAPPE / "medarbejdere.json"
 ARKIV_FIL = DATA_MAPPE / "arkiv.json"
 SKABELON_FIL = DATA_MAPPE / "skabeloner.json"
+INDSTILLINGER_FIL = DATA_MAPPE / "indstillinger.json"
+BRUGER_FIL = DATA_MAPPE / "brugere.json"
+# Standardplacering for sikkerhedskopier (kan ændres under Data & sikkerhed).
+STANDARD_BACKUP_MAPPE = DATA_MAPPE / "Backup"
 
 ASSETS_MAPPE = RESSOURCE_MAPPE / "assets"
 

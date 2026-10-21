@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.medarbejder import Medarbejder
+from app.skabeloner import gyldig_email
 from app.ui.hjaelpere import laes_dato
 
 
@@ -59,12 +60,17 @@ class MedarbejderDialog(QDialog):
         self.dato_input.setDate(QDate.currentDate())
 
         self.kommentar_input = QLineEdit()
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("Bruges til rykkere, fx privat e-mail")
+        self.tracking_input = QLineEdit()
+        self.tracking_input.setPlaceholderText("Link til sporing af returpakken (valgfrit)")
 
         form = QFormLayout()
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(12)
         form.addRow("Lønnr.", self.loennr_input)
         form.addRow("Medarbejdernavn", self.navn_input)
+        form.addRow("E-mail", self.email_input)
         form.addRow("Sidste arbejdsdag", self.dato_input)
 
         if self.ny:
@@ -73,7 +79,7 @@ class MedarbejderDialog(QDialog):
             form.addRow("Skabelon", self.skabelon_input)
             hjaelp = QLabel(
                 "Afviklingssagens opgaver oprettes ud fra skabelonen, med frister "
-                "regnet fra sidste arbejdsdag. Skabeloner rettes i Data/skabeloner.json."
+                "regnet fra sidste arbejdsdag. Skabeloner rettes på siden Skabeloner."
             )
             hjaelp.setObjectName("hjaelpTekst")
             hjaelp.setWordWrap(True)
@@ -83,6 +89,7 @@ class MedarbejderDialog(QDialog):
             hjaelp.setObjectName("hjaelpTekst")
             form.addRow("", hjaelp)
 
+        form.addRow("Tracking-link", self.tracking_input)
         form.addRow("Kommentar", self.kommentar_input)
         return form
 
@@ -143,6 +150,8 @@ class MedarbejderDialog(QDialog):
         self.loennr_input.setText(str(medarbejder.loennr))
         self.navn_input.setText(medarbejder.navn)
         self.kommentar_input.setText(str(medarbejder.kommentar))
+        self.email_input.setText(medarbejder.email)
+        self.tracking_input.setText(medarbejder.tracking_link)
 
         dato = laes_dato(medarbejder.fratraedelsesdato)
         if dato.isValid():
@@ -171,6 +180,10 @@ class MedarbejderDialog(QDialog):
                 "(aktiv eller arkiveret)."
             )
             return
+        if data["email"] and not gyldig_email(data["email"]):
+            self.fejl_label.setText("E-mailadressen ser ikke gyldig ud.")
+            self.email_input.setFocus()
+            return
         if data["status_manuel"] and not data["status_begrundelse"]:
             self.fejl_label.setText("Skriv hvorfor status låses manuelt.")
             self.begrundelse_input.setFocus()
@@ -187,6 +200,8 @@ class MedarbejderDialog(QDialog):
             "navn": self.navn_input.text().strip(),
             "fratraedelsesdato": self.dato_input.date().toString("yyyy-MM-dd"),
             "kommentar": self.kommentar_input.text().strip(),
+            "email": self.email_input.text().strip(),
+            "tracking_link": self.tracking_input.text().strip(),
             "skabelon": skabelon,
             "status_manuel": self.status_input.currentText() if laast else None,
             "status_begrundelse": self.begrundelse_input.text().strip() if laast else "",

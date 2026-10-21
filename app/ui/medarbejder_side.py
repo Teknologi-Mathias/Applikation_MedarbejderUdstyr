@@ -31,7 +31,8 @@ KOL_LOENNR, KOL_NAVN, KOL_DATO, KOL_STATUS, KOL_OPGAVER, KOL_KOMMENTAR = range(
 
 
 class MedarbejderSide(QWidget):
-    def __init__(self, titel, undertitel, knapper, parent=None):
+    def __init__(self, titel, undertitel, knapper, handlinger=(), parent=None):
+        """knapper: øverste række ved søgefeltet. handlinger: række nedenunder (højre)."""
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
@@ -56,6 +57,13 @@ class MedarbejderSide(QWidget):
         for knap in knapper:
             vaerktoej.addWidget(knap)
         layout.addLayout(vaerktoej)
+
+        if handlinger:
+            anden_raekke = QHBoxLayout()
+            anden_raekke.addStretch()
+            for widget in handlinger:
+                anden_raekke.addWidget(widget)
+            layout.addLayout(anden_raekke)
 
         kort = lav_kort(skygge=False)
         kort_layout = QVBoxLayout(kort)

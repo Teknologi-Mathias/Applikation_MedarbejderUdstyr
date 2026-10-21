@@ -62,6 +62,16 @@ def action_center(medarbejdere, i_dag):
                     o.id,
                 ))
 
+        for r in m.usendte_rykkere():
+            alarmer.append(Alarm(
+                ADVARSEL,
+                "Rykker ikke markeret som sendt",
+                f"{m.navn} · {r.skabelon_navn} · kladde oprettet "
+                f"{r.oprettet[:10]} af {r.oprettet_af}",
+                "Kladde",
+                m.loennr,
+            ))
+
         fratraedelse = laes_iso_dato(m.fratraedelsesdato)
         if fratraedelse is None:
             continue
@@ -112,3 +122,61 @@ def forsinkede(medarbejdere, i_dag):
         for m in _aktive_sager(medarbejdere)
         for o in m.forsinkede_opgaver(i_dag)
     ]
+
+
+def paamindelser(skabeloner, medarbejdere, i_dag):
+    """Windows-notifikationer ud fra påmindelsesskabelonerne.
+
+    Returnerer [(skabelon, nøgle, værdier)] – én pr. ting, der skal mindes om.
+    Nøglen er unik pr. skabelon og sag/opgave, så samme besked kun vises én
+    gang pr. dag. Værdierne flettes ind i skabelonens titel og tekst.
+    """
+    resultat = []
+    sager = _aktive_sager(medarbejdere)
+    for skabelon in skabeloner:
+        regel, dage = skabelon.get("regel"), int(skabelon.get("dage") or 0)
+        for m in sager:
+            basis = {
+                "navn": m.navn,
+                "manglende_udstyr": ", ".join(m.manglende_udstyr()) or "intet",
+            }
+            for noegle, ekstra in _regel_fund(regel, dage, m, i_dag):
+                resultat.append((skabelon, f"{skabelon['id']}:{noegle}", {**basis, **ekstra}))
+    return resultat
+
+
+def _regel_fund(regel, dage, m, i_dag):
+    """Giver (nøgle, værdier) for hver ting i sagen, som reglen rammer."""
+    if regel in ("opgave_forsinket", "frist_i_dag"):
+        for o in m.aabne_opgaver():
+            over = o.dage_over_frist(i_dag)
+            if over is None:
+                continue
+            if (regel == "opgave_forsinket" and over > 0) or (
+                regel == "frist_i_dag" and over == 0
+            ):
+                yield o.id, {
+                    "opgave": o.navn,
+                    "ansvarlig": o.ansvarlig or "ingen angivet",
+                    "frist": o.frist,
+                    "dage": str(over),
+                }
+
+    elif regel == "fratraedelse_naermer_sig":
+        fratraedelse = laes_iso_dato(m.fratraedelsesdato)
+        if fratraedelse is not None and (fratraedelse - i_dag).days == dage:
+            yield m.loennr, {"dage": str(dage), "frist": m.fratraedelsesdato}
+
+    elif regel == "rykker_ikke_sendt":
+        for r in m.usendte_rykkere():
+            siden = r.dage_siden("oprettet", i_dag)
+            if siden is not None and siden >= dage:
+                yield r.id, {"dage": str(siden), "frist": r.frist}
+
+    elif regel == "intet_svar_efter_rykker":
+        sendte = [r for r in m.rykkere if r.sendt]
+        if sendte and m.manglende_udstyr() and not m.usendte_rykkere():
+            seneste = max(sendte, key=lambda r: r.sendt)
+            siden = seneste.dage_siden("sendt", i_dag)
+            if siden is not None and siden >= dage:
+                yield seneste.id, {"dage": str(siden), "frist": seneste.frist}

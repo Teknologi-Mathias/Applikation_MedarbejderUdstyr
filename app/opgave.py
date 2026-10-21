@@ -3,6 +3,24 @@ import uuid
 from datetime import date
 
 
+# Opgavenavne fra V0.5.x -> udstyr. Bruges kun til ældre data uden "udstyr"-felt.
+_KENDT_UDSTYR = {
+    "Modtag tøj": "Tøj",
+    "Modtag telefon og SIM-kort": "Telefon og SIM-kort",
+    "Modtag og spær tankkort": "Tankkort",
+    "Modtag andet udstyr": "Andet udstyr",
+}
+
+
+def udled_udstyr(opgavenavn):
+    """Gæt udstyret ud fra et opgavenavn fra en ældre version ("" = intern opgave)."""
+    if opgavenavn in _KENDT_UDSTYR:
+        return _KENDT_UDSTYR[opgavenavn]
+    if opgavenavn.startswith("Modtag andet: "):
+        return opgavenavn.removeprefix("Modtag andet: ")
+    return ""
+
+
 def laes_iso_dato(tekst):
     """"2026-11-30" -> date, eller None hvis teksten ikke er en gyldig dato."""
     try:
@@ -32,6 +50,7 @@ class Opgave:
         begrundelse="",
         naeste_handling="",
         id=None,
+        udstyr="",
     ):
         # Fast id, så Action Center kan pege direkte på opgaven.
         self.id = str(id) if id else uuid.uuid4().hex[:12]
@@ -42,6 +61,9 @@ class Opgave:
         self.obligatorisk = bool(obligatorisk)
         self.begrundelse = str(begrundelse or "").strip()
         self.naeste_handling = str(naeste_handling or "").strip()
+        # Det udstyr medarbejderen skal returnere, fx "Telefon og SIM-kort".
+        # Tom = intern opgave (fx "Er lukket i NAV?"), som ikke nævnes i rykkere.
+        self.udstyr = str(udstyr or "").strip()
 
     @classmethod
     def normaliser_status(cls, status):
@@ -81,6 +103,7 @@ class Opgave:
             "obligatorisk": self.obligatorisk,
             "begrundelse": self.begrundelse,
             "naeste_handling": self.naeste_handling,
+            "udstyr": self.udstyr,
         }
 
     @classmethod
@@ -94,4 +117,5 @@ class Opgave:
             data.get("begrundelse", ""),
             data.get("naeste_handling", ""),
             data.get("id"),
+            data["udstyr"] if "udstyr" in data else udled_udstyr(data.get("navn", "")),
         )

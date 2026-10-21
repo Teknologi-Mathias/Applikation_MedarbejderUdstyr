@@ -59,7 +59,7 @@ def lav_kort(skygge=True):
         effekt = QGraphicsDropShadowEffect(kort)
         effekt.setBlurRadius(24)
         effekt.setOffset(0, 4)
-        effekt.setColor(QColor(15, 23, 42, 22))
+        effekt.setColor(QColor(0, 0, 0, 110))
         kort.setGraphicsEffect(effekt)
     return kort
 

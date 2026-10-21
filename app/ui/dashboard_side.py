@@ -81,7 +81,7 @@ class DashboardSide(QWidget):
             ("afventer", Medarbejder.STATUS_AFVENTER, STATUS_STIL[Medarbejder.STATUS_AFVENTER]["farve"]),
             ("delvist", Medarbejder.STATUS_DELVIST, STATUS_STIL[Medarbejder.STATUS_DELVIST]["farve"]),
             ("afviklet", Medarbejder.STATUS_AFVIKLET, STATUS_STIL[Medarbejder.STATUS_AFVIKLET]["farve"]),
-            ("arkiverede", "Arkiverede", "#94A3B8"),
+            ("arkiverede", "Arkiverede", FARVER["dim"]),
         ):
             kort, vaerdi, sub = self._opret_statistik_kort(titel, farve)
             self.kort[noegle] = (vaerdi, sub)
@@ -185,7 +185,7 @@ class DashboardSide(QWidget):
         antal_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         antal_label.setMinimumWidth(28)
         antal_label.setStyleSheet(
-            f"background: {FARVER['primary_soft']}; color: {FARVER['primary']};"
+            f"background: {FARVER['primary_soft']}; color: {FARVER['primary_tekst']};"
             "border-radius: 10px; font-weight: 700; font-size: 12px; padding: 3px 8px;"
         )
         top.addWidget(titel_label)

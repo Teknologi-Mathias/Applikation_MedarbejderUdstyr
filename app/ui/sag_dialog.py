@@ -3,14 +3,19 @@ from datetime import date
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QProgressBar,
     QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -114,8 +119,11 @@ class OpgaveRaekke(QFrame):
 class SagDialog(QDialog):
     """Arbejder på en kopi af medarbejderen; hent resultatet i self.medarbejder."""
 
+    FANE_OPGAVER = 0
+    FANE_TIDSLINJE = 1
+
     def __init__(self, parent, medarbejder, ansvarlige=(), fokus_opgave_id=None,
-                 kun_laesning=False):
+                 kun_laesning=False, start_fane=FANE_OPGAVER):
         super().__init__(parent)
         self.medarbejder = medarbejder.kopi()
         self.ansvarlige = list(ansvarlige)
@@ -130,7 +138,30 @@ class SagDialog(QDialog):
         layout.setSpacing(12)
 
         layout.addLayout(self._opbyg_hoved())
+
+        self.faner = QTabWidget()
+        self.faner.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
+        self.faner.addTab(self._opbyg_opgave_fane(), "Opgaver")
+        self.faner.addTab(self._opbyg_tidslinje_fane(), "Tidslinje")
+        self.faner.setTabToolTip(0, "Sagens opgaver – skift status, rediger eller tilføj")
+        self.faner.setTabToolTip(1, "Hele forløbet: hvem gjorde hvad og hvornår")
+        self.faner.setCurrentIndex(start_fane)
+        layout.addWidget(self.faner, 1)
+
         layout.addWidget(self._streg())
+        layout.addLayout(self._opbyg_bund())
+
+        self._byg_raekker()
+        self.opgaver_aendret()
+        self._byg_tidslinje()
+
+    ### ----- opbygning ------------------------------------------------------
+
+    def _opbyg_opgave_fane(self):
+        fane = QWidget()
+        layout = QVBoxLayout(fane)
+        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setSpacing(12)
         layout.addLayout(self._opbyg_fremdrift())
 
         self.raekke_layout = QVBoxLayout()
@@ -147,20 +178,57 @@ class SagDialog(QDialog):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setWidget(indre)
         layout.addWidget(self.scroll, 1)
+        return fane
 
-        layout.addWidget(self._streg())
-        layout.addLayout(self._opbyg_bund())
+    def _opbyg_tidslinje_fane(self):
+        fane = QWidget()
+        layout = QVBoxLayout(fane)
+        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setSpacing(10)
 
-        self._byg_raekker()
-        self.opgaver_aendret()
+        top = QHBoxLayout()
+        forklaring = QLabel(
+            "Hele forløbet registreres automatisk og kan ikke redigeres. "
+            "Notater tilføjes som nye hændelser."
+        )
+        forklaring.setObjectName("hjaelpTekst")
+        forklaring.setWordWrap(True)
+        top.addWidget(forklaring, 1)
+        if not self.kun_laesning:
+            notat_knap = lav_knap("+ Tilføj notat")
+            notat_knap.clicked.connect(self.tilfoej_notat)
+            top.addWidget(notat_knap)
+        layout.addLayout(top)
 
-    ### ----- opbygning ------------------------------------------------------
+        self.manipuleret_label = QLabel(
+            "Advarsel: Tidslinjen er ændret uden for programmet – én eller flere "
+            "hændelser stemmer ikke med den oprindelige registrering."
+        )
+        self.manipuleret_label.setObjectName("advarsel")
+        self.manipuleret_label.setWordWrap(True)
+        layout.addWidget(self.manipuleret_label)
+
+        self.tidslinje = QTableWidget()
+        self.tidslinje.setColumnCount(4)
+        self.tidslinje.setHorizontalHeaderLabels(["Tidspunkt", "Bruger", "Hændelse", "Kommentar"])
+        self.tidslinje.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tidslinje.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tidslinje.setShowGrid(False)
+        self.tidslinje.setWordWrap(True)
+        self.tidslinje.setAlternatingRowColors(True)
+        self.tidslinje.verticalHeader().setVisible(False)
+        self.tidslinje.horizontalHeader().setStretchLastSection(True)
+        self.tidslinje.setColumnWidth(0, 130)
+        self.tidslinje.setColumnWidth(1, 110)
+        self.tidslinje.setColumnWidth(2, 250)
+        layout.addWidget(self.tidslinje, 1)
+        return fane
 
     @staticmethod
     def _streg():
         streg = QFrame()
-        streg.setFrameShape(QFrame.Shape.HLine)
-        streg.setStyleSheet("color: #E2E8F0;")
+        streg.setObjectName("streg")
+        streg.setFixedHeight(1)
         return streg
 
     def _opbyg_hoved(self):
@@ -301,3 +369,46 @@ class SagDialog(QDialog):
             self.fokus_opgave_id = dialog.opgave.id
             self._byg_raekker()
             self.opgaver_aendret()
+
+    ### ----- tidslinje ------------------------------------------------------
+
+    def _reference_tekst(self, reference):
+        """Viser opgavens navn i stedet for dens id, hvis referencen er en opgave."""
+        opgave = self.medarbejder.find_opgave(reference)
+        if opgave is not None:
+            return opgave.navn
+        rykker = self.medarbejder.find_rykker(reference)
+        if rykker is not None:
+            return f"Rykker: {rykker.emne}"
+        return reference
+
+    def _byg_tidslinje(self):
+        historik = self.medarbejder.historik
+        self.manipuleret_label.setVisible(not historik.er_intakt())
+        haendelser = historik.haendelser()
+        self.tidslinje.setRowCount(len(haendelser))
+        for raekke, h in enumerate(haendelser):
+            tid = h.get("tid", "")
+            vis_tid = f"{vis_dato(tid[:10])} {tid[11:16]}".strip()
+            reference = self._reference_tekst(h.get("reference", ""))
+            kommentar = " · ".join(
+                t for t in (h.get("kommentar", ""), reference) if t
+            )
+            for kolonne, tekst in enumerate(
+                (vis_tid, h.get("bruger", ""), h.get("handling", ""), kommentar)
+            ):
+                item = QTableWidgetItem(tekst)
+                item.setToolTip(tekst)
+                self.tidslinje.setItem(raekke, kolonne, item)
+        self.tidslinje.resizeRowsToContents()
+        self.tidslinje.scrollToBottom()
+
+    def tilfoej_notat(self):
+        tekst, ok = QInputDialog.getMultiLineText(
+            self, "Tilføj notat",
+            "Notatet tilføjes tidslinjen og kan ikke ændres bagefter.\n"
+            "Det gemmes sammen med sagen.",
+        )
+        if ok and tekst.strip():
+            self.medarbejder.historik.tilfoej("Notat", tekst.strip())
+            self._byg_tidslinje()

@@ -1,14 +1,16 @@
-"""En fratrådt medarbejder og dennes afviklingssag (listen af opgaver)."""
+"""En fratrådt medarbejder og dennes afviklingssag (opgaver, rykkere, tidslinje)."""
 from datetime import timedelta
 
+from app.historik import Historik
 from app.opgave import Opgave, laes_iso_dato
+from app.rykker import Rykker
 
-# Udstyr fra V0.5.x-dataformatet -> (opgavenavn, ansvarlig). Kun til konvertering.
+# Udstyr fra V0.5.0-dataformatet -> (opgavenavn, ansvarlig, udstyr). Kun til konvertering.
 _GAMMELT_UDSTYR = {
-    "toej": ("Modtag tøj", "Administration"),
-    "telefon": ("Modtag telefon og SIM-kort", "IT"),
-    "tankkort": ("Modtag og spær tankkort", "Administration"),
-    "andet": ("Modtag andet udstyr", "Administration"),
+    "toej": ("Modtag tøj", "Administration", "Tøj"),
+    "telefon": ("Modtag telefon og SIM-kort", "IT", "Telefon og SIM-kort"),
+    "tankkort": ("Modtag og spær tankkort", "Administration", "Tankkort"),
+    "andet": ("Modtag andet udstyr", "Administration", "Andet udstyr"),
 }
 
 
@@ -32,6 +34,11 @@ class Medarbejder:
         opgaver=None,
         status_manuel=None,
         status_begrundelse="",
+        email="",
+        tracking_link="",
+        historik=None,
+        rykkere=None,
+        arkiveret="",
     ):
         self.loennr = str(loennr).strip()
         self.navn = navn
@@ -43,6 +50,13 @@ class Medarbejder:
             None if status_manuel is None else self.normaliser_status(status_manuel)
         )
         self.status_begrundelse = str(status_begrundelse or "").strip()
+        self.email = str(email or "").strip()
+        # Link til sporing af returforsendelsen (returlabel).
+        self.tracking_link = str(tracking_link or "").strip()
+        self.historik = historik if historik is not None else Historik()
+        self.rykkere = list(rykkere or [])
+        # Dato for arkivering – bruges af slettepolitikken.
+        self.arkiveret = str(arkiveret or "")
 
     ### ----- status ---------------------------------------------------------
 
@@ -79,7 +93,7 @@ class Medarbejder:
             return self.STATUS_DELVIST
         return self.STATUS_AFVENTER
 
-    ### ----- opgaver --------------------------------------------------------
+    ### ----- opgaver og udstyr ----------------------------------------------
 
     def find_opgave(self, opgave_id):
         for opgave in self.opgaver:
@@ -101,6 +115,10 @@ class Medarbejder:
     def forsinkede_opgaver(self, i_dag):
         return [o for o in self.opgaver if o.er_forsinket(i_dag)]
 
+    def manglende_udstyr(self):
+        """Udstyr der endnu ikke er afleveret, fx ["Telefon og SIM-kort", "Tøj"]."""
+        return [o.udstyr for o in self.aabne_opgaver() if o.udstyr]
+
     def flyt_fratraedelse(self, ny_dato):
         """Ændrer fratrædelsesdatoen og flytter åbne opgavers frister med samme antal dage."""
         gammel, ny = laes_iso_dato(self.fratraedelsesdato), laes_iso_dato(ny_dato)
@@ -111,6 +129,17 @@ class Medarbejder:
                 if frist is not None:
                     opgave.frist = (frist + forskel).isoformat()
         self.fratraedelsesdato = ny_dato
+
+    ### ----- rykkere --------------------------------------------------------
+
+    def find_rykker(self, rykker_id):
+        for rykker in self.rykkere:
+            if rykker.id == rykker_id:
+                return rykker
+        return None
+
+    def usendte_rykkere(self):
+        return [r for r in self.rykkere if not r.sendt]
 
     ### ----- JSON -----------------------------------------------------------
 
@@ -128,7 +157,12 @@ class Medarbejder:
             "status_manuel": self.status_manuel is not None,
             "status_begrundelse": self.status_begrundelse,
             "kommentar": self.kommentar,
+            "email": self.email,
+            "tracking_link": self.tracking_link,
+            "arkiveret": self.arkiveret,
             "opgaver": [o.til_dict() for o in self.opgaver],
+            "rykkere": [r.til_dict() for r in self.rykkere],
+            "historik": self.historik.til_liste(),
         }
 
     @classmethod
@@ -146,14 +180,26 @@ class Medarbejder:
                 opgaver,
                 data.get("status") if data.get("status_manuel") else None,
                 data.get("status_begrundelse", ""),
+                data.get("email", ""),
+                data.get("tracking_link", ""),
+                Historik(data.get("historik")),
+                [Rykker.fra_dict(r) for r in data.get("rykkere") or []
+                 if isinstance(r, dict)],
+                data.get("arkiveret", ""),
             )
         else:
             medarbejder = cls._fra_gammelt_format(data)
+
+        if "historik" not in data:
+            medarbejder.historik.tilfoej(
+                "Overført fra tidligere version",
+                "Tidslinjen starter her; tidligere hændelser er ikke registreret.",
+            )
         return medarbejder
 
     @classmethod
     def _fra_gammelt_format(cls, data):
-        """Konverterer V0.5.x-data: udstyr bliver til opgaver.
+        """Konverterer V0.5.0-data: udstyr bliver til opgaver.
 
         Var den gamle (manuelle) status en anden end den beregnede, låses den,
         så ingen medarbejder skifter status af sig selv ved opdateringen.
@@ -161,18 +207,19 @@ class Medarbejder:
         fratraedelse = data.get("fratraedelsesdato", "")
         udstyr = data.get("udstyr") if isinstance(data.get("udstyr"), dict) else {}
         opgaver = []
-        for noegle, (navn, ansvarlig) in _GAMMELT_UDSTYR.items():
+        for noegle, (navn, ansvarlig, genstand) in _GAMMELT_UDSTYR.items():
             post = udstyr.get(noegle)
             if not isinstance(post, dict) or not post.get("har"):
                 continue
             beskrivelse = str(data.get("andet_beskrivelse") or "").strip()
             if noegle == "andet" and beskrivelse:
-                navn = f"Modtag andet: {beskrivelse}"
+                navn, genstand = f"Modtag andet: {beskrivelse}", beskrivelse
             opgaver.append(Opgave(
                 navn,
                 ansvarlig,
                 fratraedelse,
                 Opgave.UDFOERT if post.get("afleveret") else Opgave.IKKE_STARTET,
+                udstyr=genstand,
             ))
 
         medarbejder = cls(

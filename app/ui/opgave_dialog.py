@@ -30,6 +30,10 @@ class OpgaveDialog(QDialog):
         self.setMinimumWidth(480)
 
         self.navn_input = QLineEdit(self.opgave.navn)
+        self.udstyr_input = QLineEdit(self.opgave.udstyr)
+        self.udstyr_input.setPlaceholderText(
+            "Fx 'Telefon og SIM-kort' – tom, hvis det er en intern opgave"
+        )
 
         self.ansvarlig_input = QComboBox()
         self.ansvarlig_input.setEditable(True)
@@ -60,6 +64,7 @@ class OpgaveDialog(QDialog):
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(12)
         form.addRow("Opgave", self.navn_input)
+        form.addRow("Udstyr", self.udstyr_input)
         form.addRow("Ansvarlig", self.ansvarlig_input)
         form.addRow("Frist", self.frist_input)
         form.addRow("Status", self.status_input)
@@ -117,6 +122,7 @@ class OpgaveDialog(QDialog):
             return
 
         self.opgave.navn = navn
+        self.opgave.udstyr = self.udstyr_input.text().strip()
         self.opgave.ansvarlig = self.ansvarlig_input.currentText().strip()
         self.opgave.frist = self.frist_input.date().toString("yyyy-MM-dd")
         self.opgave.status = status

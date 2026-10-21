@@ -8,7 +8,7 @@ from datetime import date
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from app import alarmer
+from app import APP_NAVN, alarmer, skabeloner as sk
 
 
 class Notifikationer(QObject):
@@ -22,10 +22,10 @@ class Notifikationer(QObject):
 
         self.tilgaengelig = QSystemTrayIcon.isSystemTrayAvailable()
         self.tray = QSystemTrayIcon(ikon, self)
-        self.tray.setToolTip("Medarbejderafvikling")
+        self.tray.setToolTip(APP_NAVN)
 
         menu = QMenu()
-        menu.addAction("Åbn Medarbejderafvikling", self.vis_vindue.emit)
+        menu.addAction(f"Åbn {APP_NAVN}", self.vis_vindue.emit)
         menu.addSeparator()
         menu.addAction("Afslut", self.afslut.emit)
         self.tray.setContextMenu(menu)
@@ -47,23 +47,30 @@ class Notifikationer(QObject):
         if self.tilgaengelig and QSystemTrayIcon.supportsMessages():
             self.tray.showMessage(titel, tekst, QSystemTrayIcon.MessageIcon.Information, 10_000)
 
-    def tjek(self, medarbejdere):
-        """Giver besked om opgaver, der er blevet forsinkede siden sidst."""
-        i_dag = date.today()
-        nye = [
-            (m, o) for m, o in alarmer.forsinkede(medarbejdere, i_dag)
-            if (o.id, i_dag) not in self._givet_besked
-        ]
-        if not nye:
-            return
-        self._givet_besked.update((o.id, i_dag) for _, o in nye)
+    def tjek(self, medarbejdere, skabeloner):
+        """Viser påmindelser ud fra de aktive påmindelsesskabeloner.
 
-        linjer = [f"{o.navn} – {m.navn} ({o.ansvarlig or 'ingen ansvarlig'})"
-                  for m, o in nye[:3]]
-        if len(nye) > 3:
-            linjer.append(f"… og {len(nye) - 3} mere")
-        titel = (
-            "1 opgave er forsinket" if len(nye) == 1
-            else f"{len(nye)} opgaver er forsinkede"
-        )
-        self.vis_besked(titel, "\n".join(linjer))
+        Hver påmindelse vises højst én gang pr. dag. Rammer en skabelon mere end
+        3 ting på én gang, samles de i én besked.
+        """
+        i_dag = date.today()
+        nye = {}
+        for skabelon, noegle, vaerdier in alarmer.paamindelser(skabeloner, medarbejdere, i_dag):
+            if (noegle, i_dag) in self._givet_besked:
+                continue
+            self._givet_besked.add((noegle, i_dag))
+            nye.setdefault(skabelon["id"], (skabelon, []))[1].append(vaerdier)
+
+        for skabelon, alle_vaerdier in nye.values():
+            # Manglende værdier vises som "–" i stedet for at blokere påmindelsen.
+            vaerdier = {k: "–" for k in sk.PAAMINDELSE_VARIABLER} | alle_vaerdier[0]
+            titel, _ = sk.flet(skabelon["titel"], vaerdier, sk.PAAMINDELSE_VARIABLER)
+            tekst, _ = sk.flet(skabelon["tekst"], vaerdier, sk.PAAMINDELSE_VARIABLER)
+            if len(alle_vaerdier) > 3:
+                titel = f"{skabelon['navn']}: {len(alle_vaerdier)} sager"
+                tekst = ", ".join(v["navn"] for v in alle_vaerdier[:5]) + (
+                    " m.fl." if len(alle_vaerdier) > 5 else ""
+                )
+            elif len(alle_vaerdier) > 1:
+                tekst += f"\n(+ {len(alle_vaerdier) - 1} mere)"
+            self.vis_besked(titel, tekst)

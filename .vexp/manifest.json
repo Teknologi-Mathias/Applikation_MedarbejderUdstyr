@@ -1,39 +1,46 @@
 {
   "file_hashes": {
-    "README.md": "5f0117574d52b8d914bc0d98bb14854e9d25f037958272fc542030004da77382",
-    "app/__init__.py": "0a44cf09ef4eab8b86b11e136e7ba7edc673fe0a7aad91718cf9197ae94b0ce9",
-    "app/data_manager.py": "5902e7d6d6e624447a55c120f81032ee1915dd495b31ce1e169e006a5beb21bf",
-    "app/medarbejder.py": "1a95078a03d743588e168de1edeecab7154b8271a90ee57c339b2d2e14f33ce5",
-    "app/stier.py": "ee5bf8785496204c1bced13fa475bb8110d2db3f325eb8775171e09e60f970dc",
+    ".claude/CLAUDE.md": "1b120062a2c8a0416f3afd563130e46e70b36a0e84e7ea84b702d99480617281",
+    "README.md": "670e83f6f011591a86e5d95839afe13e4f7e625d6c7242fdb7d2ff8d11fd49f7",
+    "app/__init__.py": "b45befb96dbd07b529baae2042ff85c1703d8e6a4cd0a5f5f444529492b00f64",
+    "app/alarmer.py": "33e55a0a9e0305173721e846a8ff8bd07a13fb6d7d9d9c1f11e2b2f939569e12",
+    "app/data_manager.py": "b3657967ca835650f148de4b7f4a1e28545b48b85f44d31a69ae757e8935b16d",
+    "app/medarbejder.py": "ff061d91c1d6e188615b768f500e801d86ca56e7d1510ab271dd040f1134cc1f",
+    "app/opgave.py": "0a8c67657bb5c09d06742579919e2bad8a41c08afc5d98be7033717bb7691928",
+    "app/skabeloner.py": "9f5d6a842cce600158f412a5474c65b460c3d8065383f430d5b8ceb66cffde9b",
+    "app/stier.py": "2384daa0d714f6a2a7bb4a5c41a51f25508ad0a0d0a2b415bf195191bfd482f8",
     "app/ui/__init__.py": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    "app/ui/dashboard_side.py": "73d303a52c7a43982f1cdf94f55943d4522eb8e2ecfd92353eecda04f9c0f558",
+    "app/ui/dashboard_side.py": "ead50d7ec03995fb18746d1a326f29667678248009dbab3e873eb398228c94ff",
     "app/ui/diagrammer.py": "94ba01a7faaf1144d396cee764a2487ed80e3ae6cb4835b8274b92e97ed48242",
-    "app/ui/hjaelpere.py": "1c94784bd337497e82d6d748a5038a9067fb43a39fc4c7b223cb4c9f59cf206c",
-    "app/ui/hovedvindue.py": "ece940f369c44bf5a1934126fee64c041b1e6dce90f7738021a8c01f6ad844e4",
-    "app/ui/medarbejder_dialog.py": "a76252a5590fb64595f10e9889eb50a0a7c60ff2e6a5bb3455c1c34e40e73f7b",
-    "app/ui/medarbejder_side.py": "fa47a489f03c2cfcc5f2cc4acb3a3683f8b9fda752a6db41cc2414a013304c36",
-    "app/ui/theme.py": "56c7e51076293883cdda632d526fb761af9bc14ad55b98ba998f81adc7a8c949",
+    "app/ui/hjaelpere.py": "09eb67911145c710ef5e4f15a9d0a9908b3f6dda78fca0261d2f8cd51893eb54",
+    "app/ui/hovedvindue.py": "bb439dccb4ef74e39e6bd5bd95528756d4547fc3b465490eb88f8e5321ec4ba1",
+    "app/ui/medarbejder_dialog.py": "84ec74b465482a1e38c63eb646e459c9559741d5d2ce5cc44b24e1e999d9fefe",
+    "app/ui/medarbejder_side.py": "a26e29a933a0d254a16a93ab4b7d3a926bcb24d601b9e178a02cde0af9308828",
+    "app/ui/notifikationer.py": "d9d940dc064b61bd59b7e433b5a902c957c5b5d211fab090b02a0e33c9a628d7",
+    "app/ui/opgave_dialog.py": "344689e7fa18992f97c02221b869ddc7234d61f2a68a8405a11ebe680c9c19e5",
+    "app/ui/sag_dialog.py": "ff3db9fb12e10dff01bf4decd0c3c66b25b8655c9943a1ac0abf4eae30cc7fdd",
+    "app/ui/theme.py": "cc068584751fdbd268981ea5677cc78ced47ba42b3cb98a0dc76a288decdeb7f",
     "app/ui/widgets.py": "45e8d2b23caaa3641a228a0db09a24180840a4f8c36dcefcbd7406f914ce8230",
     "main.py": "b9ad707430bd929b567cc14fc4b7cbb771bd777c1ea1753167559ace1b8fa0a1"
   },
-  "indexed_at_commit": "34e16894fd77f6ac746f1f2219796dac91e2d75d",
-  "indexed_at_timestamp": "2026-10-21T19:20:20.399920+00:00",
+  "indexed_at_commit": "0ceb31e675eff72274fcbe5cdeb9b8fa6e9193b9",
+  "indexed_at_timestamp": "2026-10-21T20:16:32.831947300+00:00",
   "languages": {
     "markdown": {
       "calls": 0,
-      "nodes": 5
+      "nodes": 12
     },
     "python": {
-      "calls": 159,
-      "nodes": 106
+      "calls": 243,
+      "nodes": 167
     }
   },
   "parser_version": "3.3.2",
   "schema_version": 3,
   "stats": {
-    "total_edges": 258,
-    "total_files": 15,
-    "total_nodes": 111
+    "total_edges": 412,
+    "total_files": 22,
+    "total_nodes": 179
   },
   "vexp_version": "3.3.7"
 }
