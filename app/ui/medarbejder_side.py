@@ -1,4 +1,6 @@
 """Side med søgefelt, knapper og medarbejdertabel (bruges til Hovedside og Arkiv)."""
+from datetime import date
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -10,20 +12,20 @@ from PySide6.QtWidgets import (
 )
 
 from app.medarbejder import Medarbejder
-from app.ui.hjaelpere import lav_kort, lav_sidehoved, laes_dato
-from app.ui.theme import STATUS_STIL, udstyr_stil
+from app.ui.hjaelpere import lav_kort, lav_sidehoved, laes_dato, vis_dato
+from app.ui.theme import STATUS_STIL, opgaver_stil
 from app.ui.widgets import LOENNR_ROLE, SORT_ROLE, STIL_ROLE, PilleDelegate, SortItem
 
 # Kolonner: (overskrift, startbredde). Den sidste strækkes til resten af pladsen.
 KOLONNER = (
     ("Lønnr.", 110),
     ("Medarbejdernavn", 240),
-    ("Fratrædelsesdato", 150),
-    ("Status", 190),
-    ("Udstyr", 160),
+    ("Sidste arbejdsdag", 150),
+    ("Status", 220),
+    ("Opgaver", 150),
     ("Kommentar", 0),
 )
-KOL_LOENNR, KOL_NAVN, KOL_DATO, KOL_STATUS, KOL_UDSTYR, KOL_KOMMENTAR = range(
+KOL_LOENNR, KOL_NAVN, KOL_DATO, KOL_STATUS, KOL_OPGAVER, KOL_KOMMENTAR = range(
     len(KOLONNER)
 )
 
@@ -44,7 +46,7 @@ class MedarbejderSide(QWidget):
 
         self.soegefelt = QLineEdit()
         self.soegefelt.setPlaceholderText(
-            "Søg på navn, lønnr., status, udstyr eller kommentar…"
+            "Søg på navn, lønnr., status, opgave, ansvarlig eller kommentar…"
         )
         self.soegefelt.setClearButtonEnabled(True)
         self.soegefelt.setMinimumWidth(340)
@@ -88,7 +90,7 @@ class MedarbejderSide(QWidget):
 
         pille = PilleDelegate(tabel)
         tabel.setItemDelegateForColumn(KOL_STATUS, pille)
-        tabel.setItemDelegateForColumn(KOL_UDSTYR, pille)
+        tabel.setItemDelegateForColumn(KOL_OPGAVER, pille)
 
         tabel.setSortingEnabled(True)
         header.setSortIndicator(KOL_DATO, Qt.SortOrder.AscendingOrder)
@@ -115,19 +117,22 @@ class MedarbejderSide(QWidget):
         return item
 
     @staticmethod
-    def _udstyr_tooltip(m):
+    def _opgaver_tooltip(m, i_dag):
         linjer = []
-        for noegle, _ in Medarbejder.UDSTYR:
-            post = m.udstyr[noegle]
-            if post["har"]:
-                tilstand = "afleveret" if post["afleveret"] else "mangler"
-                tegn = "✓" if post["afleveret"] else "✗"
-                linjer.append(f"{tegn}  {m.udstyr_navn(noegle)} – {tilstand}")
+        for o in m.opgaver:
+            tegn = "✓" if o.afsluttet else ("!" if o.er_forsinket(i_dag) else "○")
+            linje = f"{tegn}  {o.navn} – {o.status}"
+            if o.ansvarlig:
+                linje += f" ({o.ansvarlig})"
+            if not o.afsluttet and o.frist:
+                linje += f" · frist {vis_dato(o.frist)}"
+            linjer.append(linje)
         return "\n".join(linjer)
 
     def _raekke_celler(self, m):
+        i_dag = date.today()
         dato = laes_dato(m.fratraedelsesdato)
-        vis_dato = (
+        vis_fratraedelse = (
             dato.toString("dd-MM-yyyy") if dato.isValid() else str(m.fratraedelsesdato)
         )
         status_nr = (
@@ -135,20 +140,28 @@ class MedarbejderSide(QWidget):
             if m.status in Medarbejder.STATUSER
             else 99
         )
-        afleveret, total = m.udstyr_optaelling()
-        # Sorteres efter andel afleveret; medarbejdere uden udstyr sidst.
-        udstyr_noegle = (0, afleveret / total) if total else (1, 0.0)
+        status_tekst = m.status + (" (manuel)" if m.status_manuel else "")
+        status_tooltip = (
+            f"Låst manuelt: {m.status_begrundelse}" if m.status_manuel
+            else "Beregnet ud fra opgaverne"
+        )
+        afsluttede, total = m.opgave_optaelling()
+        forsinket = bool(m.forsinkede_opgaver(i_dag))
+        # Sorteres efter andel afsluttet; sager uden opgaver sidst.
+        opgave_noegle = (0, afsluttede / total) if total else (1, 0.0)
 
         return {
             KOL_LOENNR: self._celle(
                 str(m.loennr), self._loennr_noegle(m.loennr), m.loennr),
             KOL_NAVN: self._celle(str(m.navn), str(m.navn).lower(), m.loennr),
-            KOL_DATO: self._celle(vis_dato, str(m.fratraedelsesdato), m.loennr),
+            KOL_DATO: self._celle(vis_fratraedelse, str(m.fratraedelsesdato), m.loennr),
             KOL_STATUS: self._celle(
-                str(m.status), status_nr, m.loennr, STATUS_STIL.get(m.status)),
-            KOL_UDSTYR: self._celle(
-                m.udstyr_tekst(), udstyr_noegle, m.loennr,
-                udstyr_stil(afleveret, total), self._udstyr_tooltip(m)),
+                status_tekst, status_nr, m.loennr,
+                STATUS_STIL.get(m.status), status_tooltip),
+            KOL_OPGAVER: self._celle(
+                m.opgave_tekst(), opgave_noegle, m.loennr,
+                opgaver_stil(afsluttede, total, forsinket),
+                self._opgaver_tooltip(m, i_dag)),
             KOL_KOMMENTAR: self._celle(
                 str(m.kommentar), str(m.kommentar).lower(), m.loennr),
         }
@@ -197,7 +210,7 @@ class MedarbejderSide(QWidget):
             for kolonne in range(tabel.columnCount()):
                 item = tabel.item(row, kolonne)
                 if item is not None:
-                    # Tooltip med, så man fx kan søge på "telefon".
+                    # Tooltip med, så man fx kan søge på en opgave eller ansvarlig.
                     tekster.append(f"{item.text()} {item.toolTip()}".lower())
             tabel.setRowHidden(row, not any(soegetekst in t for t in tekster))
 

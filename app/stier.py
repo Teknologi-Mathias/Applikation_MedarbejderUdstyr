@@ -22,10 +22,11 @@ else:
 DATA_MAPPE = PROGRAM_MAPPE / "Data"
 AKTIVE_FIL = DATA_MAPPE / "medarbejdere.json"
 ARKIV_FIL = DATA_MAPPE / "arkiv.json"
+SKABELON_FIL = DATA_MAPPE / "skabeloner.json"
 
 ASSETS_MAPPE = RESSOURCE_MAPPE / "assets"
 
-# Før V0.6 lå data i %APPDATA%. Bruges kun til en engangskopi ved opstart.
+# Til og med V0.5.1 lå data i %APPDATA%. Bruges kun til en engangskopi ved opstart.
 GAMMEL_DATA_MAPPE = (
     Path(os.environ.get("APPDATA", str(Path.home())))
     / "MedarbejderUdstyr"

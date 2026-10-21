@@ -1,6 +1,6 @@
 """Små fælles byggeklodser til brugerfladen (datoer, knapper, kort)."""
-from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QDate, QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -32,6 +32,12 @@ def dansk_dato(dato):
 
 def laes_dato(tekst):
     return QDate.fromString(str(tekst), "yyyy-MM-dd")
+
+
+def vis_dato(tekst):
+    """"2026-11-30" -> "30-11-2026" (ugyldige datoer vises som de er)."""
+    dato = laes_dato(tekst)
+    return dato.toString("dd-MM-yyyy") if dato.isValid() else str(tekst)
 
 
 ### ----- widgets -------------------------------------------------------------
@@ -70,20 +76,29 @@ def lav_sidehoved(titel, undertitel):
     return boks, under_label
 
 
-def lav_raekke(titel, undertitel, badge, badge_bg, badge_tekst):
+def pille_css(stil):
+    """Stylesheet til en pille-label; stil er en dict med "bg" og "tekst"."""
+    return (
+        f"background: {stil['bg']}; color: {stil['tekst']}; border-radius: 10px;"
+        "font-weight: 700; font-size: 12px; padding: 5px 10px;"
+    )
+
+
+def lav_pille(tekst, stil, bredde=None):
+    label = QLabel(tekst)
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if bredde:
+        label.setFixedWidth(bredde)
+    label.setStyleSheet(pille_css(stil))
+    return label
+
+
+def lav_raekke(titel, undertitel, badge, stil):
     """En række i dashboardets lister: farvet badge + titel og undertitel."""
     widget = QWidget()
     layout = QHBoxLayout(widget)
     layout.setContentsMargins(4, 9, 4, 9)
     layout.setSpacing(12)
-
-    badge_label = QLabel(badge)
-    badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    badge_label.setFixedWidth(78)
-    badge_label.setStyleSheet(
-        f"background: {badge_bg}; color: {badge_tekst}; border-radius: 10px;"
-        "font-weight: 700; font-size: 12px; padding: 6px 0;"
-    )
 
     tekst_layout = QVBoxLayout()
     tekst_layout.setSpacing(1)
@@ -96,6 +111,25 @@ def lav_raekke(titel, undertitel, badge, badge_bg, badge_tekst):
     tekst_layout.addWidget(titel_label)
     tekst_layout.addWidget(under_label)
 
-    layout.addWidget(badge_label)
+    layout.addWidget(lav_pille(badge, stil, bredde=86))
     layout.addLayout(tekst_layout, 1)
     return widget
+
+
+def lav_app_ikon():
+    """Programmets ikon (vindue og proceslinje), tegnet i kode."""
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(FARVER["primary"]))
+    p.drawRoundedRect(QRectF(2, 2, 60, 60), 14, 14)
+    font = QFont()
+    font.setPixelSize(36)
+    font.setBold(True)
+    p.setFont(font)
+    p.setPen(QColor("white"))
+    p.drawText(QRectF(2, 2, 60, 60), Qt.AlignmentFlag.AlignCenter, "M")
+    p.end()
+    return QIcon(pixmap)

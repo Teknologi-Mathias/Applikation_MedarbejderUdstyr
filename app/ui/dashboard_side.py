@@ -1,5 +1,7 @@
-"""Dashboard: statistikkort, diagrammer og lister over hvad der kræver handling."""
-from PySide6.QtCore import QDate, Qt
+"""Dashboard: statistikkort, diagrammer, Action Center og Dagsoversigt."""
+from datetime import date
+
+from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -12,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app import alarmer
 from app.medarbejder import Medarbejder
 from app.ui.diagrammer import BarChart, DonutChart
 from app.ui.hjaelpere import (
@@ -21,14 +24,19 @@ from app.ui.hjaelpere import (
     lav_kort,
     lav_raekke,
     lav_sidehoved,
+    vis_dato,
 )
-from app.ui.theme import FARVER, STATUS_STIL
+from app.ui.theme import ALARM_STIL, FARVER, OPGAVE_STIL, STATUS_STIL
+
+# Data på hver klikbar listerække: (lønnr., opgave-id eller None).
+SAG_ROLE = Qt.ItemDataRole.UserRole
 
 
 class DashboardSide(QWidget):
-    NOTIFIKATIONSDAGE = 14
-    KOMMENDE_FRATRAEDELSESDAGE = 7
     DIAGRAM_DAGE = 14
+
+    # Udsendes ved klik i Action Center/Dagsoversigt: (lønnr., opgave-id eller "").
+    aabn_sag = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -124,16 +132,16 @@ class DashboardSide(QWidget):
         raekke = QHBoxLayout()
         raekke.setSpacing(14)
 
-        notif_kort, self.notifikations_liste, self.notif_antal = self._opret_liste_kort(
-            "Kræver opmærksomhed",
-            f"Afventer udstyr og fratrådt for mindst {self.NOTIFIKATIONSDAGE} dage siden",
+        action_kort, self.action_liste, self.action_antal = self._opret_liste_kort(
+            "Action Center",
+            "Hvad mangler, hvem skal handle – klik for at åbne opgaven",
         )
-        kommende_kort, self.kommende_liste, self.kommende_antal = self._opret_liste_kort(
-            f"Fratræder inden for {self.KOMMENDE_FRATRAEDELSESDAGE} dage",
-            "Aktive medarbejdere, der snart forlader virksomheden",
+        dag_kort, self.dag_liste, self.dag_antal = self._opret_liste_kort(
+            "Dagsoversigt",
+            "Opgaver med frist i dag",
         )
-        raekke.addWidget(notif_kort, 1)
-        raekke.addWidget(kommende_kort, 1)
+        raekke.addWidget(action_kort, 3)
+        raekke.addWidget(dag_kort, 2)
         return raekke
 
     def _opret_statistik_kort(self, titel, farve):
@@ -191,7 +199,10 @@ class DashboardSide(QWidget):
         liste.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         liste.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         liste.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        liste.setMinimumHeight(260)
+        liste.setMinimumHeight(300)
+        liste.setProperty("klikbar", True)
+        liste.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        liste.itemClicked.connect(self._raekke_klikket)
 
         layout.addLayout(top)
         layout.addWidget(under_label)
@@ -205,8 +216,8 @@ class DashboardSide(QWidget):
         self._arkiverede = arkiverede
         self._opdater_statistik()
         self._opdater_diagram()
-        self._opdater_notifikationer()
-        self._opdater_kommende_fratraedelser()
+        self._opdater_action_center()
+        self._opdater_dagsoversigt()
 
     def _opdater_statistik(self):
         aktive = self._aktive
@@ -215,18 +226,21 @@ class DashboardSide(QWidget):
             status: sum(1 for m in aktive if m.status == status)
             for status in Medarbejder.STATUSER
         }
-        antal_notifikationer = len(self._notifikationer())
+        antal_forsinkede = len(alarmer.forsinkede(aktive, date.today()))
 
         def procent(antal):
             return round(antal / antal_aktive * 100) if antal_aktive else 0
 
         vaerdi, sub = self.kort["aktive"]
         vaerdi.setText(str(antal_aktive))
-        if antal_notifikationer:
-            sub.setText(f"{antal_notifikationer} kræver opmærksomhed")
+        if antal_forsinkede:
+            sub.setText(
+                f"{antal_forsinkede} forsinkede "
+                f"{'opgave' if antal_forsinkede == 1 else 'opgaver'}"
+            )
             sub.setStyleSheet(f"color: {STATUS_STIL[Medarbejder.STATUS_AFVENTER]['tekst']};")
         else:
-            sub.setText("Intet kræver opmærksomhed")
+            sub.setText("Ingen forsinkede opgaver")
             sub.setStyleSheet("")
 
         for noegle, status in (
@@ -281,23 +295,6 @@ class DashboardSide(QWidget):
             ))
         self.soejlediagram.saet_data(data)
 
-    def _notifikationer(self):
-        """Aktive med status 'Afventer Udstyr', fratrådt for >= 14 dage siden."""
-        i_dag = QDate.currentDate()
-        resultat = []
-        for m in self._aktive:
-            if m.status != Medarbejder.STATUS_AFVENTER:
-                continue
-            dato = laes_dato(m.fratraedelsesdato)
-            if not dato.isValid():
-                continue
-            dage_siden = dato.daysTo(i_dag)
-            if dage_siden >= self.NOTIFIKATIONSDAGE:
-                resultat.append((dage_siden, dato, m))
-        # Mest overskredne fratrædelser øverst.
-        resultat.sort(key=lambda element: element[0], reverse=True)
-        return resultat
-
     @staticmethod
     def _fyld_liste(liste, raekker, tom_tekst):
         liste.clear()
@@ -312,61 +309,40 @@ class DashboardSide(QWidget):
             liste.addItem(item)
             liste.setItemWidget(item, label)
             return
-        for widget in raekker:
+        for widget, sag in raekker:
             item = QListWidgetItem()
+            item.setData(SAG_ROLE, sag)
             item.setSizeHint(widget.sizeHint())
             liste.addItem(item)
             liste.setItemWidget(item, widget)
 
-    def _opdater_notifikationer(self):
-        raekker = []
-        notifikationer = self._notifikationer()
-        for dage_siden, dato, m in notifikationer:
-            kritisk = dage_siden >= 30
-            mangler = m.manglende_udstyr()
-            mangler_tekst = (
-                f"mangler: {', '.join(mangler)}" if mangler else "udstyr mangler"
-            )
-            raekker.append(lav_raekke(
-                f"{m.navn}  ·  lønnr. {m.loennr}",
-                f"Fratrådt {dato.toString('dd-MM-yyyy')} – {mangler_tekst}",
-                f"{dage_siden} dage",
-                "#FEE2E2" if kritisk else "#FEF3C7",
-                "#B91C1C" if kritisk else "#B45309",
-            ))
-        self._fyld_liste(
-            self.notifikations_liste, raekker, "Ingen medarbejdere kræver opmærksomhed."
-        )
-        self.notif_antal.setText(str(len(notifikationer)))
+    def _raekke_klikket(self, item):
+        sag = item.data(SAG_ROLE)
+        if sag:
+            loennr, opgave_id = sag
+            self.aabn_sag.emit(loennr, opgave_id or "")
 
-    def _opdater_kommende_fratraedelser(self):
-        i_dag = QDate.currentDate()
-        kommende = []
-        for m in self._aktive:
-            dato = laes_dato(m.fratraedelsesdato)
-            if not dato.isValid():
-                continue
-            dage_til = i_dag.daysTo(dato)
-            if 0 <= dage_til <= self.KOMMENDE_FRATRAEDELSESDAGE:
-                kommende.append((dato, dage_til, m))
-        kommende.sort(key=lambda element: (element[0].toJulianDay(), element[2].navn))
+    def _opdater_action_center(self):
+        alle = alarmer.action_center(self._aktive, date.today())
+        raekker = [
+            (lav_raekke(a.titel, a.undertitel, a.badge, ALARM_STIL[a.niveau]),
+             (a.loennr, a.opgave_id))
+            for a in alle
+        ]
+        self._fyld_liste(self.action_liste, raekker, "Intet kræver handling lige nu.")
+        self.action_antal.setText(str(len(alle)))
 
-        raekker = []
-        for dato, dage_til, m in kommende:
-            if dage_til == 0:
-                badge, bg, tekst = "I dag", "#FEE2E2", "#B91C1C"
-            elif dage_til == 1:
-                badge, bg, tekst = "I morgen", "#FEF3C7", "#B45309"
-            else:
-                badge, bg, tekst = f"{dage_til} dage", "#E0E7FF", "#4338CA"
-            raekker.append(lav_raekke(
-                f"{m.navn}  ·  lønnr. {m.loennr}",
-                f"{dato.toString('dd-MM-yyyy')} – {m.status} · {m.udstyr_tekst()}",
-                badge, bg, tekst,
-            ))
-        self._fyld_liste(
-            self.kommende_liste,
-            raekker,
-            f"Ingen fratrædelser inden for {self.KOMMENDE_FRATRAEDELSESDAGE} dage.",
-        )
-        self.kommende_antal.setText(str(len(kommende)))
+    def _opdater_dagsoversigt(self):
+        opgaver = alarmer.dagsoversigt(self._aktive, date.today())
+        raekker = [
+            (lav_raekke(
+                o.navn,
+                f"{m.navn} · Ansvarlig: {o.ansvarlig or 'ingen angivet'} · "
+                f"Frist {vis_dato(o.frist)}",
+                o.status,
+                OPGAVE_STIL[o.status],
+            ), (m.loennr, o.id))
+            for m, o in opgaver
+        ]
+        self._fyld_liste(self.dag_liste, raekker, "Ingen opgaver har frist i dag.")
+        self.dag_antal.setText(str(len(opgaver)))

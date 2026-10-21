@@ -66,7 +66,7 @@ def _sikre_data_mappe():
     DATA_MAPPE.mkdir(parents=True, exist_ok=True)
 
 
-def _hent_json(fil):
+def hent_json(fil):
     _sikre_data_mappe()
 
     if not fil.exists():
@@ -93,7 +93,7 @@ def _hent_json(fil):
         ) from fejl
 
 
-def _gem_json(data, fil):
+def gem_json(data, fil):
     _sikre_data_mappe()
 
     fd, tmp_sti = tempfile.mkstemp(
@@ -134,45 +134,45 @@ def fil_signatur():
 ### ----- offentlige funktioner ----------------------------------------------
 
 def hent_medarbejdere():
-    return _til_medarbejdere(_hent_json(AKTIVE_FIL))
+    return _til_medarbejdere(hent_json(AKTIVE_FIL))
 
 
 def hent_arkiverede_medarbejdere():
-    return _til_medarbejdere(_hent_json(ARKIV_FIL))
+    return _til_medarbejdere(hent_json(ARKIV_FIL))
 
 
 def gem_medarbejdere(medarbejdere):
-    _gem_json([m.til_dict() for m in medarbejdere], AKTIVE_FIL)
+    gem_json([m.til_dict() for m in medarbejdere], AKTIVE_FIL)
 
 
 def gem_arkiv(medarbejdere):
-    _gem_json([m.til_dict() for m in medarbejdere], ARKIV_FIL)
+    gem_json([m.til_dict() for m in medarbejdere], ARKIV_FIL)
 
 
 def arkiver_medarbejder(medarbejder):
     """Flytter en medarbejder fra aktive til arkiv (matcher på lønnr.)."""
-    arkiv = _uden_loennr(_hent_json(ARKIV_FIL), medarbejder.loennr)
-    aktive = _uden_loennr(_hent_json(AKTIVE_FIL), medarbejder.loennr)
+    arkiv = _uden_loennr(hent_json(ARKIV_FIL), medarbejder.loennr)
+    aktive = _uden_loennr(hent_json(AKTIVE_FIL), medarbejder.loennr)
 
     arkiv.append(medarbejder.til_dict())
 
     # Arkivet gemmes først: går noget galt midtvejs, er personen hellere i
     # begge filer end i ingen af dem.
-    _gem_json(arkiv, ARKIV_FIL)
-    _gem_json(aktive, AKTIVE_FIL)
+    gem_json(arkiv, ARKIV_FIL)
+    gem_json(aktive, AKTIVE_FIL)
 
 
 def aktiver_medarbejder(medarbejder):
     """Flytter en medarbejder fra arkiv tilbage til aktive."""
-    arkiv = _uden_loennr(_hent_json(ARKIV_FIL), medarbejder.loennr)
-    aktive = _uden_loennr(_hent_json(AKTIVE_FIL), medarbejder.loennr)
+    arkiv = _uden_loennr(hent_json(ARKIV_FIL), medarbejder.loennr)
+    aktive = _uden_loennr(hent_json(AKTIVE_FIL), medarbejder.loennr)
 
     aktive.append(medarbejder.til_dict())
 
-    _gem_json(aktive, AKTIVE_FIL)
-    _gem_json(arkiv, ARKIV_FIL)
+    gem_json(aktive, AKTIVE_FIL)
+    gem_json(arkiv, ARKIV_FIL)
 
 
 def slet_fra_arkiv(medarbejder):
-    arkiv = _uden_loennr(_hent_json(ARKIV_FIL), medarbejder.loennr)
-    _gem_json(arkiv, ARKIV_FIL)
+    arkiv = _uden_loennr(hent_json(ARKIV_FIL), medarbejder.loennr)
+    gem_json(arkiv, ARKIV_FIL)

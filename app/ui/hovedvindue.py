@@ -1,6 +1,7 @@
 """Hovedvinduet: sidebar, sider og alle handlinger på medarbejdere."""
 from PySide6.QtCore import QTime, QTimer, Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -13,13 +14,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app import VERSION, data_manager
+from app import VERSION, data_manager, skabeloner
 from app.data_manager import DataFejl
 from app.medarbejder import Medarbejder
 from app.ui.dashboard_side import DashboardSide
-from app.ui.hjaelpere import lav_knap
+from app.ui.hjaelpere import lav_app_ikon, lav_knap
 from app.ui.medarbejder_dialog import MedarbejderDialog
 from app.ui.medarbejder_side import MedarbejderSide
+from app.ui.notifikationer import Notifikationer
+from app.ui.sag_dialog import SagDialog
 
 
 class MainWindow(QMainWindow):
@@ -33,8 +36,19 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Medarbejderafvikling")
+        self.setWindowIcon(lav_app_ikon())
         self.resize(1320, 860)
         self.setMinimumSize(1020, 700)
+
+        self.notifikationer = Notifikationer(lav_app_ikon(), self)
+        self.notifikationer.vis_vindue.connect(self.vis_fra_baggrund)
+        self.notifikationer.afslut.connect(self.afslut)
+        self._afslutter = False
+        self._baggrund_forklaret = False
+        # Med ikon ved uret lukkes programmet kun via "Afslut".
+        QApplication.instance().setQuitOnLastWindowClosed(
+            not self.notifikationer.tilgaengelig
+        )
 
         self.medarbejdere_liste = []
         self.medarbejdere_liste_arkiv = []
@@ -96,6 +110,7 @@ class MainWindow(QMainWindow):
         rod.setSpacing(0)
 
         self.dashboard = DashboardSide()
+        self.dashboard.aabn_sag.connect(self.aabn_sag)
         self.hovedside = self._opbyg_hovedside()
         self.arkivside = self._opbyg_arkivside()
 
@@ -164,23 +179,25 @@ class MainWindow(QMainWindow):
 
     def _opbyg_hovedside(self):
         opret_knap = lav_knap("+ Opret medarbejder", "primary")
-        rediger_knap = lav_knap(
-            "Rediger", tooltip="Rediger oplysninger og udstyr (eller dobbeltklik)"
+        sag_knap = lav_knap(
+            "Åbn sag", tooltip="Opgaver, ansvarlige og frister (eller dobbeltklik)"
         )
-        status_knap = lav_knap("Skift status", tooltip="Går til næste status i rækken")
+        rediger_knap = lav_knap(
+            "Rediger", tooltip="Navn, lønnr., sidste arbejdsdag og manuel status"
+        )
         arkiver_knap = lav_knap("Arkiver", "danger")
 
         opret_knap.clicked.connect(self.opret_medarbejder)
+        sag_knap.clicked.connect(self.aabn_valgt_sag)
         rediger_knap.clicked.connect(self.rediger_medarbejder)
-        status_knap.clicked.connect(self.skift_status)
         arkiver_knap.clicked.connect(self.arkiver_medarbejder)
 
         side = MedarbejderSide(
             "Medarbejdere",
-            "Aktive medarbejdere og status på udstyrsafleveringen.",
-            [opret_knap, rediger_knap, status_knap, arkiver_knap],
+            "Aktive afviklingssager. Status beregnes ud fra sagens opgaver.",
+            [opret_knap, sag_knap, rediger_knap, arkiver_knap],
         )
-        side.tabel.doubleClicked.connect(lambda _index: self.rediger_medarbejder())
+        side.tabel.doubleClicked.connect(lambda _index: self.aabn_valgt_sag())
         return side
 
     def _opbyg_arkivside(self):
@@ -190,11 +207,14 @@ class MainWindow(QMainWindow):
         goer_aktiv_knap.clicked.connect(self.aktiver_medarbejder)
         slet_knap.clicked.connect(self.slet_medarbejder)
 
-        return MedarbejderSide(
+        side = MedarbejderSide(
             "Arkiv",
-            "Afsluttede medarbejdere. Kan gøres aktive igen eller slettes.",
+            "Afsluttede sager. Dobbeltklik for at se sagen. "
+            "Kan gøres aktive igen eller slettes.",
             [goer_aktiv_knap, slet_knap],
         )
+        side.tabel.doubleClicked.connect(lambda _index: self.vis_arkiveret_sag())
+        return side
 
     ### ----- visning --------------------------------------------------------
 
@@ -209,6 +229,7 @@ class MainWindow(QMainWindow):
         self.hovedside.vis(self.medarbejdere_liste)
         self.arkivside.vis(self.medarbejdere_liste_arkiv)
         self.dashboard.opdater(self.medarbejdere_liste, self.medarbejdere_liste_arkiv)
+        self.notifikationer.tjek(self.medarbejdere_liste)
         self.sidst_opdateret_label.setText(
             f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}"
         )
@@ -257,9 +278,53 @@ class MainWindow(QMainWindow):
 
     ### ----- handlinger: hovedside ------------------------------------------
 
+    def _hent_skabeloner(self):
+        try:
+            return skabeloner.hent_skabeloner()
+        except DataFejl as fejl:
+            QMessageBox.warning(self, "Skabeloner", str(fejl))
+            return None
+
+    def _ansvarlige(self):
+        try:
+            alle_skabeloner = skabeloner.hent_skabeloner()
+        except DataFejl:
+            alle_skabeloner = []
+        return skabeloner.kendte_ansvarlige(alle_skabeloner, self.medarbejdere_liste)
+
+    def _gem_aendret(self, loennr, ny):
+        """Erstatter medarbejderen med dette lønnr. med den ændrede kopi og gemmer.
+
+        Data kan være ændret af en kollega, mens en dialog var åben, så der
+        synkroniseres og tjekkes igen først.
+        """
+        self.synkroniser()
+        gammel = self._find(self.medarbejdere_liste, loennr)
+        if gammel is None:
+            self.opdater_alle_visninger()
+            QMessageBox.warning(
+                self,
+                "Medarbejder ikke fundet",
+                "Medarbejderen findes ikke længere (er den ændret af en anden?).",
+            )
+            return False
+        if self._loennr_optaget(ny.loennr, undtagen=loennr):
+            return False
+
+        index = self.medarbejdere_liste.index(gammel)
+        self.medarbejdere_liste[index] = ny
+        self._gem_aktive()
+        self.opdater_alle_visninger()
+        return True
+
     def opret_medarbejder(self):
         self.synkroniser()
-        dialog = MedarbejderDialog(self, optagede_loennumre=self._alle_loennumre())
+        alle_skabeloner = self._hent_skabeloner()
+        if alle_skabeloner is None:
+            return
+        dialog = MedarbejderDialog(
+            self, optagede_loennumre=self._alle_loennumre(), skabeloner=alle_skabeloner
+        )
         if not dialog.exec():
             return
 
@@ -270,9 +335,24 @@ class MainWindow(QMainWindow):
         if self._loennr_optaget(data["loennr"]):
             return
 
-        self.medarbejdere_liste.append(Medarbejder.fra_dict(data))
+        opgaver = (
+            skabeloner.opret_opgaver(data["skabelon"], data["fratraedelsesdato"])
+            if data["skabelon"] else []
+        )
+        medarbejder = Medarbejder(
+            data["loennr"],
+            data["navn"],
+            data["fratraedelsesdato"],
+            data["kommentar"],
+            opgaver,
+            data["status_manuel"],
+            data["status_begrundelse"],
+        )
+        self.medarbejdere_liste.append(medarbejder)
         self._gem_aktive()
         self.opdater_alle_visninger()
+        # Vis den nye sag med det samme, så opgaverne kan gennemgås.
+        self.aabn_sag(medarbejder.loennr)
 
     def rediger_medarbejder(self):
         medarbejder = self._hent_valgt(self.hovedside)
@@ -287,37 +367,37 @@ class MainWindow(QMainWindow):
             return
 
         data = dialog.hent_data()
+        ny = medarbejder.kopi()
+        ny.loennr = data["loennr"]
+        ny.navn = data["navn"]
+        ny.flyt_fratraedelse(data["fratraedelsesdato"])
+        ny.kommentar = data["kommentar"]
+        ny.status_manuel = data["status_manuel"]
+        ny.status_begrundelse = data["status_begrundelse"]
+        self._gem_aendret(loennr, ny)
 
-        # Data kan være ændret af en kollega, mens dialogen var åben.
+    def aabn_valgt_sag(self):
+        medarbejder = self._hent_valgt(self.hovedside)
+        if medarbejder is not None:
+            self.aabn_sag(medarbejder.loennr)
+
+    def aabn_sag(self, loennr, opgave_id=""):
+        """Åbner afviklingssagen; opgave_id fremhæver en bestemt opgave."""
         self.synkroniser()
         medarbejder = self._find(self.medarbejdere_liste, loennr)
         if medarbejder is None:
             self.opdater_alle_visninger()
-            QMessageBox.warning(
-                self,
-                "Medarbejder ikke fundet",
-                "Medarbejderen findes ikke længere (er den ændret af en anden?).",
-            )
             return
-        if self._loennr_optaget(data["loennr"], undtagen=loennr):
-            return
+        dialog = SagDialog(
+            self, medarbejder, self._ansvarlige(), fokus_opgave_id=opgave_id or None
+        )
+        if dialog.exec():
+            self._gem_aendret(loennr, dialog.medarbejder)
 
-        index = self.medarbejdere_liste.index(medarbejder)
-        self.medarbejdere_liste[index] = Medarbejder.fra_dict(data)
-        self._gem_aktive()
-        self.opdater_alle_visninger()
-
-    def skift_status(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is None:
-            return
-
-        statuser = list(Medarbejder.STATUSER)
-        nuvaerende = statuser.index(medarbejder.status)
-        medarbejder.status = statuser[(nuvaerende + 1) % len(statuser)]
-
-        self._gem_aktive()
-        self.opdater_alle_visninger()
+    def vis_arkiveret_sag(self):
+        medarbejder = self._hent_valgt(self.arkivside, arkiv=True)
+        if medarbejder is not None:
+            SagDialog(self, medarbejder, kun_laesning=True).exec()
 
     def arkiver_medarbejder(self):
         medarbejder = self._hent_valgt(self.hovedside)
@@ -362,3 +442,31 @@ class MainWindow(QMainWindow):
         data_manager.slet_fra_arkiv(medarbejder)
         self._laes_data()
         self.opdater_alle_visninger()
+
+    ### ----- baggrund og lukning --------------------------------------------
+
+    def closeEvent(self, event):
+        """Luk-knappen skjuler vinduet; programmet kører videre ved uret."""
+        if self._afslutter or not self.notifikationer.tilgaengelig:
+            event.accept()
+            return
+        event.ignore()
+        self.hide()
+        if not self._baggrund_forklaret:
+            self._baggrund_forklaret = True
+            self.notifikationer.vis_besked(
+                "Medarbejderafvikling kører i baggrunden",
+                "Du får besked om forsinkede opgaver. Højreklik på ikonet ved "
+                "uret og vælg Afslut for at lukke helt.",
+            )
+
+    def vis_fra_baggrund(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.sider.setCurrentIndex(self.SIDE_DASHBOARD)
+
+    def afslut(self):
+        self._afslutter = True
+        self.notifikationer.tray.hide()
+        QApplication.quit()

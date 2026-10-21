@@ -2,7 +2,9 @@
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
+from app import alarmer
 from app.medarbejder import Medarbejder
+from app.opgave import Opgave
 from app.stier import ASSETS_MAPPE
 
 CHEVRON = (ASSETS_MAPPE / "chevron.svg").as_posix()
@@ -36,17 +38,35 @@ STATUS_STIL = {
 }
 
 INTET_STIL = {"farve": "#94A3B8", "bg": "#F1F5F9", "tekst": "#64748B"}
+_ROED = STATUS_STIL[Medarbejder.STATUS_AFVENTER]
+_GUL = STATUS_STIL[Medarbejder.STATUS_DELVIST]
+_GROEN = STATUS_STIL[Medarbejder.STATUS_AFVIKLET]
+_BLAA = {"farve": "#6366F1", "bg": "#E0E7FF", "tekst": "#4338CA"}
+
+OPGAVE_STIL = {
+    Opgave.IKKE_STARTET: INTET_STIL,
+    Opgave.I_GANG: _BLAA,
+    Opgave.AFVENTER: _GUL,
+    Opgave.UDFOERT: _GROEN,
+    Opgave.UNDTAGET: {"farve": "#64748B", "bg": "#E2E8F0", "tekst": "#475569"},
+}
+
+ALARM_STIL = {
+    alarmer.KRITISK: _ROED,
+    alarmer.ADVARSEL: _GUL,
+    alarmer.PLANLAGT: _BLAA,
+}
 
 
-def udstyr_stil(afleveret, total):
-    """Farve til udstyrs-pillen: rød = intet afleveret, gul = noget, grøn = alt."""
+def opgaver_stil(afsluttede, total, forsinket):
+    """Farve til opgave-pillen i tabellen: rød = forsinket, grøn = alt klaret."""
     if total == 0:
         return INTET_STIL
-    if afleveret == 0:
-        return STATUS_STIL[Medarbejder.STATUS_AFVENTER]
-    if afleveret < total:
-        return STATUS_STIL[Medarbejder.STATUS_DELVIST]
-    return STATUS_STIL[Medarbejder.STATUS_AFVIKLET]
+    if forsinket:
+        return _ROED
+    if afsluttede == total:
+        return _GROEN
+    return _GUL
 
 _QSS = """
 QWidget { color: @TEXT; font-size: 13px; }
@@ -88,6 +108,17 @@ QPushButton[nav="true"]:checked { background: @PRIMARY; color: white; }
 #hjaelpTekst { color: @MUTED; font-size: 12px; }
 QCheckBox { spacing: 8px; background: transparent; }
 QCheckBox:disabled { color: #94A3B8; }
+#sagTitel { font-size: 20px; font-weight: 700; }
+#opgaveRaekke { background: @SURFACE; border: 1px solid @BORDER; border-radius: 10px; }
+#opgaveRaekke[fokus="true"] { border: 2px solid @PRIMARY; background: @PRIMARY_SOFT; }
+#opgaveRaekke QLabel { background: transparent; }
+#opgaveNavn { font-weight: 600; }
+#opgaveMeta { color: @MUTED; font-size: 12px; }
+#opgaveForsinket { color: #B91C1C; font-size: 12px; font-weight: 600; }
+QProgressBar#fremdrift {
+    background: @BORDER; border: none; border-radius: 3px;
+}
+QProgressBar#fremdrift::chunk { background: #10B981; border-radius: 3px; }
 
 /* ---------- Knapper ---------- */
 QPushButton {
@@ -146,6 +177,7 @@ QTableCornerButton::section { background: @SURFACE; border: none; }
 QListWidget { background: transparent; border: none; outline: 0; }
 QListWidget::item { border-bottom: 1px solid #F1F5F9; }
 QListWidget::item:hover, QListWidget::item:selected { background: transparent; }
+QListWidget[klikbar="true"]::item:hover { background: #F8FAFC; border-radius: 8px; }
 
 /* ---------- Scrollbars ---------- */
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }

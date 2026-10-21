@@ -1,26 +1,39 @@
 {
   "file_hashes": {
-    "data_manager.py": "89d6c01fe0fe7880e31cadc1614cabab1d2c5539a8bda42c9a74ad0796d84991",
-    "gui.py": "20a9111978656528ea5ced721a6c66fc389476dcc3054b183b52a7534385b1a6",
-    "main.py": "87b9768598e48199b251f296de101cf836feee4030051fcc2a22444ab0a8af8a",
-    "medarbejder.py": "b978c697bfe1da9679db15bf7d896eeb721c5a5e3a99d665f6193c1f22b031e9",
-    "theme.py": "b9926b3a9719111164d1eb5a30d5b7c76eedaded8dd39cf688f2b983a5c28dfd",
-    "widgets.py": "f94d73310f5c33f8d7e7b9351deaaa7e25c92f84cab995f9fd85305645a9e26b"
+    "README.md": "5f0117574d52b8d914bc0d98bb14854e9d25f037958272fc542030004da77382",
+    "app/__init__.py": "0a44cf09ef4eab8b86b11e136e7ba7edc673fe0a7aad91718cf9197ae94b0ce9",
+    "app/data_manager.py": "5902e7d6d6e624447a55c120f81032ee1915dd495b31ce1e169e006a5beb21bf",
+    "app/medarbejder.py": "1a95078a03d743588e168de1edeecab7154b8271a90ee57c339b2d2e14f33ce5",
+    "app/stier.py": "ee5bf8785496204c1bced13fa475bb8110d2db3f325eb8775171e09e60f970dc",
+    "app/ui/__init__.py": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    "app/ui/dashboard_side.py": "73d303a52c7a43982f1cdf94f55943d4522eb8e2ecfd92353eecda04f9c0f558",
+    "app/ui/diagrammer.py": "94ba01a7faaf1144d396cee764a2487ed80e3ae6cb4835b8274b92e97ed48242",
+    "app/ui/hjaelpere.py": "1c94784bd337497e82d6d748a5038a9067fb43a39fc4c7b223cb4c9f59cf206c",
+    "app/ui/hovedvindue.py": "ece940f369c44bf5a1934126fee64c041b1e6dce90f7738021a8c01f6ad844e4",
+    "app/ui/medarbejder_dialog.py": "a76252a5590fb64595f10e9889eb50a0a7c60ff2e6a5bb3455c1c34e40e73f7b",
+    "app/ui/medarbejder_side.py": "fa47a489f03c2cfcc5f2cc4acb3a3683f8b9fda752a6db41cc2414a013304c36",
+    "app/ui/theme.py": "56c7e51076293883cdda632d526fb761af9bc14ad55b98ba998f81adc7a8c949",
+    "app/ui/widgets.py": "45e8d2b23caaa3641a228a0db09a24180840a4f8c36dcefcbd7406f914ce8230",
+    "main.py": "b9ad707430bd929b567cc14fc4b7cbb771bd777c1ea1753167559ace1b8fa0a1"
   },
-  "indexed_at_commit": "360178ef6e39b2d06d5a91a631fa23da114264dc",
-  "indexed_at_timestamp": "2026-10-21T18:40:38.228285900+00:00",
+  "indexed_at_commit": "34e16894fd77f6ac746f1f2219796dac91e2d75d",
+  "indexed_at_timestamp": "2026-10-21T19:20:20.399920+00:00",
   "languages": {
+    "markdown": {
+      "calls": 0,
+      "nodes": 5
+    },
     "python": {
-      "calls": 127,
-      "nodes": 85
+      "calls": 159,
+      "nodes": 106
     }
   },
   "parser_version": "3.3.2",
   "schema_version": 3,
   "stats": {
-    "total_edges": 202,
-    "total_files": 6,
-    "total_nodes": 85
+    "total_edges": 258,
+    "total_files": 15,
+    "total_nodes": 111
   },
   "vexp_version": "3.3.7"
 }
