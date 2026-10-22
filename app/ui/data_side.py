@@ -1,4 +1,8 @@
-"""Siden Data & sikkerhed: sikkerhedskopier, gendannelse, slettepolitik og adgang."""
+"""Siden Data & sikkerhed: sikkerhedskopier, gendannelse, slettepolitik og adgang.
+
+Sikkerhedskopier af filer findes kun i JSON-tilstanden (tjenester.backup).
+I Supabase-tilstand tager Supabase backup af databasen; siden forklarer det.
+"""
 from datetime import date
 
 from PySide6.QtCore import QUrl, Signal
@@ -75,7 +79,7 @@ class DataSide(QWidget):
             "Sikkerhedskopier, gendannelse og opbevaring af persondata.",
         )
         layout.addLayout(hoved)
-        layout.addWidget(self._opbyg_backup())
+        layout.addWidget(self._opbyg_backup() if self.t.backup else self._opbyg_database_backup())
         layout.addWidget(self._opbyg_opbevaring())
         layout.addWidget(self._opbyg_adgang())
         layout.addStretch()
@@ -151,6 +155,16 @@ class DataSide(QWidget):
         layout.addWidget(self.backup_status)
         return kort
 
+    def _opbyg_database_backup(self):
+        kort, _ = _kort(
+            "Sikkerhedskopier",
+            "Data ligger i den fælles Supabase-database. Sikkerhedskopier tages af "
+            "Supabase (Dashboard → Database → Backups) – ikke af programmet – og "
+            "gendannelse sker dér af projektets ejer. Programmet gemmer ingen "
+            "lokale kopier af persondata.",
+        )
+        return kort
+
     def _opbyg_opbevaring(self):
         kort, layout = _kort(
             "Opbevaring og sletning",
@@ -184,6 +198,15 @@ class DataSide(QWidget):
         return kort
 
     def _opbyg_adgang(self):
+        if self.t.datakilde is None:
+            kort, _ = _kort(
+                "Adgang til persondata",
+                "Adgang styres af databasen: kun brugere med en IN-BASE-profil kan "
+                "logge på og se sager (Row Level Security). Kun administratorer kan "
+                "ændre opsætning, oprette brugere og slette sager permanent. "
+                "Tidslinjen kan ikke ændres eller slettes af brugerne.",
+            )
+            return kort
         kort, layout = _kort(
             "Adgang til persondata",
             "Navne, e-mailadresser, tracking-links og tidslinjer ligger i "
@@ -209,10 +232,15 @@ class DataSide(QWidget):
 
     def opdater(self):
         ind = self.t.indstillinger.hent()
+        self.maaneder_input.setValue(int(ind["opbevaring_maaneder"]))
+        if self.t.backup:
+            self._vis_backups(ind)
+        self.udloebne = udloebne(self.hent_arkiv(), ind["opbevaring_maaneder"], date.today())
+        self._opdater_udloebne()
+
+    def _vis_backups(self, ind):
         self.mappe_felt.setText(str(self.t.backup.mappe()))
         self.antal_input.setValue(int(ind["backup_antal"]))
-        self.maaneder_input.setValue(int(ind["opbevaring_maaneder"]))
-
         self.backups = self.t.backup.liste()
         self.backup_tabel.setRowCount(len(self.backups))
         for raekke, b in enumerate(self.backups):
@@ -226,7 +254,7 @@ class DataSide(QWidget):
             for kolonne, tekst in enumerate(celler):
                 self.backup_tabel.setItem(raekke, kolonne, QTableWidgetItem(tekst))
 
-        self.udloebne = udloebne(self.hent_arkiv(), ind["opbevaring_maaneder"], date.today())
+    def _opdater_udloebne(self):
         self.udloebne_label.setText(
             f"{len(self.udloebne)} arkiverede sager har overskredet opbevaringsperioden"
         )

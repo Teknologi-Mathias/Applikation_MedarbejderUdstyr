@@ -1,14 +1,14 @@
 """Grænseflader for datalagringen.
 
 Services kender kun disse grænseflader – ikke JSON-filer eller databaser.
-I dag findes JSON-implementeringer (app/repositories/json/). En fremtidig
-Supabase/PostgreSQL-implementering skal implementere de samme metoder
-(se app/infrastructure/database/README.md).
+Implementeringer: app/repositories/supabase/ (standard) og
+app/repositories/json/ (kun INBASE_BACKEND=json). app/bootstrap.py vælger.
 
 Fælles regler for alle implementeringer:
 - Hver sag har et versionsnummer. gem() afviser med KonfliktFejl, hvis den
   gemte version ikke er den samme, som sagen blev hentet med (optimistisk
   låsning), og tæller versionen op ved succes.
+- gem() skriver kun den ene sag (og dens egne opgaver, rykkere og tidslinje).
 - Fejl meldes som DataFejl/KonfliktFejl/OfflineFejl (app/repositories/fejl.py).
 """
 from typing import Optional, Protocol
@@ -31,12 +31,30 @@ class SagRepository(Protocol):
 
 class SkabelonRepository(Protocol):
     def hent_alle(self) -> dict: ...
-    def gem_alle(self, alle: dict) -> None: ...
+    def gem(self, slags: str, skabelon: dict, placering: int) -> None:
+        """Opretter/opdaterer ÉN skabelon. placering = dens nummer i listen."""
 
 
 class BrugerRepository(Protocol):
+    """Lokale konti (kun JSON-tilstanden)."""
+
     def hent_alle(self) -> list[dict]: ...
     def gem_alle(self, brugere: list[dict]) -> None: ...
+
+
+class KontoRepository(Protocol):
+    """Konti hos en ekstern identitetsudbyder (Supabase Auth + profiler)."""
+
+    def log_ind(self, email: str, kode: str) -> str:
+        """Brugerens id. Kaster ForkertLoginFejl ved forkert e-mail/kode."""
+    def log_ud(self) -> None: ...
+    def profil(self, bruger_id: str) -> Optional[dict]: ...
+    def alle_profiler(self) -> list[dict]: ...
+    def katalog(self) -> list[dict]: ...
+    def skift_egen_kode(self, ny_kode: str) -> None: ...
+    def opret(self, email: str, brugernavn: str, navn: str, rolle: str, kode: str) -> dict: ...
+    def nulstil_kode(self, bruger_id: str, kode: str) -> None: ...
+    def slet(self, bruger_id: str) -> None: ...
 
 
 class IndstillingRepository(Protocol):

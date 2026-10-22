@@ -1,7 +1,13 @@
-"""Log på-skærmen, der skal passeres før programmet åbner."""
+"""Log på-skærmen, der skal passeres før programmet åbner.
+
+Har en ny bruger fået en midlertidig adgangskode af administratoren, skal
+vedkommende vælge sin egen, før programmet åbner (NyKodeDialog).
+"""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -10,7 +16,53 @@ from PySide6.QtWidgets import (
 )
 
 from app import APP_BESKRIVELSE, APP_NAVN, APP_SLOGAN, VERSION
+from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.ui.hjaelpere import lav_app_ikon, lav_kort, lav_logo
+
+
+class NyKodeDialog(QDialog):
+    """Første log på: erstat den midlertidige adgangskode med en ny."""
+
+    def __init__(self, parent, auth):
+        super().__init__(parent)
+        self.auth = auth
+        self.setWindowTitle("Vælg din egen adgangskode")
+        self.setMinimumWidth(440)
+        forklaring = QLabel(
+            "Du er logget på med en midlertidig adgangskode fra din administrator. "
+            f"Vælg nu din egen (mindst {auth.MIN_KODE} tegn)."
+        )
+        forklaring.setWordWrap(True)
+        self.kode_input = QLineEdit()
+        self.gentag_input = QLineEdit()
+        for felt in (self.kode_input, self.gentag_input):
+            felt.setEchoMode(QLineEdit.EchoMode.Password)
+        form = QFormLayout()
+        form.addRow("Ny adgangskode", self.kode_input)
+        form.addRow("Gentag", self.gentag_input)
+        self.fejl_label = QLabel("")
+        self.fejl_label.setObjectName("feltFejl")
+        self.fejl_label.setWordWrap(True)
+        knapper = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        knapper.button(QDialogButtonBox.StandardButton.Ok).setText("Gem og fortsæt")
+        knapper.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuller")
+        knapper.accepted.connect(self.accept)
+        knapper.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.addWidget(forklaring)
+        layout.addLayout(form)
+        layout.addWidget(self.fejl_label)
+        layout.addWidget(knapper)
+
+    def accept(self):
+        try:
+            self.auth.skift_midlertidig_kode(self.kode_input.text(), self.gentag_input.text())
+        except (ValideringsFejl, DataFejl) as fejl:
+            self.fejl_label.setText(str(fejl))
+            return
+        super().accept()
 
 
 class LoginDialog(QDialog):
@@ -41,7 +93,7 @@ class LoginDialog(QDialog):
         beskrivelse.setWordWrap(True)
 
         self.brugernavn_input = QLineEdit()
-        self.brugernavn_input.setPlaceholderText("Brugernavn")
+        self.brugernavn_input.setPlaceholderText(auth.LOGIN_FELT)
         self.kode_input = QLineEdit()
         self.kode_input.setPlaceholderText("Adgangskode")
         self.kode_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -69,7 +121,7 @@ class LoginDialog(QDialog):
         indhold.addWidget(slogan)
         indhold.addWidget(beskrivelse)
         indhold.addSpacing(14)
-        indhold.addWidget(QLabel("Brugernavn"))
+        indhold.addWidget(QLabel(auth.LOGIN_FELT))
         indhold.addWidget(self.brugernavn_input)
         indhold.addWidget(QLabel("Adgangskode"))
         indhold.addWidget(self.kode_input)
@@ -81,7 +133,8 @@ class LoginDialog(QDialog):
             offline.setObjectName("advarsel")
             offline.setWordWrap(True)
             indhold.addWidget(offline)
-        indhold.addWidget(beta)
+        if auth.BETA:
+            indhold.addWidget(beta)
 
         version = QLabel(VERSION)
         version.setObjectName("sidebarFod")
@@ -104,11 +157,20 @@ class LoginDialog(QDialog):
         self.brugernavn_input.setFocus()
 
     def _log_paa(self):
-        bruger = self.auth.log_ind(self.brugernavn_input.text(), self.kode_input.text())
+        try:
+            bruger = self.auth.log_ind(self.brugernavn_input.text(), self.kode_input.text())
+        except DataFejl as fejl:     # ingen forbindelse, ingen profil o.l.
+            self.fejl_label.setText(str(fejl))
+            return
         if bruger is None:
-            self.fejl_label.setText("Forkert brugernavn eller adgangskode.")
+            self.fejl_label.setText(self.auth.LOGIN_FEJL)
             self.kode_input.clear()
             self.kode_input.setFocus()
+            return
+        if bruger.get("skal_skifte_kode") and not NyKodeDialog(self, self.auth).exec():
+            self.auth.log_ud()
+            self.fejl_label.setText("Du skal vælge en ny adgangskode for at fortsætte.")
+            self.kode_input.clear()
             return
         self.bruger = bruger
         self.accept()

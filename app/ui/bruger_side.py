@@ -1,4 +1,9 @@
-"""Siden Brugerkartotek: opret, slet og skift kode for brugere (kun administratorer)."""
+"""Siden Brugerkartotek: opret, slet og skift kode for brugere (kun administratorer).
+
+I Supabase-tilstand opretter "Opret bruger" en rigtig Supabase Auth-konto via
+Edge Function admin-create-user (serveren tjekker, at du er administrator).
+Den nye bruger får en midlertidig kode og vælger sin egen ved første log på.
+"""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -18,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import session
-from app.repositories.fejl import OfflineFejl, ValideringsFejl
+from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.services.auth_service import ROLLE_BRUGER, ROLLER
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, vis_dato
@@ -48,6 +53,8 @@ class KodeDialog(QDialog):
         self.setMinimumWidth(480)
 
         self.brugernavn_input = QLineEdit(brugernavn)
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("bruges til at logge på")
         self.navn_input = QLineEdit()
         self.rolle_input = QComboBox()
         self.rolle_input.addItems(ROLLER)
@@ -59,15 +66,18 @@ class KodeDialog(QDialog):
         self.forstaaet_input = QCheckBox(
             "Jeg har læst BETA-advarslen"
         )
+        self.forstaaet_input.setVisible(auth.BETA)
 
         form = QFormLayout()
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(10)
         if ny:
             form.addRow("Brugernavn", self.brugernavn_input)
+            if auth.KRAEVER_EMAIL:
+                form.addRow("E-mail", self.email_input)
             form.addRow("Navn", self.navn_input)
             form.addRow("Rolle", self.rolle_input)
-        form.addRow("Adgangskode", self.kode_input)
+        form.addRow("Midlertidig kode" if auth.KRAEVER_EMAIL else "Adgangskode", self.kode_input)
         form.addRow("Gentag kode", self.gentag_input)
 
         rolle_hjaelp = QLabel(
@@ -76,6 +86,13 @@ class KodeDialog(QDialog):
         )
         rolle_hjaelp.setObjectName("hjaelpTekst")
         rolle_hjaelp.setWordWrap(True)
+        kode_hjaelp = QLabel(
+            f"Koden er midlertidig (mindst {auth.MIN_KODE} tegn). Giv den til brugeren "
+            "på en sikker måde – brugeren skal vælge sin egen kode ved første log på."
+        )
+        kode_hjaelp.setObjectName("hjaelpTekst")
+        kode_hjaelp.setWordWrap(True)
+        kode_hjaelp.setVisible(auth.KRAEVER_EMAIL)
 
         self.fejl_label = QLabel("")
         self.fejl_label.setObjectName("feltFejl")
@@ -94,10 +111,12 @@ class KodeDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(12)
-        layout.addWidget(_beta_label())
+        if auth.BETA:
+            layout.addWidget(_beta_label())
         layout.addLayout(form)
         if ny:
             layout.addWidget(rolle_hjaelp)
+        layout.addWidget(kode_hjaelp)
         layout.addWidget(self.forstaaet_input)
         layout.addWidget(self.fejl_label)
         layout.addWidget(knapper)
@@ -106,7 +125,7 @@ class KodeDialog(QDialog):
         if self.kode_input.text() != self.gentag_input.text():
             self.fejl_label.setText("De to adgangskoder er ikke ens.")
             return
-        if not self.forstaaet_input.isChecked():
+        if self.auth.BETA and not self.forstaaet_input.isChecked():
             self.fejl_label.setText("Bekræft, at du har læst BETA-advarslen.")
             return
         try:
@@ -116,10 +135,11 @@ class KodeDialog(QDialog):
                     self.navn_input.text(),
                     self.rolle_input.currentText(),
                     self.kode_input.text(),
+                    email=self.email_input.text(),
                 )
             else:
                 self.auth.nulstil_kode(self.brugernavn_input.text(), self.kode_input.text())
-        except (ValideringsFejl, OfflineFejl) as fejl:
+        except (ValideringsFejl, DataFejl) as fejl:   # DataFejl omfatter OfflineFejl
             self.fejl_label.setText(str(fejl))
             return
         super().accept()
@@ -138,7 +158,8 @@ class BrugerSide(QWidget):
             "Brugere med adgang til IN-BASE og deres rolle. Kun administratorer ser denne side.",
         )
         layout.addLayout(hoved)
-        layout.addWidget(_beta_label())
+        if auth.BETA:
+            layout.addWidget(_beta_label())
 
         knapper = QHBoxLayout()
         opret = lav_knap("+ Opret bruger", "primary")
@@ -155,8 +176,8 @@ class BrugerSide(QWidget):
         kort = lav_kort(skygge=False)
         kort_layout = QVBoxLayout(kort)
         kort_layout.setContentsMargins(8, 8, 8, 8)
-        self.tabel = QTableWidget(0, 4)
-        self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "Rolle", "Oprettet"])
+        self.tabel = QTableWidget(0, 5)
+        self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "E-mail", "Rolle", "Oprettet"])
         self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -165,7 +186,7 @@ class BrugerSide(QWidget):
         self.tabel.verticalHeader().setVisible(False)
         self.tabel.verticalHeader().setDefaultSectionSize(42)
         self.tabel.horizontalHeader().setStretchLastSection(True)
-        for kolonne, bredde in enumerate((200, 260, 160)):
+        for kolonne, bredde in enumerate((170, 200, 240, 130)):
             self.tabel.setColumnWidth(kolonne, bredde)
         kort_layout.addWidget(self.tabel)
         layout.addWidget(kort, 1)
@@ -180,6 +201,7 @@ class BrugerSide(QWidget):
             celler = (
                 b["brugernavn"] + ("  (dig)" if mig else ""),
                 b.get("navn", ""),
+                b.get("email", ""),
                 b.get("rolle", ""),
                 vis_dato(b.get("oprettet", "")[:10]),
             )
@@ -202,7 +224,10 @@ class BrugerSide(QWidget):
     def skift_kode(self):
         brugernavn = self._valgt()
         if brugernavn and KodeDialog(self, self.auth, ny=False, brugernavn=brugernavn).exec():
-            QMessageBox.information(self, "Adgangskode", f"Koden for {brugernavn} er skiftet.")
+            QMessageBox.information(
+                self, "Adgangskode",
+                f"Koden for {brugernavn} er skiftet."
+                + (" Brugeren skal vælge en ny kode ved næste log på." if self.auth.KRAEVER_EMAIL else ""))
 
     def slet(self):
         brugernavn = self._valgt()

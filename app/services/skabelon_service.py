@@ -52,11 +52,7 @@ class SkabelonService:
                 ny["version"] = int(gammel.get("version", 1)) + 1
                 log.info("Skabelon %s gemt som version %s", ny["navn"], ny["version"])
         ny["aendret"], ny["aendret_af"] = nu(), nuvaerende_bruger()
-        if index is None:
-            liste.append(ny)
-        else:
-            liste[index] = ny
-        self.repo.gem_alle(alle)
+        self.repo.gem(slags, ny, len(liste) if index is None else index)
         return ny
 
     def skift_aktiv(self, slags: str, skabelon: dict) -> dict:

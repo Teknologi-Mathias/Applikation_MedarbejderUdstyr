@@ -258,7 +258,7 @@ class MainWindow(QMainWindow):
 
     def _signatur_nu(self):
         return (self.t.onboarding.signatur(), self.t.offboarding.signatur(),
-                self.t.datakilde.offline)
+                self.t.lagring.offline)
 
     def _laes_data(self) -> bool:
         try:
@@ -297,8 +297,9 @@ class MainWindow(QMainWindow):
         aktuel = self.stak.currentWidget()
         if isinstance(aktuel, (SkabelonSide, IndstillingerSide)):
             aktuel.opdater()
-        self.sidebar.saet_lagring(self.t.datakilde.offline,
-                                  len(self.t.lagring.ventende_aendringer()))
+        self.sidebar.saet_lagring(self.t.lagring.offline,
+                                  len(self.t.lagring.ventende_aendringer()),
+                                  self.t.lagring.kilde)
         self.sidebar.opdateret_label.setText(
             f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}")
 
@@ -319,7 +320,12 @@ class MainWindow(QMainWindow):
         )
 
     def _daglig_backup(self):
-        """Tager dagens backup (én gang pr. dag). Fejl vises én gang pr. kørsel."""
+        """Tager dagens backup (én gang pr. dag). Fejl vises én gang pr. kørsel.
+
+        Kun JSON-tilstanden – i Supabase-tilstand tager Supabase backup af databasen.
+        """
+        if self.t.backup is None:
+            return
         try:
             self.t.backup.daglig_backup()
         except (DataFejl, OSError) as fejl:
@@ -357,7 +363,7 @@ class MainWindow(QMainWindow):
 
     def anvend_rolle(self):
         admin = session.er_admin()
-        redigerbar = admin and not self.t.datakilde.offline
+        redigerbar = admin and not self.t.lagring.offline
         for noegle in ("on_skabeloner", "off_skabeloner"):
             self.sider[noegle].saet_redigerbar(redigerbar)
         for knap in (self.on_slet, self.off_slet):
@@ -377,6 +383,7 @@ class MainWindow(QMainWindow):
 
     def log_ud(self):
         log.info("Bruger %s logger ud", session.brugernavn())
+        self.t.auth.log_ud()
         session.log_ud()
         self.hide()
         self.log_paa()

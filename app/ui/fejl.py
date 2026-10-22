@@ -4,7 +4,7 @@
 
 - ValideringsFejl  -> informationsboks med regelbeskeden
 - KonfliktFejl     -> advarsel (data er ændret af en anden); kald opdater
-- OfflineFejl      -> advarsel om offline-tilstand
+- OfflineFejl      -> advarsel om manglende forbindelse/offline-tilstand
 - DataFejl/OSError -> fejlboks + logning (intet slugges tavst)
 Returnerer funktionens resultat, eller markøren FEJL ved fejl:
 
@@ -36,7 +36,7 @@ def udfoer(parent, funktion, *args, efter_konflikt=None, **kwargs):
         if efter_konflikt:
             efter_konflikt()
     except OfflineFejl as fejl:
-        QMessageBox.warning(parent, "Offline", str(fejl))
+        QMessageBox.warning(parent, "Ingen forbindelse", str(fejl))
     except (DataFejl, OSError) as fejl:
         log.exception("Datafejl under %s", getattr(funktion, "__name__", funktion))
         QMessageBox.critical(parent, "Datafejl", f"Handlingen mislykkedes:\n{fejl}")

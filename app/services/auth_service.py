@@ -1,19 +1,25 @@
 """Autentificering og brugeradministration.
 
-AuthService er det eneste sted, der kender til adgangskoder. I dag bruges
-LokalAuth (saltede PBKDF2-hashes i Data/brugere.json – BETA, filen er ikke
-beskyttet). Når Supabase Auth tilsluttes, skal en SupabaseAuth implementere
-samme metoder, så login, skift af kode og brugerkartotek virker uændret.
+To implementeringer med samme offentlige metoder, så login, skift af kode og
+brugerkartotek i UI'en virker uændret:
+
+- SupabaseAuthService (standard): Supabase Auth + user_profiles. Rollen
+  afgøres af profilen i databasen; andre brugeres konti oprettes, nulstilles
+  og slettes af Edge Functions, der selv tjekker administratorrollen.
+- AuthService (kun INBASE_BACKEND=json): saltede PBKDF2-hashes i
+  Data/brugere.json – BETA, filen er ikke beskyttet.
+
 Adgangskoder gemmes aldrig i klartekst.
 """
 import hashlib
 import hmac
 import logging
+import re
 import secrets
 
 from app.domain.historik import nu
-from app.repositories.base import BrugerRepository
-from app.repositories.fejl import ValideringsFejl
+from app.repositories.base import BrugerRepository, KontoRepository
+from app.repositories.fejl import DataFejl, ForkertLoginFejl, ValideringsFejl
 
 log = logging.getLogger(__name__)
 
@@ -39,8 +45,18 @@ def offentlig(bruger: dict) -> dict:
 
 
 class AuthService:
+    # Til brugerfladen: hvad man logger på med, og om adgangskoderne er BETA.
+    LOGIN_FELT = "Brugernavn"
+    LOGIN_FEJL = "Forkert brugernavn eller adgangskode."
+    KRAEVER_EMAIL = False
+    BETA = True
+    MIN_KODE = MIN_KODE_LAENGDE
+
     def __init__(self, repo: BrugerRepository):
         self.repo = repo
+
+    def log_ud(self) -> None:
+        """Lokale konti har ingen server-session."""
 
     ### ----- hjælpere -------------------------------------------------------
 
@@ -113,7 +129,7 @@ class AuthService:
 
     ### ----- administration (kun administratorer) ---------------------------
 
-    def opret(self, brugernavn: str, navn: str, rolle: str, kode: str) -> None:
+    def opret(self, brugernavn: str, navn: str, rolle: str, kode: str, email: str = "") -> None:
         brugernavn = (brugernavn or "").strip()
         if not brugernavn or " " in brugernavn:
             raise ValideringsFejl("Brugernavnet skal udfyldes og må ikke indeholde mellemrum.")
@@ -146,3 +162,130 @@ class AuthService:
         if bruger is None:
             raise ValideringsFejl("Brugeren findes ikke længere.")
         self._saet_kode(brugere, bruger, kode)
+
+
+### ===== Supabase Auth ======================================================
+
+SUPABASE_MIN_KODE_LAENGDE = 8
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_BRUGERNAVN = re.compile(r"^[A-Za-z0-9._-]{2,40}$")
+
+
+class SupabaseAuthService:
+    """Login og brugeradministration mod Supabase Auth.
+
+    - Log på sker med e-mail + adgangskode. Uden en user_profiles-række har
+      kontoen ingen adgang (RLS) – også selvom login lykkes.
+    - Rollen kommer fra profilen i databasen, aldrig fra klienten.
+    - Nye brugere får en midlertidig kode af administratoren og skal skifte
+      den ved første log på (skal_skifte_kode).
+    """
+
+    LOGIN_FELT = "E-mail"
+    LOGIN_FEJL = "Forkert e-mail eller adgangskode."
+    KRAEVER_EMAIL = True
+    BETA = False
+    MIN_KODE = SUPABASE_MIN_KODE_LAENGDE
+
+    def __init__(self, repo: KontoRepository):
+        self.repo = repo
+        self._aktuel: dict | None = None
+
+    @staticmethod
+    def valider_ny_kode(kode: str, gentag: str | None = None) -> None:
+        if len(kode or "") < SUPABASE_MIN_KODE_LAENGDE:
+            raise ValideringsFejl(
+                f"Adgangskoden skal være mindst {SUPABASE_MIN_KODE_LAENGDE} tegn.")
+        if gentag is not None and kode != gentag:
+            raise ValideringsFejl("De to adgangskoder er ikke ens.")
+
+    ### ----- log på ---------------------------------------------------------
+
+    def klargoer(self) -> None:
+        """Intet at forberede: konti findes i Supabase Auth."""
+
+    def log_ind(self, email: str, kode: str) -> dict | None:
+        """Brugeren (profil) ved korrekt login, ellers None. DataFejl ved andre fejl."""
+        email = (email or "").strip().lower()
+        if not _EMAIL.match(email) or not kode:
+            return None
+        try:
+            bruger_id = self.repo.log_ind(email, kode)
+        except ForkertLoginFejl:
+            log.info("Mislykket log på for %r", email)
+            return None
+        profil = self.repo.profil(bruger_id)
+        if profil is None:
+            self.repo.log_ud()
+            log.warning("Konto uden IN-BASE-profil forsøgte at logge på: %s", email)
+            raise DataFejl("Kontoen har ikke adgang til IN-BASE. Kontakt en administrator.")
+        self._aktuel = profil
+        log.info("Bruger %s logget på", profil["brugernavn"])
+        return profil
+
+    def log_ud(self) -> None:
+        self._aktuel = None
+        self.repo.log_ud()
+
+    def brugere(self) -> list[dict]:
+        """Administratorer: alle profiler. Brugere: kun navne (til "Ansvarlig")."""
+        if self._aktuel and self._aktuel.get("rolle") == ROLLE_ADMIN:
+            return self.repo.alle_profiler()
+        return self.repo.katalog()
+
+    ### ----- egen adgangskode -----------------------------------------------
+
+    def skift_egen_kode(self, brugernavn: str, nuvaerende: str, ny: str, gentag: str) -> None:
+        if not self._aktuel:
+            raise ValideringsFejl("Du er ikke logget på.")
+        self.valider_ny_kode(ny, gentag)
+        if ny == nuvaerende:
+            raise ValideringsFejl("Den nye adgangskode skal være forskellig fra den gamle.")
+        try:   # bekræft den nuværende kode, før den skiftes
+            self.repo.log_ind(self._aktuel["email"], nuvaerende)
+        except ForkertLoginFejl as fejl:
+            raise ValideringsFejl("Den nuværende adgangskode er forkert.") from fejl
+        self.repo.skift_egen_kode(ny)
+        self._aktuel["skal_skifte_kode"] = False
+        log.info("Adgangskode skiftet for %s", brugernavn)
+
+    def skift_midlertidig_kode(self, ny: str, gentag: str) -> None:
+        """Første log på: brugeren vælger sin egen kode i stedet for den midlertidige."""
+        if not self._aktuel:
+            raise ValideringsFejl("Du er ikke logget på.")
+        self.valider_ny_kode(ny, gentag)
+        self.repo.skift_egen_kode(ny)
+        self._aktuel["skal_skifte_kode"] = False
+        log.info("Midlertidig adgangskode skiftet for %s", self._aktuel["brugernavn"])
+
+    ### ----- administration (Edge Functions tjekker selv administratorrollen) -
+
+    def _profil_for(self, brugernavn: str) -> dict:
+        for profil in self.repo.alle_profiler():
+            if profil["brugernavn"].lower() == str(brugernavn).strip().lower():
+                return profil
+        raise ValideringsFejl("Brugeren findes ikke længere.")
+
+    def opret(self, brugernavn: str, navn: str, rolle: str, kode: str, email: str = "") -> None:
+        brugernavn, email = (brugernavn or "").strip(), (email or "").strip().lower()
+        if not _BRUGERNAVN.match(brugernavn):
+            raise ValideringsFejl(
+                "Brugernavnet skal være 2-40 tegn: bogstaver, tal, punktum, - eller _.")
+        if not _EMAIL.match(email):
+            raise ValideringsFejl("Skriv en gyldig e-mailadresse – den bruges til at logge på.")
+        if rolle not in ROLLER:
+            raise ValideringsFejl("Ukendt rolle.")
+        self.valider_ny_kode(kode)
+        self.repo.opret(email, brugernavn, (navn or "").strip() or brugernavn, rolle, kode)
+        log.info("Bruger %s (%s) oprettet med rollen %s", brugernavn, email, rolle)
+
+    def nulstil_kode(self, brugernavn: str, kode: str) -> None:
+        """Administrator sætter en ny midlertidig kode for en anden bruger."""
+        self.valider_ny_kode(kode)
+        self.repo.nulstil_kode(self._profil_for(brugernavn)["id"], kode)
+
+    def slet(self, brugernavn: str, aktuel_brugernavn: str) -> None:
+        profil = self._profil_for(brugernavn)
+        if profil["brugernavn"].lower() == str(aktuel_brugernavn).lower():
+            raise ValideringsFejl("Du kan ikke slette den bruger, du er logget ind med.")
+        self.repo.slet(profil["id"])

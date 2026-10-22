@@ -15,3 +15,7 @@ class OfflineFejl(DataFejl):
 
 class ValideringsFejl(ValueError):
     """Input overholder ikke forretningsreglerne (vises direkte for brugeren)."""
+
+
+class ForkertLoginFejl(Exception):
+    """E-mail/brugernavn eller adgangskode er forkert (ikke en datafejl)."""

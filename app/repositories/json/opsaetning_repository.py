@@ -32,9 +32,16 @@ class JsonSkabelonRepository:
             gem_json(alle, fil)
         return alle
 
-    def gem_alle(self, alle: dict) -> None:
+    def gem(self, slags: str, skabelon: dict, placering: int) -> None:
         self.datakilde.kraev_online("Ændring af skabeloner")
-        gem_json({slags: alle[slags] for slags in sk.SLAGS}, self.datakilde.fil(SKABELONER))
+        alle = self.hent_alle()
+        liste = alle[slags]
+        index = next((i for i, s in enumerate(liste) if s["id"] == skabelon["id"]), None)
+        if index is None:
+            liste.insert(placering, skabelon)
+        else:
+            liste[index] = skabelon
+        gem_json({s: alle[s] for s in sk.SLAGS}, self.datakilde.fil(SKABELONER))
 
 
 class JsonIndstillingRepository:

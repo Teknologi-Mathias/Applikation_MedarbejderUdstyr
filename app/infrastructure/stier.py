@@ -1,13 +1,14 @@
 """Alle stier programmet bruger, samlet ét sted.
 
-To mapper er vigtige:
-
-- CENTRAL_DATA_MAPPE ("Data"): de fælles data. Som færdig .exe ligger den ved
-  siden af programfilen (fx C:\\IN-BASE\\Data) og kan pege på et netværksdrev
-  via miljøvariablen INBASE_DATA. Senere erstattes den af Supabase/PostgreSQL.
-- LOKAL_MAPPE ("Lokal"): data, der hører til denne pc – offline-kopi,
-  ændringslog, log-filer og brugerpræferencer. Ligger også ved siden af
-  programmet (ikke i %APPDATA%) og kan flyttes med INBASE_LOKAL.
+- KONFIG_FIL (%APPDATA%\\IN-BASE\\.env): forbindelsen til Supabase (URL og
+  offentlig nøgle). Læses af app/infrastructure/database/config.py.
+- LOKAL_MAPPE: data, der hører til denne pc – log-filer, notifikationslog og
+  (kun JSON-tilstand) offline-kopi og præferencer. Den færdige .exe bruger
+  %LOCALAPPDATA%\\IN-BASE (aldrig mappen inde i/ved siden af programmet, som
+  kan være skrivebeskyttet); fra kildekoden bruges Lokal/ i projektet.
+  Kan flyttes med INBASE_LOKAL.
+- CENTRAL_DATA_MAPPE ("Data"): kun JSON-tilstanden (INBASE_BACKEND=json).
+  I Supabase-tilstand er databasen den eneste fælles datakilde.
 
 Filnavnene er konstanter; den konkrete mappe vælges af Datakilde
 (app/repositories/json/datakilde.py), så offline-tilstand kan skifte mappe.
@@ -27,8 +28,17 @@ else:
     PROGRAM_MAPPE = Path(__file__).resolve().parents[2]
     RESSOURCE_MAPPE = PROGRAM_MAPPE
 
+_APPDATA = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+_LOCALAPPDATA = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+
+KONFIG_MAPPE = _APPDATA / "IN-BASE"
+KONFIG_FIL = KONFIG_MAPPE / ".env"
+
 CENTRAL_DATA_MAPPE = Path(os.environ.get("INBASE_DATA") or PROGRAM_MAPPE / "Data")
-LOKAL_MAPPE = Path(os.environ.get("INBASE_LOKAL") or PROGRAM_MAPPE / "Lokal")
+LOKAL_MAPPE = Path(
+    os.environ.get("INBASE_LOKAL")
+    or (_LOCALAPPDATA / "IN-BASE" if ER_FROSSET else PROGRAM_MAPPE / "Lokal")
+)
 
 # Filnavne i en datamappe (central eller offline-kopi).
 OFFBOARDING_AKTIVE = "medarbejdere.json"
@@ -51,10 +61,3 @@ LAGRING_FIL = LOKAL_MAPPE / "lagring.json"
 NOTIFIKATIONSLOG_FIL = LOKAL_MAPPE / "notifikationslog.json"
 
 ASSETS_MAPPE = RESSOURCE_MAPPE / "assets"
-
-# Til og med V0.5.1 lå data i %APPDATA%. Bruges kun til en engangskopi ved opstart.
-GAMMEL_DATA_MAPPE = (
-    Path(os.environ.get("APPDATA", str(Path.home())))
-    / "MedarbejderUdstyr"
-    / "Data"
-)

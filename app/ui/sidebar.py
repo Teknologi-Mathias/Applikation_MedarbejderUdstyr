@@ -115,14 +115,14 @@ class Sidebar(QFrame):
             f"{bruger.get('navn') or bruger.get('brugernavn', '')}\n{bruger.get('rolle', '')}"
         )
 
-    def saet_lagring(self, offline: bool, ventende: int):
+    def saet_lagring(self, offline: bool, ventende: int, kilde: str = "central datamappe"):
         if offline:
             self.lagring_label.setObjectName("lagringOffline")
             self.lagring_label.setText(f"● OFFLINE · {ventende} ikke synkroniseret")
             self.lagring_label.setToolTip("Ændringer gemmes lokalt. Gå online under Indstillinger.")
         else:
             self.lagring_label.setObjectName("lagringOnline")
-            self.lagring_label.setText("● ONLINE · central datamappe")
-            self.lagring_label.setToolTip("Data gemmes direkte i den centrale datamappe.")
+            self.lagring_label.setText(f"● ONLINE · {kilde.split(' (')[0]}")
+            self.lagring_label.setToolTip(f"Data gemmes direkte i {kilde}.")
         self.lagring_label.style().unpolish(self.lagring_label)
         self.lagring_label.style().polish(self.lagring_label)

@@ -1,74 +1,56 @@
-# Database (Supabase / PostgreSQL) – forberedelse
+# Database (Supabase / PostgreSQL)
 
-**Status: ikke tilsluttet.** IN-BASE gemmer i dag data som JSON i den
-centrale datamappe (`app/repositories/json/`). Intet i programmet forbinder
-til en database, og intet foregiver at gøre det.
+Supabase er IN-BASE's fælles datakilde. Opsætning og drift:
+[docs/SUPABASE_OPSAETNING.md](../../../docs/SUPABASE_OPSAETNING.md).
 
 ## Hvor ligger hvad?
 
 | Fil | Indhold |
 |---|---|
-| `config.py` | Den ENESTE læsning af databasekonfiguration (miljøvariabler). |
-| `connection.py` | Det ENESTE sted, en forbindelse oprettes. Fejler i dag tydeligt. |
-| `migrations/001_initial_schema.sql` | Tabeller, nøgler, kontrollerede statusser, versions-trigger. |
-| `migrations/002_rls_policies.sql` | Row Level Security og roller. |
-| `migrering.py` | Forbereder JSON-data til import og validerer dem mod kilden. |
-| `../../repositories/base.py` | Grænsefladerne en Supabase-implementering skal opfylde. |
-| `../../bootstrap.py` | Her vælges hvilke repositories (JSON/Supabase) der bruges. |
+| `config.py` | Den ENESTE læsning af konfiguration (`%APPDATA%\IN-BASE\.env`, miljø). Afviser privilegerede nøgler. |
+| `connection.py` | Det ENESTE sted, Supabase-klienten oprettes (én pr. kørsel, session kun i hukommelsen). |
+| `migrations/001`–`004` | Skema, RLS/privilegier, RPC-funktioner, bevidste standarder. Køres manuelt i rækkefølge. |
+| `reset/nulstil_forretningsdata.sql` | Engangs-tømning af forretningsdata (kræver bekræftelse). |
+| `../../repositories/supabase/` | ALLE kald til tabeller, RPC, Auth og Edge Functions. |
+| `../../repositories/supabase/mapping.py` | Den ENESTE oversættelse domæne ↔ kolonner (feltkort). |
+| `../../../supabase/functions/` | Edge Functions til brugeradministration (servernøgle kun dér). |
+| `../../bootstrap.py` | Vælger Supabase- eller JSON-repositories. |
 
-## Konfiguration
-
-Kopiér `.env.example` fra projektroden og sæt:
-
-```
-INBASE_SUPABASE_URL=https://<projekt>.supabase.co
-INBASE_SUPABASE_ANON_KEY=<offentlig anon/publishable nøgle>
-```
-
-**Aldrig** `service_role`-nøgle, databaseadgangskode eller andre privilegerede
-hemmeligheder i Windows-programmet – `config.py` afviser dem. Adgang styres
-af brugerens login (Supabase Auth) og RLS-politikkerne.
-
-## Datamodel (kort)
+## Datamodel
 
 ```
 people ──< employment_records ──< lifecycle_cases ──< case_tasks
-                                        │          ├──< case_reminders
-                                        │          └──< audit_events (insert-only)
+   (identitet)   (lønnr., stilling,      │          ├──< case_reminders
+                  område, datoer)        │          └──< audit_events (insert-only)
 workflow_templates ──< workflow_template_tasks
                   └──< workflow_template_versions
-areas, positions, message_templates, notification_rules, user_profiles
+areas, positions, app_settings, message_templates, notification_rules
+auth.users ──1:1── user_profiles (brugernavn, rolle, tema, must_change_password)
 ```
 
-* Personens identitet (`people`) er adskilt fra ansættelsen
-  (`employment_records`: lønnr., stilling, område, datoer) og fra sagen
-  (`lifecycle_cases`: onboarding/offboarding). Genansættelse = ny ansættelse
-  og ny sag på samme person.
-* Lønnr. er valgfrit og unikt, når det findes – aldrig primærnøgle.
-* Sager har `version` (optimistisk låsning) – samme princip som JSON-lagringen.
+## Skrivning
 
-## Implementeringsplan
+* Sager skrives KUN via `inbase_save_case(p_case, p_expected_version)`:
+  sag, person, ansættelse, ændrede opgaver/rykkere og nye hændelser i én
+  transaktion. Forkert version → `IB409` → `KonfliktFejl`. Klienten sender kun
+  de rækker, der er ændret siden sagen blev hentet.
+* Tidslinjen er insert-only; hændelser kan kun registreres i eget navn.
+* Skabeloner (arbejdsgange) via `inbase_save_workflow_template` (kun admin);
+  mail-/påmindelsesskabeloner, indstillinger og områder direkte (RLS: kun admin).
+* Permanent sletning via `inbase_delete_case` (kun admin) – sletter også
+  personen, hvis ingen anden sag bruger den.
 
-1. Tilføj `supabase` til `requirements.txt`; implementér `opret_klient()`.
-2. `SupabaseAuth` i `app/services/auth_service.py`-mønstret (log på, skift
-   kode via Supabase Auth – kode håndteres aldrig lokalt).
-3. `app/repositories/supabase/` med `SupabaseSagRepository` m.fl., der
-   opfylder `app/repositories/base.py`:
-   * `gem()` = `update ... where id = :id and version = :version`; 0 rækker
-     → `KonfliktFejl`. Sag + opgaver + hændelser gemmes i én transaktion
-     (en PostgreSQL-funktion kaldt via RPC), så de lykkes eller fejler samlet.
-4. Kør `001` og `002` i Supabase; gennemgå RLS med MASAN.
-5. Kør `python -m app.infrastructure.database.migrering --data Data --ud ud`,
-   importér tabellerne i rækkefølgen areas → positions → people →
-   employment_records → workflow_* → message_templates → notification_rules →
-   lifecycle_cases → case_tasks → case_reminders → audit_events, og
-   sammenhold antal med `rapport.json`. Originaldata slettes ikke.
-6. Vælg Supabase-repositories i `bootstrap.py`.
+## Nyt felt – uden at duplikere databasekode
 
-## Offline og synkronisering
+1. Ny migrering `00N_<navn>.sql`: `alter table public.<tabel> add column ...;`
+2. Én linje i det relevante feltkort i `repositories/supabase/mapping.py`,
+   fx `("telefon", "phone", TEKST)` i `PERSON_FELTER`.
+3. Feltet i domænets `til_dict()`/`fra_dict()` (som for JSON).
 
-Offline-tilstanden (`app/services/lagring_service.py`) virker i dag mod den
-centrale JSON-mappe: lokal kopi + ændringslog + versionskontrol ved
-synkronisering; konflikter overskrives aldrig. Samme strategi skal bruges mod
-Supabase. Overvej SQLite til den lokale kopi og ændringskøen, når der er
-mange brugere. Der skiftes aldrig automatisk mellem datakilder.
+RPC-funktionerne udleder selv kolonnelisten fra tabellen, så de skal ikke
+ændres. UI, services og controllere kalder ikke databasen og berøres kun, hvis
+feltet skal vises/redigeres.
+
+Ny tabel/funktion: migrering (tabel + RLS-politik + grants), metode i et
+repository i `repositories/supabase/`, evt. grænseflade i `repositories/base.py`
+og valg i `bootstrap.py`.

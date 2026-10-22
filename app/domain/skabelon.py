@@ -195,7 +195,7 @@ _STANDARD = {
 ### ----- normalisering ------------------------------------------------------
 
 def ny_id():
-    return uuid.uuid4().hex[:12]
+    return str(uuid.uuid4())
 
 
 def klargoer(skabelon, slags):

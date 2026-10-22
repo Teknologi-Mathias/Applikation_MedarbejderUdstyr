@@ -1,1 +1,6 @@
+# Kørsel
 PySide6>=6.6
+supabase>=2.33,<3        # Supabase Auth, PostgREST og Edge Functions (inkl. httpx)
+python-dotenv>=1.0       # læser %APPDATA%\IN-BASE\.env
+
+# Build-værktøjer (PyInstaller) står i requirements-build.txt.
