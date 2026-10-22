@@ -2,18 +2,26 @@
 ;
 ; Bygges af scripts\build_windows.ps1, som sender versionen (fra app\__init__.py)
 ; og stierne med:
-;   ISCC.exe /DAppVersion=<version> /DSourceDir=<dist\IN-BASE> /DOutputDir=<release> installer\IN-BASE.iss
+;   ISCC.exe /DAppVersion=<version> /DSourceDir=<dist\IN-BASE> /DOutputDir=<release>
+;            /DKlientKonfig=<build\installer\IN-BASE.env> installer\IN-BASE.iss
 ;
 ; Bevidst:
 ; - AppId er FAST for alle versioner (så en ny version opgraderer den gamle).
 ;   MÅ ALDRIG ÆNDRES.
-; - Installerer pr. bruger uden administratorrettigheder (kan vælges for alle).
-; - Konfigurationen (%APPDATA%\IN-BASE\.env) og lokale data
-;   (%LOCALAPPDATA%\IN-BASE) røres hverken ved installation, opgradering eller
-;   afinstallation. Installeren kender intet til Supabase og ændrer ingen data.
+; - Installerer altid pr. bruger uden administratorrettigheder, så
+;   konfigurationen havner hos den bruger, der installerer.
+; - Konfigurationen %APPDATA%\IN-BASE\.env (Supabase-URL + OFFENTLIG
+;   publishable-nøgle, lavet af tools\lav_klientkonfig.py) lægges KUN på plads,
+;   hvis filen ikke findes. Den overskrives aldrig ved opgradering og slettes
+;   ikke ved afinstallation. Den indlejres ikke i IN-BASE.exe.
+; - Lokale data (%LOCALAPPDATA%\IN-BASE) røres aldrig. Installeren ændrer intet
+;   i Supabase-databasen.
 
 #ifndef AppVersion
   #error "AppVersion mangler. Byg med scripts\build_windows.ps1."
+#endif
+#ifndef KlientKonfig
+  #error "KlientKonfig mangler (konfigurationen til %APPDATA%\IN-BASE\.env). Byg med scripts\build_windows.ps1."
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\IN-BASE"
@@ -40,7 +48,6 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 ; Ingen administratorkrav: installeres i brugerens egen Programs-mappe.
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutputDir}
 OutputBaseFilename=IN-BASE-Setup-v{#AppVersion}
 SetupIconFile=..\assets\IN-BASE.ico
@@ -68,6 +75,8 @@ Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Forbindelsen til Supabase: kun hvis brugeren ikke allerede har en konfiguration.
+Source: "{#KlientKonfig}"; DestDir: "{userappdata}\IN-BASE"; DestName: ".env"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -76,5 +85,5 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
-; Ingen [UninstallDelete]: afinstallation fjerner kun de installerede filer.
+; Ingen [UninstallDelete]: afinstallation fjerner kun programfilerne.
 ; Konfiguration og lokale data slettes kun manuelt (se docs\RELEASE.md).

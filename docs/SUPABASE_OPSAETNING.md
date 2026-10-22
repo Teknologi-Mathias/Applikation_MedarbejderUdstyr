@@ -103,7 +103,15 @@ Databasen afviser at fjerne den sidste administrator.
 
 ## 6. Konfiguration på hver pc
 
-Opret `%APPDATA%\IN-BASE\.env` (fx `C:\Users\<navn>\AppData\Roaming\IN-BASE\.env`):
+**Med installeren sker det automatisk.** `scripts\build_windows.ps1` tager
+URL og publishable-nøgle fra projektets `.env` (kun de to værdier), og
+installeren lægger dem i `%APPDATA%\IN-BASE\.env` – men kun hvis brugeren
+ikke allerede har filen. Den overskrives aldrig ved opgradering og slettes
+ikke ved afinstallation. Den ligger ikke i selve `IN-BASE.exe`.
+
+Skal en pc pege på et andet projekt, eller kører du appen uden installer,
+så opret/ret filen `%APPDATA%\IN-BASE\.env` manuelt
+(fx `C:\Users\<navn>\AppData\Roaming\IN-BASE\.env`):
 
 ```
 INBASE_SUPABASE_URL=https://<projekt-ref>.supabase.co
@@ -211,7 +219,8 @@ pyinstaller --noconfirm MedarbejderUdstyr.spec           # dist\IN-BASE.exe
 ```
 
 Appen kræver hverken Python, database-adgangskode eller servernøgle.
-Konfigurationen indlejres ikke; logs skrives i `%LOCALAPPDATA%\IN-BASE`.
+Installeren lægger `%APPDATA%\IN-BASE\.env` på plads, hvis den mangler (se
+afsnit 6); den indlejres ikke i .exe-filen. Logs skrives i `%LOCALAPPDATA%\IN-BASE`.
 
 ## 12. Test
 

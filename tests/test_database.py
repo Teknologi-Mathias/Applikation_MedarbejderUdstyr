@@ -76,6 +76,12 @@ class KonfigurationTest(unittest.TestCase):
         konfig = hent_konfiguration({"INBASE_SUPABASE_ANON_KEY": OFFENTLIG}, filer=[fil])
         self.assertEqual(konfig.anon_noegle, OFFENTLIG)
 
+    def test_env_fil_med_bom_laeses(self):
+        fil = self.tmp / ".env"
+        fil.write_text(f"INBASE_SUPABASE_URL={URL}\nINBASE_SUPABASE_ANON_KEY={OFFENTLIG}\n",
+                       encoding="utf-8-sig")
+        self.assertTrue(hent_konfiguration({}, filer=[fil]).er_konfigureret)
+
     def test_klienten_oprettes_eet_sted_og_genbruges(self):
         konfig = hent_konfiguration({"INBASE_SUPABASE_URL": URL,
                                      "INBASE_SUPABASE_ANON_KEY": OFFENTLIG}, filer=[])

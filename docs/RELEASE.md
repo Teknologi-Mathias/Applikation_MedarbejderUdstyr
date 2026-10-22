@@ -16,8 +16,8 @@ Resultat: `release\IN-BASE-Setup-v<version>.exe` + `.sha256`.
 | **PyInstaller-build** | `dist\IN-BASE\IN-BASE.exe` + `_internal\` | Mellemtrin: hele appen inkl. Python, Qt og Supabase-klienten i én mappe. Kan startes direkte til test. |
 | **Installer** | `release\IN-BASE-Setup-v<version>.exe` | Det, brugerne får. Installerer mappen ovenfor, laver genveje og afinstallation. Kræver ikke Python. |
 
-Den installerede app læser KUN `%APPDATA%\IN-BASE\.env` (se
-docs/SUPABASE_OPSAETNING.md, afsnit 6) og skriver logs i
+Den installerede app læser KUN `%APPDATA%\IN-BASE\.env`. Den fil lægger
+installeren selv på plads (se "Forbindelsen til Supabase" nedenfor) og skriver logs i
 `%LOCALAPPDATA%\IN-BASE`. Ingen af delene ligger i installationsmappen, så
 de bevares ved opgradering og afinstallation.
 
@@ -96,8 +96,8 @@ relevante del af testpakken manuelt før releasen – og hele pakken ved større
 
 * `AppId` `{C5BFD02A-D4D8-418F-8093-BC7609B78B60}` er fast for alle versioner –
   derfor opgraderer en ny version den gamle. **Må aldrig ændres.**
-* Installerer pr. bruger i `%LOCALAPPDATA%\Programs\IN-BASE` uden
-  administratorrettigheder (kan vælges for alle brugere i en dialog).
+* Installerer altid pr. bruger i `%LOCALAPPDATA%\Programs\IN-BASE` uden
+  administratorrettigheder.
 * Startmenu-genvej; skrivebordsgenvej kan vælges.
 * Ved opgradering slettes kun `{app}\_internal` (gamle biblioteker), før de nye
   kopieres ind. Kører IN-BASE (også ved uret), bedes den lukket.
@@ -106,6 +106,24 @@ relevante del af testpakken manuelt før releasen – og hele pakken ved større
   Skal de væk, slettes de manuelt efter afinstallation – fx ved udskiftning
   af pc: `Remove-Item "$env:APPDATA\IN-BASE", "$env:LOCALAPPDATA\IN-BASE" -Recurse`.
 * Installeren rører aldrig Supabase-databasen.
+
+### Forbindelsen til Supabase (`%APPDATA%\IN-BASE\.env`)
+
+* Buildscriptet laver filen med `tools\lav_klientkonfig.py` ud fra
+  projektets `.env` – **kun** `INBASE_SUPABASE_URL` og
+  `INBASE_SUPABASE_ANON_KEY`. Testlogin og alt andet i `.env` kommer aldrig
+  med, og en secret-/service_role-nøgle stopper buildet.
+* Andet projekt (fx et testprojekt):
+  `.\scripts\build_windows.ps1 -KlientKonfig C:\sti\til\andet.env`.
+* Installeren lægger filen i `%APPDATA%\IN-BASE\.env` **kun hvis den mangler**
+  (`onlyifdoesntexist`) og fjerner den ikke ved afinstallation
+  (`uninsneveruninstall`). En rettet konfiguration overlever altså
+  opgraderinger. Skifter I Supabase-projekt, skal filen rettes/slettes på
+  pc'erne – en ny installer overskriver den ikke.
+* Filen ligger ikke i `IN-BASE.exe` eller installationsmappen; buildet stopper,
+  hvis en `.env` havner i app-mappen.
+* Publishable-nøglen er offentlig af natur (den findes i enhver klient);
+  adgangen beskyttes af brugerens login og RLS i databasen.
 
 ## Fejlfinding
 
@@ -135,4 +153,5 @@ relevante del af testpakken manuelt før releasen – og hele pakken ved større
 | `installer/IN-BASE.iss` | Inno Setup |
 | `scripts/build_windows.ps1` | Hele releasen i én kommando |
 | `requirements-build.txt` | Kørselspakker + PyInstaller |
+| `tools/lav_klientkonfig.py` | Laver installerens `%APPDATA%\IN-BASE\.env` (kun URL + publishable-nøgle) |
 | `tests/test_release.py` | Tests af versions- og buildkonfigurationen |

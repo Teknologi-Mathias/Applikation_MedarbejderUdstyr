@@ -123,7 +123,9 @@ Ret versionen i `app/__init__.py` (`__version__`) og kør:
 
 Resultatet er `release\IN-BASE-Setup-v<version>.exe` + SHA-256-kontrolsum.
 Opsætning, afprøvning og fejlfinding: [docs/RELEASE.md](docs/RELEASE.md).
-Konfigurationen indlejres ikke; hver pc skal have `%APPDATA%\IN-BASE\.env`.
+Installeren lægger forbindelsen til Supabase (URL + offentlig nøgle fra
+projektets `.env`) i `%APPDATA%\IN-BASE\.env`, hvis filen mangler – den ligger
+ikke i selve .exe-filen og overskrives aldrig ved opgradering.
 
 ## Logo og ikon
 

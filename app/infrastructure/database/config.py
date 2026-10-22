@@ -63,7 +63,8 @@ def env_filer() -> list[Path]:
 
 def _laes_env_fil(fil: Path) -> dict:
     from dotenv import dotenv_values
-    return {k: v for k, v in dotenv_values(fil).items() if v is not None}
+    # utf-8-sig: filen må gerne være gemt med BOM (fx "UTF-8 med BOM" i Notesblok).
+    return {k: v for k, v in dotenv_values(fil, encoding="utf-8-sig").items() if v is not None}
 
 
 def indlaes_miljoe(miljoe=None, filer=None) -> tuple[dict, tuple]:

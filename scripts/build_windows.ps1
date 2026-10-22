@@ -14,6 +14,12 @@
     Scriptet committer, pusher, tagger og publicerer ikke noget, og det rører
     hverken Supabase eller konfigurationen i %APPDATA%\IN-BASE.
 
+.PARAMETER KlientKonfig
+    .env-fil med INBASE_SUPABASE_URL og INBASE_SUPABASE_ANON_KEY, som installeren
+    lægger i %APPDATA%\IN-BASE\.env (kun hvis brugeren ikke har en i forvejen).
+    Standard: .env i projektmappen. Kun de to værdier kopieres – aldrig testlogin
+    eller andre nøgler – og secret-/service_role-nøgler afvises.
+
 .PARAMETER InnoSetupPath
     Fuld sti til ISCC.exe, hvis Inno Setup ikke ligger et almindeligt sted.
     Kan også sættes med miljøvariablen INBASE_ISCC.
@@ -23,6 +29,7 @@
 #>
 [CmdletBinding()]
 param(
+    [string]$KlientKonfig = '',
     [string]$InnoSetupPath = $env:INBASE_ISCC
 )
 
@@ -34,6 +41,9 @@ $Python = Join-Path $Rod '.venv\Scripts\python.exe'
 $Spec = Join-Path $Rod 'MedarbejderUdstyr.spec'
 $Iss = Join-Path $Rod 'installer\IN-BASE.iss'
 $ArbejdsMappe = Join-Path $Rod 'build\pyinstaller'
+$InstallerArbejde = Join-Path $Rod 'build\installer'
+$GenereretKonfig = Join-Path $InstallerArbejde 'IN-BASE.env'
+if (-not $KlientKonfig) { $KlientKonfig = Join-Path $Rod '.env' }
 $DistRod = Join-Path $Rod 'dist'
 $AppMappe = Join-Path $DistRod 'IN-BASE'
 $ReleaseMappe = Join-Path $Rod 'release'
@@ -125,6 +135,20 @@ try {
     Ok "Version $Version"
     if ($Erstatter) { Write-Host "    BEMÆRK  $InstallerNavn findes allerede og bliver ERSTATTET." -ForegroundColor Yellow }
 
+    Trin 'Klargør klientkonfigurationen til %APPDATA%\IN-BASE\.env'
+    if (Test-Path -LiteralPath $InstallerArbejde) { Remove-Item -LiteralPath $InstallerArbejde -Recurse -Force }
+    $SupabaseUrl = ([string](Invoke-Native { & $Python (Join-Path $Rod 'tools\lav_klientkonfig.py') $KlientKonfig $GenereretKonfig })).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $GenereretKonfig)) {
+        Stop-Build (@(
+            "Klientkonfigurationen kunne ikke laves ud fra: $KlientKonfig",
+            'Filen skal indeholde:',
+            '  INBASE_SUPABASE_URL=https://<projekt-ref>.supabase.co',
+            '  INBASE_SUPABASE_ANON_KEY=sb_publishable_<offentlig nøgle>',
+            'Angiv evt. en anden fil:  .\scripts\build_windows.ps1 -KlientKonfig <sti>'
+        ) -join [Environment]::NewLine)
+    }
+    Ok "Supabase: $SupabaseUrl (kun URL + publishable-nøgle; kilde: $KlientKonfig)"
+
     Trin ("Kører målrettede tests: {0}" -f ($Tests -join ', '))
     Push-Location $Rod
     try {
@@ -179,7 +203,7 @@ try {
 
     Trin 'Bygger installeren med Inno Setup'
     New-Item -ItemType Directory -Force -Path $ReleaseMappe | Out-Null
-    Invoke-Native { & $Iscc /Q "/DAppVersion=$Version" "/DSourceDir=$AppMappe" "/DOutputDir=$ReleaseMappe" $Iss }
+    Invoke-Native { & $Iscc /Q "/DAppVersion=$Version" "/DSourceDir=$AppMappe" "/DOutputDir=$ReleaseMappe" "/DKlientKonfig=$GenereretKonfig" $Iss }
     if ($LASTEXITCODE -ne 0) { Stop-Build "Inno Setup fejlede (exit $LASTEXITCODE). Se meddelelserne ovenfor." }
     if (-not (Test-Path -LiteralPath $Installer)) { Stop-Build "Installeren blev ikke oprettet: $Installer" }
     if ((Get-Item -LiteralPath $Installer).LastWriteTime -lt $start) { Stop-Build "Installeren blev ikke opdateret: $Installer" }
@@ -201,6 +225,7 @@ try {
     Write-Host "  SHA-256     : $hash"
     Write-Host "  Kontrolsum  : $hashFil"
     Write-Host "  App-mappe   : $AppMappe"
+    Write-Host "  Supabase    : $SupabaseUrl (lægges i %APPDATA%\IN-BASE\.env, hvis den mangler)"
     Write-Host "  Tests       : $($Tests -join ', ')"
     Write-Host "  Varighed    : $varighed"
     Write-Host '  Intet er committet, tagget eller publiceret.'
