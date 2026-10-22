@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app import skabeloner as sk
+from app.domain import skabelon as sk
+from app.domain.onboarding import OnboardingForloeb
 from app.ui.hjaelpere import lav_knap, lav_kort
 
 
@@ -253,6 +254,11 @@ class PaamindelseDialog(QDialog):
         self.dage_input.setRange(0, 365)
         self.dage_input.setSuffix(" dage")
         self.dage_input.setValue(int(self.skabelon.get("dage", 0)))
+        self.gentag_input = QSpinBox()
+        self.gentag_input.setRange(0, 365)
+        self.gentag_input.setSpecialValueText("Kun én gang")
+        self.gentag_input.setSuffix(" dage")
+        self.gentag_input.setValue(int(self.skabelon.get("gentag_dage", 1)))
         self.aktiv_input = QCheckBox("Aktiv (vises som Windows-notifikation)")
         self.aktiv_input.setChecked(self.skabelon["aktiv"])
         self.titel_input = QLineEdit(self.skabelon["titel"])
@@ -265,6 +271,7 @@ class PaamindelseDialog(QDialog):
         form.addRow("Navn", self.navn_input)
         form.addRow("Regel", self.regel_input)
         form.addRow("X =", self.dage_input)
+        form.addRow("Gentag efter", self.gentag_input)
         form.addRow("", self.aktiv_input)
         form.addRow("Titel", self.titel_input)
         form.addRow("Tekst", self.tekst_input)
@@ -327,6 +334,7 @@ class PaamindelseDialog(QDialog):
             navn=self.navn_input.text().strip(),
             regel=self.regel_noegler[self.regel_input.currentIndex()],
             dage=self.dage_input.value(),
+            gentag_dage=self.gentag_input.value(),
             aktiv=self.aktiv_input.isChecked(),
             titel=self.titel_input.text().strip(),
             tekst=self.tekst_input.toPlainText().strip(),
@@ -368,37 +376,64 @@ class PaamindelseDialog(QDialog):
 ### ----- sager (udstyr ved oprettelse) --------------------------------------
 
 class SagSkabelonDialog(QDialog):
-    KOLONNER = ("Opgave", "Udstyr (tom = intern)", "Ansvarlig", "Frist (dage)", "Obligatorisk")
+    """Arbejdsgangsskabelon (onboarding eller offboarding).
+
+    Offboarding: kolonnen Udstyr. Onboarding: kolonnen Milepæl og valg af
+    stillinger. Gemmes som en ny version (se SkabelonService).
+    """
 
     def __init__(self, parent, skabelon):
         super().__init__(parent)
         self.skabelon = dict(skabelon)
-        self.setWindowTitle("Sagsskabelon")
-        self.setMinimumSize(900, 560)
+        self.onboarding = self.skabelon.get("proces") == OnboardingForloeb.PROCES
+        self.milepaele = OnboardingForloeb.MILEPAELE if self.onboarding else ()
+        self.kolonner = (
+            "Opgave", "Beskrivelse", "Milepæl" if self.onboarding else "Udstyr (tom = intern)",
+            "Ansvarlig", "Frist (dage)", "Obligatorisk",
+        )
+        proces_navn = "onboarding" if self.onboarding else "offboarding"
+        self.setWindowTitle(f"Skabelon – {proces_navn}")
+        self.setMinimumSize(1000, 600)
 
         self.navn_input = QLineEdit(self.skabelon["navn"])
-        self.aktiv_input = QCheckBox("Aktiv (kan vælges, når en medarbejder oprettes)")
+        self.beskrivelse_input = QLineEdit(self.skabelon.get("beskrivelse", ""))
+        self.aktiv_input = QCheckBox("Aktiv (kan vælges ved oprettelse)")
         self.aktiv_input.setChecked(self.skabelon["aktiv"])
         form = QFormLayout()
         form.setHorizontalSpacing(14)
         form.addRow("Navn", self.navn_input)
+        form.addRow("Beskrivelse", self.beskrivelse_input)
+        self.stilling_felter = {}
+        if self.onboarding:
+            raekke = QHBoxLayout()
+            for stilling in OnboardingForloeb.STILLINGER:
+                felt = QCheckBox(stilling)
+                felt.setChecked(stilling in (self.skabelon.get("stillinger") or []))
+                self.stilling_felter[stilling] = felt
+                raekke.addWidget(felt)
+            raekke.addStretch()
+            form.addRow("Stillinger", raekke)
         form.addRow("", self.aktiv_input)
 
+        version = self.skabelon.get("version", 1)
         forklaring = QLabel(
-            "Opgaverne oprettes automatisk, når en medarbejder oprettes med denne "
-            "skabelon. Frist (dage) regnes fra sidste arbejdsdag – 0 = samme dag, "
-            "negativ = før. Udfyld Udstyr for ting, medarbejderen skal returnere; "
-            "de nævnes i rykkere."
+            f"Version {version}. Ændringer gemmes som version {version + 1} og påvirker kun "
+            "nye forløb – igangværende sager beholder deres egne opgaver. "
+            + ("Frist (dage) regnes fra ansættelsesdatoen. Milepælen styrer, hvornår "
+               "opgaven bliver aktiv. Ingen stillinger valgt = alle stillinger."
+               if self.onboarding else
+               "Frist (dage) regnes fra sidste arbejdsdag – 0 = samme dag, negativ = før. "
+               "Udfyld Udstyr for ting, medarbejderen skal returnere; de nævnes i rykkere.")
         )
         forklaring.setObjectName("hjaelpTekst")
         forklaring.setWordWrap(True)
 
-        self.tabel = QTableWidget(0, len(self.KOLONNER))
-        self.tabel.setHorizontalHeaderLabels(self.KOLONNER)
+        self.tabel = QTableWidget(0, len(self.kolonner))
+        self.tabel.setHorizontalHeaderLabels(self.kolonner)
         self.tabel.verticalHeader().setVisible(False)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.horizontalHeader().setStretchLastSection(True)
-        for kolonne, bredde in enumerate((260, 200, 150, 100)):
+        for kolonne, bredde in enumerate((230, 220, 170, 130, 90)):
             self.tabel.setColumnWidth(kolonne, bredde)
         for post in self.skabelon["opgaver"]:
             self._tilfoej_raekke(post)
@@ -428,40 +463,54 @@ class SagSkabelonDialog(QDialog):
         layout.addWidget(self.fejl_label)
         layout.addWidget(_gem_annuller(self))
 
+    def _milepael_felt(self, valgt):
+        felt = QComboBox()
+        felt.addItem("Ingen", "")
+        for noegle, navn in self.milepaele:
+            felt.addItem(navn, noegle)
+        felt.setCurrentIndex(max(felt.findData(valgt), 0))
+        return felt
+
     def _tilfoej_raekke(self, post, fokus=False, raekke=None):
         raekke = self.tabel.rowCount() if raekke is None else raekke
         self.tabel.insertRow(raekke)
-        vaerdier = (
-            post.get("navn", ""),
-            post.get("udstyr", ""),
-            post.get("ansvarlig", ""),
-            post.get("frist_dage", 0),
-        )
+        tredje = "" if self.onboarding else post.get("udstyr", "")
+        vaerdier = (post.get("navn", ""), post.get("beskrivelse", ""), tredje,
+                    post.get("ansvarlig", ""), post.get("frist_dage", 0))
         for kolonne, vaerdi in enumerate(vaerdier):
             self.tabel.setItem(raekke, kolonne, QTableWidgetItem(str(vaerdi)))
+        if self.onboarding:
+            self.tabel.setCellWidget(raekke, 2, self._milepael_felt(post.get("milepael", "")))
         obligatorisk = QTableWidgetItem()
         obligatorisk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled
                               | Qt.ItemFlag.ItemIsSelectable)
         obligatorisk.setCheckState(
             Qt.CheckState.Checked if post.get("obligatorisk", True) else Qt.CheckState.Unchecked
         )
-        self.tabel.setItem(raekke, 4, obligatorisk)
+        self.tabel.setItem(raekke, 5, obligatorisk)
         if fokus:
             self.tabel.setCurrentCell(raekke, 0)
             self.tabel.editItem(self.tabel.item(raekke, 0))
 
     def _raekke_data(self, raekke):
-        tekst = [
-            (self.tabel.item(raekke, k).text() if self.tabel.item(raekke, k) else "").strip()
-            for k in range(4)
-        ]
-        return {
-            "navn": tekst[0],
-            "udstyr": tekst[1],
-            "ansvarlig": tekst[2],
-            "frist_dage": tekst[3],
-            "obligatorisk": self.tabel.item(raekke, 4).checkState() == Qt.CheckState.Checked,
+        def tekst(k):
+            item = self.tabel.item(raekke, k)
+            return item.text().strip() if item else ""
+
+        post = {
+            "navn": tekst(0),
+            "beskrivelse": tekst(1),
+            "ansvarlig": tekst(3),
+            "frist_dage": tekst(4),
+            "obligatorisk": self.tabel.item(raekke, 5).checkState() == Qt.CheckState.Checked,
         }
+        if self.onboarding:
+            post["milepael"] = self.tabel.cellWidget(raekke, 2).currentData() or ""
+            post["udstyr"] = ""
+        else:
+            post["udstyr"] = tekst(2)
+            post["milepael"] = ""
+        return post
 
     def _fjern(self):
         raekke = self.tabel.currentRow()
@@ -498,6 +547,8 @@ class SagSkabelonDialog(QDialog):
         if fejl:
             return
         self.skabelon = dict(
-            self.skabelon, navn=navn, aktiv=self.aktiv_input.isChecked(), opgaver=opgaver
+            self.skabelon, navn=navn, aktiv=self.aktiv_input.isChecked(), opgaver=opgaver,
+            beskrivelse=self.beskrivelse_input.text().strip(),
+            stillinger=[s for s, felt in self.stilling_felter.items() if felt.isChecked()],
         )
         super().accept()

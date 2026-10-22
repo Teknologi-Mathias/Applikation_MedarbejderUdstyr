@@ -1,6 +1,6 @@
 """IN-BASE – interne processer, samlet ét sted."""
 
-VERSION = "V0.6"
+VERSION = "V0.7"
 
 APP_NAVN = "IN-BASE"
 APP_SLOGAN = "Interne processer, samlet ét sted."

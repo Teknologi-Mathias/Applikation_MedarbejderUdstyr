@@ -1,46 +1,58 @@
 {
   "file_hashes": {
     ".claude/CLAUDE.md": "1b120062a2c8a0416f3afd563130e46e70b36a0e84e7ea84b702d99480617281",
-    "README.md": "670e83f6f011591a86e5d95839afe13e4f7e625d6c7242fdb7d2ff8d11fd49f7",
-    "app/__init__.py": "b45befb96dbd07b529baae2042ff85c1703d8e6a4cd0a5f5f444529492b00f64",
-    "app/alarmer.py": "33e55a0a9e0305173721e846a8ff8bd07a13fb6d7d9d9c1f11e2b2f939569e12",
-    "app/data_manager.py": "b3657967ca835650f148de4b7f4a1e28545b48b85f44d31a69ae757e8935b16d",
-    "app/medarbejder.py": "ff061d91c1d6e188615b768f500e801d86ca56e7d1510ab271dd040f1134cc1f",
-    "app/opgave.py": "0a8c67657bb5c09d06742579919e2bad8a41c08afc5d98be7033717bb7691928",
-    "app/skabeloner.py": "9f5d6a842cce600158f412a5474c65b460c3d8065383f430d5b8ceb66cffde9b",
-    "app/stier.py": "2384daa0d714f6a2a7bb4a5c41a51f25508ad0a0d0a2b415bf195191bfd482f8",
+    "README.md": "89b7334311675dce4dc392196b3f40b9643e4751be24c602a285e3ac7b23e31f",
+    "app/__init__.py": "ae5470233913c6ed3139fb5b9888ef07a6dffeedd0eae8db69f59de16edea7d0",
+    "app/alarmer.py": "870730700e67cc1ebde41e308acb56c4e413ef920eabb5c16d2b7f0a0052837d",
+    "app/brugere.py": "65ca9fa716c7e7a69aeae4d4dff46c7ea00cfd2dd4375c5e9f35cb55975f00f8",
+    "app/data_manager.py": "1c7f81a7e76f2625da43dab90d278cf948a4fb9debda26d8dc8af702f8fb9b15",
+    "app/datasikkerhed.py": "ccc5fd6d53d5a2a7fc33bcbdf084f04f9f9a81c76f438e8c87ba18e07f195ed3",
+    "app/historik.py": "af3511c98dea7e25c15d94b075371a544d558a0049417b9f872bdeb696e0046b",
+    "app/indstillinger.py": "90a3492963b47a1fb03a74322c7b361a57550a9e431d7230c244172b89db0e58",
+    "app/medarbejder.py": "8b7917c07698407ecdfe6ce5113ee7fd88d63f24a1bd81f54828ffdfb78162e0",
+    "app/opgave.py": "96a5b50108e77a51bcbc7d6d5b1dbc3ce5682f5c58225b3e83a831e88f5d92dc",
+    "app/rykker.py": "e77b9ce1fab6edf912684261aa536b59a413373ad28175caabc34a93f53881bd",
+    "app/session.py": "d2139bf34c1e197d36e2a2e7b2dd0c438a97b78e83c9aae3e8ba32896c309617",
+    "app/skabeloner.py": "ac9f66a6a04aa5d383579c59e0a4df738c3cfb0e515dea1fac6983b17aaa2b13",
+    "app/stier.py": "490a1ea326d514d8d7e53f0721e4cc817cdfbfd991febe26d8a70885362a229e",
     "app/ui/__init__.py": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    "app/ui/dashboard_side.py": "ead50d7ec03995fb18746d1a326f29667678248009dbab3e873eb398228c94ff",
-    "app/ui/diagrammer.py": "94ba01a7faaf1144d396cee764a2487ed80e3ae6cb4835b8274b92e97ed48242",
-    "app/ui/hjaelpere.py": "09eb67911145c710ef5e4f15a9d0a9908b3f6dda78fca0261d2f8cd51893eb54",
-    "app/ui/hovedvindue.py": "bb439dccb4ef74e39e6bd5bd95528756d4547fc3b465490eb88f8e5321ec4ba1",
-    "app/ui/medarbejder_dialog.py": "84ec74b465482a1e38c63eb646e459c9559741d5d2ce5cc44b24e1e999d9fefe",
-    "app/ui/medarbejder_side.py": "a26e29a933a0d254a16a93ab4b7d3a926bcb24d601b9e178a02cde0af9308828",
-    "app/ui/notifikationer.py": "d9d940dc064b61bd59b7e433b5a902c957c5b5d211fab090b02a0e33c9a628d7",
-    "app/ui/opgave_dialog.py": "344689e7fa18992f97c02221b869ddc7234d61f2a68a8405a11ebe680c9c19e5",
-    "app/ui/sag_dialog.py": "ff3db9fb12e10dff01bf4decd0c3c66b25b8655c9943a1ac0abf4eae30cc7fdd",
-    "app/ui/theme.py": "cc068584751fdbd268981ea5677cc78ced47ba42b3cb98a0dc76a288decdeb7f",
+    "app/ui/bruger_side.py": "fd74ca9ea8c1460f7c995999332845f1375e4b6a64f4a5dc5e9ee55c198170ea",
+    "app/ui/dashboard_side.py": "1e9a343332f4a93835637c8e240fc2e4c2c317d9970f13d90ceaf34ec9bdb838",
+    "app/ui/data_side.py": "d0032b91f386f14547bd2987de755520e741f2d62eaf619f4eda584f4696be87",
+    "app/ui/diagrammer.py": "a2abf16aaf278519562dea2960617bd865bb790f1c42f9006aea531c62893a47",
+    "app/ui/hjaelpere.py": "9bb7f18605ea6fc66cef83a919605fb3f9cb65ec88e8d28d2664389a91e7441b",
+    "app/ui/hovedvindue.py": "6a1fa565fd7c6247cd7911fa2ee57bf7221d27a45941268cb3c3fbba80b8cbbf",
+    "app/ui/login_dialog.py": "5f3b572db80af8a7b251a32a872e0b6daa59a2d09e94bb754ca88b44d90a4349",
+    "app/ui/medarbejder_dialog.py": "64c41120ec82eedb11a7f57a4e584758cea4100e21ac0429e85ca23924098bdf",
+    "app/ui/medarbejder_side.py": "25a4dfa63dc02c4408cc8acdb3cb509274a6868f3dfc5de766f3d8d121afdd0d",
+    "app/ui/notifikationer.py": "2cfa170c28f547e508a0d2bb39daef5c12aa8f5d5e608a2a8767f6356e5647b0",
+    "app/ui/opgave_dialog.py": "30a7a44c7887ada49805a13f2b155381e62af5b9bcd61e33ce748dfdd60f8ed3",
+    "app/ui/rykker_dialog.py": "7f58914720027320b16265f444436e30e9259fb3dbb38a404c9617ebae5a05ce",
+    "app/ui/sag_dialog.py": "601b42b1621bd2bbc7caa7b391667966d8987e4ffce3ce0a9da8a80e00338c6a",
+    "app/ui/skabelon_dialoger.py": "0802bcd7bdf97d9c8d971d5e9ce34ed2439d980746752bafc41d2a9588a1cf6d",
+    "app/ui/skabelon_side.py": "fdb9a011433889292152d551d802f2b5157a85edda75fceb9f17642c41976aa2",
+    "app/ui/theme.py": "4ab6bf423a82675aaef9d29e29e08afafae9aa3c7dbc292f8cb62f620600d66f",
     "app/ui/widgets.py": "45e8d2b23caaa3641a228a0db09a24180840a4f8c36dcefcbd7406f914ce8230",
-    "main.py": "b9ad707430bd929b567cc14fc4b7cbb771bd777c1ea1753167559ace1b8fa0a1"
+    "main.py": "b46f0f1b3a579ee2a6a8a9f221eb5d576e8d79de5629b75d02e0f292a90fb9b2"
   },
-  "indexed_at_commit": "0ceb31e675eff72274fcbe5cdeb9b8fa6e9193b9",
-  "indexed_at_timestamp": "2026-10-21T20:16:32.831947300+00:00",
+  "indexed_at_commit": "a80386f53766209c73eabf66e7482ebc4624cd46",
+  "indexed_at_timestamp": "2026-10-22T06:49:20.190098400+00:00",
   "languages": {
     "markdown": {
       "calls": 0,
-      "nodes": 12
+      "nodes": 15
     },
     "python": {
-      "calls": 243,
-      "nodes": 167
+      "calls": 575,
+      "nodes": 333
     }
   },
   "parser_version": "3.3.2",
   "schema_version": 3,
   "stats": {
-    "total_edges": 412,
-    "total_files": 22,
-    "total_nodes": 179
+    "total_edges": 867,
+    "total_files": 34,
+    "total_nodes": 348
   },
   "vexp_version": "3.3.7"
 }

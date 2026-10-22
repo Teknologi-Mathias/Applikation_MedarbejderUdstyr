@@ -14,3 +14,12 @@ vexp-hint.sh
 vexp-restore.sh
 .vexp
 .venv
+# Lokal mappe pr. pc (offline-kopi, logs, præferencer) og hemmeligheder
+Lokal/
+.env
+.env.example
+
+# Build og migreringsoutput
+build/
+dist/
+migrering_ud/

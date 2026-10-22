@@ -17,7 +17,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app import brugere, session
+from app import session
+from app.repositories.fejl import OfflineFejl, ValideringsFejl
+from app.services.auth_service import ROLLE_BRUGER, ROLLER
+from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, vis_dato
 
 BETA_TEKST = (
@@ -37,8 +40,9 @@ def _beta_label():
 class KodeDialog(QDialog):
     """Opret bruger (ny=True) eller skift adgangskode for en eksisterende bruger."""
 
-    def __init__(self, parent, ny=True, brugernavn=""):
+    def __init__(self, parent, auth, ny=True, brugernavn=""):
         super().__init__(parent)
+        self.auth = auth
         self.ny = ny
         self.setWindowTitle("Opret bruger" if ny else f"Skift adgangskode: {brugernavn}")
         self.setMinimumWidth(480)
@@ -46,8 +50,8 @@ class KodeDialog(QDialog):
         self.brugernavn_input = QLineEdit(brugernavn)
         self.navn_input = QLineEdit()
         self.rolle_input = QComboBox()
-        self.rolle_input.addItems(brugere.ROLLER)
-        self.rolle_input.setCurrentText(brugere.ROLLE_BRUGER)
+        self.rolle_input.addItems(ROLLER)
+        self.rolle_input.setCurrentText(ROLLE_BRUGER)
         self.kode_input = QLineEdit()
         self.kode_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.gentag_input = QLineEdit()
@@ -107,25 +111,26 @@ class KodeDialog(QDialog):
             return
         try:
             if self.ny:
-                brugere.opret(
+                self.auth.opret(
                     self.brugernavn_input.text(),
                     self.navn_input.text(),
                     self.rolle_input.currentText(),
                     self.kode_input.text(),
                 )
             else:
-                brugere.skift_kode(self.brugernavn_input.text(), self.kode_input.text())
-        except brugere.BrugerFejl as fejl:
+                self.auth.nulstil_kode(self.brugernavn_input.text(), self.kode_input.text())
+        except (ValideringsFejl, OfflineFejl) as fejl:
             self.fejl_label.setText(str(fejl))
             return
         super().accept()
 
 
 class BrugerSide(QWidget):
-    def __init__(self):
+    def __init__(self, auth):
         super().__init__()
+        self.auth = auth
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setContentsMargins(0, 12, 0, 0)
         layout.setSpacing(16)
 
         hoved, _ = lav_sidehoved(
@@ -166,7 +171,9 @@ class BrugerSide(QWidget):
         layout.addWidget(kort, 1)
 
     def opdater(self):
-        alle = [brugere.offentlig(b) for b in brugere.hent()]
+        alle = udfoer(self, self.auth.brugere)
+        if alle is FEJL:
+            return
         self.tabel.setRowCount(len(alle))
         for raekke, b in enumerate(alle):
             mig = b["brugernavn"] == session.brugernavn()
@@ -189,12 +196,12 @@ class BrugerSide(QWidget):
         return self.tabel.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
 
     def opret(self):
-        if KodeDialog(self, ny=True).exec():
+        if KodeDialog(self, self.auth, ny=True).exec():
             self.opdater()
 
     def skift_kode(self):
         brugernavn = self._valgt()
-        if brugernavn and KodeDialog(self, ny=False, brugernavn=brugernavn).exec():
+        if brugernavn and KodeDialog(self, self.auth, ny=False, brugernavn=brugernavn).exec():
             QMessageBox.information(self, "Adgangskode", f"Koden for {brugernavn} er skiftet.")
 
     def slet(self):
@@ -210,9 +217,5 @@ class BrugerSide(QWidget):
         )
         if svar != QMessageBox.StandardButton.Yes:
             return
-        try:
-            brugere.slet(brugernavn, session.brugernavn())
-        except brugere.BrugerFejl as fejl:
-            QMessageBox.warning(self, "Slet bruger", str(fejl))
-            return
+        udfoer(self, self.auth.slet, brugernavn, session.brugernavn())
         self.opdater()

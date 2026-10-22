@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app import skabeloner
-from app.rykker import Rykker
+from app.domain import skabelon as skabeloner
+from app.domain.rykker import Rykker
 
 
 def mailto_url(modtager, emne, broedtekst):

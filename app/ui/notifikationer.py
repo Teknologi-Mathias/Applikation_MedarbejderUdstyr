@@ -1,24 +1,28 @@
-"""Ikon i proceslinjen og Windows-notifikationer om forsinkede opgaver.
+"""Ikon i proceslinjen og Windows-notifikationer.
+
+Hvad der skal mindes om, afgøres af PaamindelsesService (gentagelser,
+regler). Denne klasse viser kun beskederne – og kun hvis brugeren har
+Windows-notifikationer slået til under Indstillinger. Action Center viser
+de samme ting uanset denne indstilling.
 
 Virker kun, mens programmet kører. Lukkes vinduet, kører programmet videre
 i baggrunden (ikonet ved uret), indtil man vælger "Afslut".
 """
-from datetime import date
-
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from app import APP_NAVN, alarmer, skabeloner as sk
+from app import APP_NAVN
 
 
 class Notifikationer(QObject):
     vis_vindue = Signal()
     afslut = Signal()
+    aabn_sag = Signal(str, str, str)   # (proces, sag_id, opgave_id) ved klik på besked
 
     def __init__(self, ikon, parent=None):
         super().__init__(parent)
-        # (opgave-id, dato) der allerede er givet besked om – max én gang pr. dag.
-        self._givet_besked = set()
+        self.slaaet_til = True
+        self._sidste_sag = None
 
         self.tilgaengelig = QSystemTrayIcon.isSystemTrayAvailable()
         self.tray = QSystemTrayIcon(ikon, self)
@@ -32,7 +36,7 @@ class Notifikationer(QObject):
         self._menu = menu   # holdes i live
 
         self.tray.activated.connect(self._ikon_aktiveret)
-        self.tray.messageClicked.connect(self.vis_vindue.emit)
+        self.tray.messageClicked.connect(self._besked_klikket)
         if self.tilgaengelig:
             self.tray.show()
 
@@ -43,34 +47,20 @@ class Notifikationer(QObject):
         ):
             self.vis_vindue.emit()
 
-    def vis_besked(self, titel, tekst):
-        if self.tilgaengelig and QSystemTrayIcon.supportsMessages():
-            self.tray.showMessage(titel, tekst, QSystemTrayIcon.MessageIcon.Information, 10_000)
+    def _besked_klikket(self):
+        self.vis_vindue.emit()
+        if self._sidste_sag:
+            self.aabn_sag.emit(*self._sidste_sag)
 
-    def tjek(self, medarbejdere, skabeloner):
-        """Viser påmindelser ud fra de aktive påmindelsesskabeloner.
+    def vis_besked(self, titel, tekst, sag=None) -> bool:
+        """Viser en Windows-notifikation, hvis det er slået til. Returnerer om den blev vist."""
+        if not (self.slaaet_til and self.tilgaengelig and QSystemTrayIcon.supportsMessages()):
+            return False
+        self._sidste_sag = sag
+        # Logoet vises i notifikationen (i stedet for Windows' standardikon).
+        self.tray.showMessage(titel, tekst, self.tray.icon(), 10_000)
+        return True
 
-        Hver påmindelse vises højst én gang pr. dag. Rammer en skabelon mere end
-        3 ting på én gang, samles de i én besked.
-        """
-        i_dag = date.today()
-        nye = {}
-        for skabelon, noegle, vaerdier in alarmer.paamindelser(skabeloner, medarbejdere, i_dag):
-            if (noegle, i_dag) in self._givet_besked:
-                continue
-            self._givet_besked.add((noegle, i_dag))
-            nye.setdefault(skabelon["id"], (skabelon, []))[1].append(vaerdier)
-
-        for skabelon, alle_vaerdier in nye.values():
-            # Manglende værdier vises som "–" i stedet for at blokere påmindelsen.
-            vaerdier = {k: "–" for k in sk.PAAMINDELSE_VARIABLER} | alle_vaerdier[0]
-            titel, _ = sk.flet(skabelon["titel"], vaerdier, sk.PAAMINDELSE_VARIABLER)
-            tekst, _ = sk.flet(skabelon["tekst"], vaerdier, sk.PAAMINDELSE_VARIABLER)
-            if len(alle_vaerdier) > 3:
-                titel = f"{skabelon['navn']}: {len(alle_vaerdier)} sager"
-                tekst = ", ".join(v["navn"] for v in alle_vaerdier[:5]) + (
-                    " m.fl." if len(alle_vaerdier) > 5 else ""
-                )
-            elif len(alle_vaerdier) > 1:
-                tekst += f"\n(+ {len(alle_vaerdier) - 1} mere)"
-            self.vis_besked(titel, tekst)
+    def vis_paamindelser(self, paamindelser) -> None:
+        for p in paamindelser:
+            self.vis_besked(p.titel, p.tekst, (p.modul, p.sag_id, ""))

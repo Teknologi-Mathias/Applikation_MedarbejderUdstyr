@@ -1,6 +1,6 @@
-"""En opgave i en afviklingssag, fx "Modtag telefon og SIM-kort"."""
+"""En opgave i en sag (onboarding eller offboarding), fx "Modtag telefon og SIM-kort"."""
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 
 # Opgavenavne fra V0.5.x -> udstyr. Bruges kun til ældre data uden "udstyr"-felt.
@@ -51,6 +51,9 @@ class Opgave:
         naeste_handling="",
         id=None,
         udstyr="",
+        beskrivelse="",
+        milepael="",
+        afsluttet="",
     ):
         # Fast id, så Action Center kan pege direkte på opgaven.
         self.id = str(id) if id else uuid.uuid4().hex[:12]
@@ -64,6 +67,11 @@ class Opgave:
         # Det udstyr medarbejderen skal returnere, fx "Telefon og SIM-kort".
         # Tom = intern opgave (fx "Er lukket i NAV?"), som ikke nævnes i rykkere.
         self.udstyr = str(udstyr or "").strip()
+        self.beskrivelse = str(beskrivelse or "").strip()
+        # Nøgle for den milepæl, opgaven hører til (fx "kontrakt"); tom = ingen.
+        self.milepael = str(milepael or "").strip()
+        # Tidspunkt hvor opgaven blev udført/undtaget – bruges til rapporter.
+        self.afsluttet_tid = str(afsluttet or "")
 
     @classmethod
     def normaliser_status(cls, status):
@@ -75,6 +83,15 @@ class Opgave:
     @property
     def afsluttet(self):
         return self.status in self.AFSLUTTEDE
+
+    def saet_status(self, status):
+        """Skifter status og registrerer, hvornår opgaven blev afsluttet."""
+        status = self.normaliser_status(status)
+        if status in self.AFSLUTTEDE and not self.afsluttet:
+            self.afsluttet_tid = datetime.now().isoformat(timespec="seconds")
+        elif status not in self.AFSLUTTEDE:
+            self.afsluttet_tid = ""
+        self.status = status
 
     def frist_dato(self):
         return laes_iso_dato(self.frist)
@@ -104,6 +121,9 @@ class Opgave:
             "begrundelse": self.begrundelse,
             "naeste_handling": self.naeste_handling,
             "udstyr": self.udstyr,
+            "beskrivelse": self.beskrivelse,
+            "milepael": self.milepael,
+            "afsluttet": self.afsluttet_tid,
         }
 
     @classmethod
@@ -118,4 +138,7 @@ class Opgave:
             data.get("naeste_handling", ""),
             data.get("id"),
             data["udstyr"] if "udstyr" in data else udled_udstyr(data.get("navn", "")),
+            data.get("beskrivelse", ""),
+            data.get("milepael", ""),
+            data.get("afsluttet", ""),
         )

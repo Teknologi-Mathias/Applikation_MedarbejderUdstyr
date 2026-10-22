@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.medarbejder import Medarbejder
-from app.skabeloner import gyldig_email
+from app.domain.offboarding import Medarbejder
+from app.domain.skabelon import gyldig_email
 from app.ui.hjaelpere import laes_dato
 
 

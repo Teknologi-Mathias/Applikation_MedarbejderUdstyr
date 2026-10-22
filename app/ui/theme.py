@@ -1,76 +1,131 @@
-"""Farver, stylesheet og palette for hele programmet.
+"""Farver, stylesheet og palette for hele programmet – det centrale temasystem.
 
-Mørkt, blødt lilla tema bygget op om #341539. Alle farver er samlet i FARVER
-og bruges som @TOKENS i stylesheetet – ret dem her, ikke rundt om i koden.
+To temaer: "lilla" (standard, mørkt blødt lilla bygget op om #341539) og
+"lys". Alle farver ligger i TEMAER og bruges som @TOKENS i stylesheetet.
+Statusfarver er semantiske toner (rød/gul/grøn/blå/intet/grå), så nye
+statusser kun skal have en tone – ikke en farve pr. tema.
+
+Nyt tema: tilføj en palette i TEMAER med de samme nøgler. Widgets må ikke
+hardcode farver; brug FARVER, tonerne eller objectName + stylesheet.
+
+FARVER, STATUS_STIL, OPGAVE_STIL og ALARM_STIL ændres på stedet ved
+temaskift, så diagrammer og tabeller følger med uden genstart.
 """
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-from app import alarmer
-from app.medarbejder import Medarbejder
-from app.opgave import Opgave
-from app.stier import ASSETS_MAPPE
+from app.domain.offboarding import Medarbejder
+from app.domain.onboarding import OnboardingForloeb as OB
+from app.domain.opgave import Opgave
+from app.infrastructure.stier import ASSETS_MAPPE
+from app.services import action_center
 
-CHEVRON = (ASSETS_MAPPE / "chevron_lys.svg").as_posix()
-CHEVRON_OP = (ASSETS_MAPPE / "chevron_op_lys.svg").as_posix()
-
-FARVER = {
-    "bg": "#1E0D22",            # baggrund bag kort
-    "sidebar": "#160A19",
-    "sidebar_hover": "#2A1430",
-    "sidebar_tekst": "#D8C6DD",
-    "surface": "#341539",       # kort, tabeller, dialoger
-    "surface_2": "#3D1B43",     # felter og skiftende tabelrækker
-    "hover": "#4A2652",
-    "border": "#52305A",
-    "border_strong": "#6B4373",
-    "text": "#F4EAF6",
-    "muted": "#BBA4C1",
-    "dim": "#8C7592",           # deaktiveret tekst, weekender
-    "primary": "#9B4FB3",
-    "primary_hover": "#AE62C6",
-    "primary_soft": "#4F2659",  # markering og infobokse
-    "primary_tekst": "#E9D5F0",
-    "danger_bg": "#4D1F2E",
-    "danger_hover": "#5C2537",
-    "danger_border": "#6E2A3E",
-    "danger_tekst": "#FFB3BE",
-    "groen": "#5FD4A4",
-    "soejle": "#7B5A8A",        # søjler i diagrammet (i dag = primary)
-}
-
-# Farver pr. status: "farve" til diagrammer, "bg"/"tekst" til piller.
-STATUS_STIL = {
-    Medarbejder.STATUS_AFVENTER: {
-        "farve": "#F07A8A", "bg": "#4D1F2E", "tekst": "#FFB3BE",
+TEMAER = {
+    "lilla": {
+        "farver": {
+            "bg": "#1E0D22", "sidebar": "#160A19", "sidebar_hover": "#2A1430",
+            "sidebar_tekst": "#D8C6DD", "sidebar_tekst_staerk": "#FFFFFF",
+            "surface": "#341539", "surface_2": "#3D1B43", "hover": "#4A2652",
+            "border": "#52305A", "border_strong": "#6B4373",
+            "text": "#F4EAF6", "muted": "#BBA4C1", "dim": "#8C7592",
+            "primary": "#9B4FB3", "primary_hover": "#AE62C6",
+            "primary_soft": "#4F2659", "primary_tekst": "#E9D5F0",
+            "danger_bg": "#4D1F2E", "danger_hover": "#5C2537",
+            "danger_border": "#6E2A3E", "danger_tekst": "#FFB3BE",
+            "groen": "#5FD4A4", "groen_bg": "#1D4237", "groen_tekst": "#9DEBC8",
+            "soejle": "#7B5A8A", "skygge": "#6E000000",
+        },
+        "toner": {
+            "roed": {"farve": "#F07A8A", "bg": "#4D1F2E", "tekst": "#FFB3BE"},
+            "gul": {"farve": "#F2B85B", "bg": "#4A3420", "tekst": "#FFD89A"},
+            "groen": {"farve": "#5FD4A4", "bg": "#1D4237", "tekst": "#9DEBC8"},
+            "blaa": {"farve": "#9B8CF5", "bg": "#352D63", "tekst": "#C9C0FF"},
+            "intet": {"farve": "#9C8AA3", "bg": "#46304D", "tekst": "#D4C4D9"},
+            "graa": {"farve": "#7E6E86", "bg": "#3B2C42", "tekst": "#B9A9C0"},
+        },
+        "chevron": "chevron_lys.svg", "chevron_op": "chevron_op_lys.svg",
     },
-    Medarbejder.STATUS_DELVIST: {
-        "farve": "#F2B85B", "bg": "#4A3420", "tekst": "#FFD89A",
+    "lys": {
+        "farver": {
+            "bg": "#F4F6FA", "sidebar": "#0F172A", "sidebar_hover": "#1E293B",
+            "sidebar_tekst": "#CBD5E1", "sidebar_tekst_staerk": "#FFFFFF",
+            "surface": "#FFFFFF", "surface_2": "#F8FAFC", "hover": "#EEF2F7",
+            "border": "#E2E8F0", "border_strong": "#CBD5E1",
+            "text": "#0F172A", "muted": "#64748B", "dim": "#94A3B8",
+            "primary": "#4F46E5", "primary_hover": "#4338CA",
+            "primary_soft": "#EEF2FF", "primary_tekst": "#3730A3",
+            "danger_bg": "#FEF2F2", "danger_hover": "#FEE2E2",
+            "danger_border": "#FECACA", "danger_tekst": "#B91C1C",
+            "groen": "#10B981", "groen_bg": "#D1FAE5", "groen_tekst": "#047857",
+            "soejle": "#A5B4FC", "skygge": "#160F172A",
+        },
+        "toner": {
+            "roed": {"farve": "#EF4444", "bg": "#FEE2E2", "tekst": "#B91C1C"},
+            "gul": {"farve": "#F59E0B", "bg": "#FEF3C7", "tekst": "#B45309"},
+            "groen": {"farve": "#10B981", "bg": "#D1FAE5", "tekst": "#047857"},
+            "blaa": {"farve": "#6366F1", "bg": "#E0E7FF", "tekst": "#4338CA"},
+            "intet": {"farve": "#94A3B8", "bg": "#F1F5F9", "tekst": "#64748B"},
+            "graa": {"farve": "#64748B", "bg": "#E2E8F0", "tekst": "#475569"},
+        },
+        "chevron": "chevron.svg", "chevron_op": "chevron_op.svg",
     },
-    Medarbejder.STATUS_AFVIKLET: {
-        "farve": "#5FD4A4", "bg": "#1D4237", "tekst": "#9DEBC8",
-    },
+}
+STANDARD_TEMA = "lys"
+
+# Status -> tone. Nye statusser tilføjes her.
+_STATUS_TONE = {
+    Medarbejder.STATUS_AFVENTER: "roed",
+    Medarbejder.STATUS_DELVIST: "gul",
+    Medarbejder.STATUS_AFVIKLET: "groen",
+    OB.STATUS_KANDIDAT: "blaa",
+    OB.STATUS_KONTRAKT: "gul",
+    OB.STATUS_OPLAERING: "gul",
+    OB.STATUS_JOBS: "blaa",
+    OB.STATUS_AKTIV: "groen",
+    OB.STATUS_ANNULLERET: "graa",
+}
+_OPGAVE_TONE = {
+    Opgave.IKKE_STARTET: "intet", Opgave.I_GANG: "blaa", Opgave.AFVENTER: "gul",
+    Opgave.UDFOERT: "groen", Opgave.UNDTAGET: "graa",
+}
+_ALARM_TONE = {
+    action_center.KRITISK: "roed", action_center.ADVARSEL: "gul",
+    action_center.PLANLAGT: "blaa",
 }
 
-INTET_STIL = {"farve": "#9C8AA3", "bg": "#46304D", "tekst": "#D4C4D9"}
-_ROED = STATUS_STIL[Medarbejder.STATUS_AFVENTER]
-_GUL = STATUS_STIL[Medarbejder.STATUS_DELVIST]
-_GROEN = STATUS_STIL[Medarbejder.STATUS_AFVIKLET]
-_BLAA = {"farve": "#9B8CF5", "bg": "#352D63", "tekst": "#C9C0FF"}
+# Aktive værdier (ændres på stedet ved temaskift).
+FARVER: dict = {}
+TONER: dict = {}
+STATUS_STIL: dict = {}
+OPGAVE_STIL: dict = {}
+ALARM_STIL: dict = {}
+INTET_STIL: dict = {}
+aktivt_tema = STANDARD_TEMA
 
-OPGAVE_STIL = {
-    Opgave.IKKE_STARTET: INTET_STIL,
-    Opgave.I_GANG: _BLAA,
-    Opgave.AFVENTER: _GUL,
-    Opgave.UDFOERT: _GROEN,
-    Opgave.UNDTAGET: {"farve": "#7E6E86", "bg": "#3B2C42", "tekst": "#B9A9C0"},
-}
 
-ALARM_STIL = {
-    alarmer.KRITISK: _ROED,
-    alarmer.ADVARSEL: _GUL,
-    alarmer.PLANLAGT: _BLAA,
-}
+def _saet_palette(navn: str) -> None:
+    global aktivt_tema
+    tema = TEMAER.get(navn, TEMAER[STANDARD_TEMA])
+    aktivt_tema = navn if navn in TEMAER else STANDARD_TEMA
+    FARVER.clear()
+    FARVER.update(tema["farver"])
+    FARVER["chevron"] = (ASSETS_MAPPE / tema["chevron"]).as_posix()
+    FARVER["chevron_op"] = (ASSETS_MAPPE / tema["chevron_op"]).as_posix()
+    TONER.clear()
+    TONER.update(tema["toner"])
+    for maal, kilde in ((STATUS_STIL, _STATUS_TONE), (OPGAVE_STIL, _OPGAVE_TONE),
+                        (ALARM_STIL, _ALARM_TONE)):
+        maal.clear()
+        maal.update({noegle: TONER[tone] for noegle, tone in kilde.items()})
+    INTET_STIL.clear()
+    INTET_STIL.update(TONER["intet"])
+
+
+_saet_palette(STANDARD_TEMA)
+
+
+def status_stil(status: str) -> dict:
+    return STATUS_STIL.get(status, INTET_STIL)
 
 
 def opgaver_stil(afsluttede, total, forsinket):
@@ -78,10 +133,10 @@ def opgaver_stil(afsluttede, total, forsinket):
     if total == 0:
         return INTET_STIL
     if forsinket:
-        return _ROED
+        return TONER["roed"]
     if afsluttede == total:
-        return _GROEN
-    return _GUL
+        return TONER["groen"]
+    return TONER["gul"]
 
 
 _QSS = """
@@ -92,7 +147,7 @@ QScrollArea { background: transparent; border: none; }
 QLabel { background: transparent; }
 
 QToolTip {
-    background: @SIDEBAR; color: @TEXT; border: 1px solid @BORDER_STRONG;
+    background: @SIDEBAR; color: @SIDEBAR_TEKST_STAERK; border: 1px solid @BORDER_STRONG;
     padding: 6px 8px; border-radius: 6px;
 }
 
@@ -281,13 +336,44 @@ QScrollBar::handle:horizontal {
 QScrollBar::handle:horizontal:hover { background: @DIM; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+/* ---------- Navigation med undersider ---------- */
+QPushButton[navSektion="true"] {
+    text-align: left; padding: 9px 12px; border: none; border-radius: 8px;
+    color: @DIM; background: transparent; font-size: 11px; font-weight: 800;
+    letter-spacing: 1px;
+}
+QPushButton[navSektion="true"]:hover { color: @SIDEBAR_TEKST; background: @SIDEBAR_HOVER; }
+QPushButton[navUnder="true"] {
+    text-align: left; padding: 7px 14px 7px 26px; border: none;
+    border-radius: 8px; color: @SIDEBAR_TEKST; background: transparent;
+    font-weight: 500; font-size: 13px;
+}
+QPushButton[navUnder="true"]:hover { background: @SIDEBAR_HOVER; color: @SIDEBAR_TEKST_STAERK; }
+QPushButton[navUnder="true"]:checked { background: @PRIMARY; color: white; font-weight: 600; }
+#antalBadge {
+    background: @PRIMARY_SOFT; color: @PRIMARY_TEKST; border-radius: 10px;
+    font-weight: 700; font-size: 12px; padding: 3px 8px;
+}
+#lagringOnline {
+    background: @GROEN_BG; color: @GROEN_TEKST; border-radius: 8px;
+    padding: 4px 8px; font-size: 11px; font-weight: 700;
+}
+#lagringOffline {
+    background: @DANGER_BG; color: @DANGER_TEKST; border-radius: 8px;
+    padding: 4px 8px; font-size: 11px; font-weight: 700;
+}
+#tomTekst { color: @MUTED; padding: 44px 0; }
+#loginTitel { color: @TEXT; font-size: 30px; font-weight: 800; letter-spacing: 1px; }
+#raekkeTitel { font-weight: 600; }
+#raekkeUnder { color: @MUTED; font-size: 12px; }
+#laastOpgave { color: @DIM; font-size: 12px; font-style: italic; }
+#milepaelTitel { color: @MUTED; font-size: 12px; font-weight: 800; letter-spacing: 1px; padding-top: 6px; }
 """
 
 
 def byg_stylesheet():
     tokens = {f"@{navn.upper()}": vaerdi for navn, vaerdi in FARVER.items()}
-    tokens["@CHEVRON"] = CHEVRON
-    tokens["@CHEVRON_OP"] = CHEVRON_OP
     # Længste nøgler først, så fx @PRIMARY_HOVER ikke rammes af @PRIMARY.
     stylesheet = _QSS
     for token in sorted(tokens, key=len, reverse=True):
@@ -295,8 +381,9 @@ def byg_stylesheet():
     return stylesheet
 
 
-def anvend_tema(app: QApplication):
-    """Fusion-stilen + mørk palette, så udseendet er ens uanset systemtema."""
+def anvend_tema(app: QApplication, navn: str = STANDARD_TEMA) -> None:
+    """Fusion-stilen + valgt palette, så udseendet er ens uanset systemtema."""
+    _saet_palette(navn)
     app.setStyle("Fusion")
 
     font = QFont()
@@ -305,22 +392,20 @@ def anvend_tema(app: QApplication):
     app.setFont(font)
 
     palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(FARVER["bg"]))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(FARVER["text"]))
-    palette.setColor(QPalette.ColorRole.Base, QColor(FARVER["surface_2"]))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(FARVER["surface"]))
-    palette.setColor(QPalette.ColorRole.Text, QColor(FARVER["text"]))
-    palette.setColor(QPalette.ColorRole.Button, QColor(FARVER["surface_2"]))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor(FARVER["text"]))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(FARVER["primary"]))
+    roller = {
+        QPalette.ColorRole.Window: "bg", QPalette.ColorRole.WindowText: "text",
+        QPalette.ColorRole.Base: "surface_2", QPalette.ColorRole.AlternateBase: "surface",
+        QPalette.ColorRole.Text: "text", QPalette.ColorRole.Button: "surface_2",
+        QPalette.ColorRole.ButtonText: "text", QPalette.ColorRole.Highlight: "primary",
+        QPalette.ColorRole.PlaceholderText: "dim", QPalette.ColorRole.ToolTipBase: "sidebar",
+        QPalette.ColorRole.ToolTipText: "sidebar_tekst_staerk",
+        QPalette.ColorRole.Link: "primary_hover",
+    }
+    for rolle, noegle in roller.items():
+        palette.setColor(rolle, QColor(FARVER[noegle]))
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("white"))
-    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(FARVER["dim"]))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(FARVER["sidebar"]))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(FARVER["text"]))
-    palette.setColor(QPalette.ColorRole.Link, QColor(FARVER["primary_hover"]))
     for rolle in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText,
                   QPalette.ColorRole.WindowText):
         palette.setColor(QPalette.ColorGroup.Disabled, rolle, QColor(FARVER["dim"]))
     app.setPalette(palette)
-
     app.setStyleSheet(byg_stylesheet())

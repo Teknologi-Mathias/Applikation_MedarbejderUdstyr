@@ -1,4 +1,4 @@
-"""Dialog til at oprette eller redigere én opgave i en afviklingssag."""
+"""Dialog til at oprette eller redigere én opgave i en sag."""
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -13,14 +13,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.opgave import Opgave
+from app.domain.opgave import Opgave
 from app.ui.hjaelpere import laes_dato, lav_knap
 
 
 class OpgaveDialog(QDialog):
     """Ændrer opgaven direkte ved Gem. Efter exec(): tjek self.slettet."""
 
-    def __init__(self, parent, opgave=None, ansvarlige=(), standard_frist=""):
+    def __init__(self, parent, opgave=None, ansvarlige=(), standard_frist="", milepaele=()):
+        """milepaele: sagens ((nøgle, navn), ...) – tom for offboarding."""
         super().__init__(parent)
         self.ny = opgave is None
         self.opgave = opgave or Opgave("", frist=standard_frist)
@@ -30,6 +31,14 @@ class OpgaveDialog(QDialog):
         self.setMinimumWidth(480)
 
         self.navn_input = QLineEdit(self.opgave.navn)
+        self.beskrivelse_input = QLineEdit(self.opgave.beskrivelse)
+        self.beskrivelse_input.setPlaceholderText("Kort vejledning til den ansvarlige (valgfri)")
+        self.milepaele = list(milepaele)
+        self.milepael_input = QComboBox()
+        self.milepael_input.addItem("Ingen milepæl", "")
+        for noegle, navn in self.milepaele:
+            self.milepael_input.addItem(navn, noegle)
+        self.milepael_input.setCurrentIndex(max(self.milepael_input.findData(self.opgave.milepael), 0))
         self.udstyr_input = QLineEdit(self.opgave.udstyr)
         self.udstyr_input.setPlaceholderText(
             "Fx 'Telefon og SIM-kort' – tom, hvis det er en intern opgave"
@@ -64,7 +73,11 @@ class OpgaveDialog(QDialog):
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(12)
         form.addRow("Opgave", self.navn_input)
-        form.addRow("Udstyr", self.udstyr_input)
+        form.addRow("Beskrivelse", self.beskrivelse_input)
+        if self.milepaele:
+            form.addRow("Milepæl", self.milepael_input)
+        else:
+            form.addRow("Udstyr", self.udstyr_input)
         form.addRow("Ansvarlig", self.ansvarlig_input)
         form.addRow("Frist", self.frist_input)
         form.addRow("Status", self.status_input)
@@ -122,10 +135,14 @@ class OpgaveDialog(QDialog):
             return
 
         self.opgave.navn = navn
-        self.opgave.udstyr = self.udstyr_input.text().strip()
+        self.opgave.beskrivelse = self.beskrivelse_input.text().strip()
+        if self.milepaele:
+            self.opgave.milepael = self.milepael_input.currentData() or ""
+        else:
+            self.opgave.udstyr = self.udstyr_input.text().strip()
         self.opgave.ansvarlig = self.ansvarlig_input.currentText().strip()
         self.opgave.frist = self.frist_input.date().toString("yyyy-MM-dd")
-        self.opgave.status = status
+        self.opgave.saet_status(status)
         self.opgave.obligatorisk = self.obligatorisk_input.isChecked()
         self.opgave.begrundelse = begrundelse
         self.opgave.naeste_handling = self.naeste_input.text().strip()

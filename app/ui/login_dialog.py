@@ -9,15 +9,16 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app import APP_BESKRIVELSE, APP_NAVN, APP_SLOGAN, VERSION, brugere
-from app.ui.hjaelpere import lav_app_ikon, lav_kort
+from app import APP_BESKRIVELSE, APP_NAVN, APP_SLOGAN, VERSION
+from app.ui.hjaelpere import lav_app_ikon, lav_kort, lav_logo
 
 
 class LoginDialog(QDialog):
     """Efter exec(): self.bruger er den bruger, der loggede på."""
 
-    def __init__(self, parent=None):
+    def __init__(self, auth, parent=None, offline_tekst=""):
         super().__init__(parent)
+        self.auth = auth
         self.bruger = None
         self.setWindowTitle(f"{APP_NAVN} – Log på")
         self.setWindowIcon(lav_app_ikon())
@@ -32,8 +33,7 @@ class LoginDialog(QDialog):
         indhold.setSpacing(10)
 
         titel = QLabel(APP_NAVN)
-        titel.setObjectName("appTitle")
-        titel.setStyleSheet("font-size: 30px;")
+        titel.setObjectName("loginTitel")
         slogan = QLabel(APP_SLOGAN)
         slogan.setObjectName("appSlogan")
         beskrivelse = QLabel(APP_BESKRIVELSE)
@@ -63,6 +63,8 @@ class LoginDialog(QDialog):
         beta.setObjectName("beta")
         beta.setWordWrap(True)
 
+        indhold.addWidget(lav_logo(64))
+        indhold.addSpacing(6)
         indhold.addWidget(titel)
         indhold.addWidget(slogan)
         indhold.addWidget(beskrivelse)
@@ -74,14 +76,11 @@ class LoginDialog(QDialog):
         indhold.addWidget(self.fejl_label)
         indhold.addWidget(log_paa)
         indhold.addSpacing(6)
-        if brugere.bruger_standardkode():
-            foerste = QLabel(
-                "Første gang: log på med admin / admin, og skift derefter koden "
-                "under Brugerkartotek."
-            )
-            foerste.setObjectName("info")
-            foerste.setWordWrap(True)
-            indhold.addWidget(foerste)
+        if offline_tekst:
+            offline = QLabel(offline_tekst)
+            offline.setObjectName("advarsel")
+            offline.setWordWrap(True)
+            indhold.addWidget(offline)
         indhold.addWidget(beta)
 
         version = QLabel(VERSION)
@@ -105,7 +104,7 @@ class LoginDialog(QDialog):
         self.brugernavn_input.setFocus()
 
     def _log_paa(self):
-        bruger = brugere.log_ind(self.brugernavn_input.text(), self.kode_input.text())
+        bruger = self.auth.log_ind(self.brugernavn_input.text(), self.kode_input.text())
         if bruger is None:
             self.fejl_label.setText("Forkert brugernavn eller adgangskode.")
             self.kode_input.clear()

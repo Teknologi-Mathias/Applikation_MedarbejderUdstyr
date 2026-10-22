@@ -6,7 +6,7 @@ den faktisk er sendt. Derfor skal brugeren selv markere rykkeren som sendt.
 import uuid
 from datetime import date, datetime
 
-from app.historik import nuvaerende_bruger
+from app.domain.historik import nuvaerende_bruger
 
 
 class Rykker:

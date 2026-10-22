@@ -1,26 +1,28 @@
 """Den bruger, der er logget ind i denne kørsel af programmet."""
+from typing import Optional
 
-_aktiv = None
+from app.services.auth_service import ROLLE_ADMIN
+
+_aktiv: Optional[dict] = None
 
 
-def log_ind(bruger):
+def log_ind(bruger: dict) -> None:
     global _aktiv
     _aktiv = dict(bruger)
 
 
-def log_ud():
+def log_ud() -> None:
     global _aktiv
     _aktiv = None
 
 
-def bruger():
+def bruger() -> Optional[dict]:
     return _aktiv
 
 
-def er_admin():
-    from app.brugere import ROLLE_ADMIN
+def er_admin() -> bool:
     return bool(_aktiv) and _aktiv.get("rolle") == ROLLE_ADMIN
 
 
-def brugernavn():
+def brugernavn() -> Optional[str]:
     return _aktiv["brugernavn"] if _aktiv else None

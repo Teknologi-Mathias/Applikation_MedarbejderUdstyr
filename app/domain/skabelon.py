@@ -1,26 +1,37 @@
-"""Skabeloner: afviklingssager, mails (rykkere) og påmindelser (Windows-notifikationer).
+"""Skabeloner: arbejdsgange (sager), mails (rykkere) og påmindelser.
 
-Alle skabeloner ligger i Data/skabeloner.json og redigeres på siden Skabeloner:
+Rene regler uden filadgang – indlæsning og lagring ligger i
+app/repositories/json/skabelon_repository.py, versionering i
+app/services/skabelon_service.py og oprettelse af opgaver i
+app/services/workflow.py.
+
+Format (Data/skabeloner.json):
 
     {
-        "sager":        [{"id", "navn", "aktiv", "opgaver": [...]}],
+        "sager":        [{"id", "navn", "aktiv", "proces", "stillinger",
+                          "beskrivelse", "version", "versioner", "opgaver": [...]}],
         "mails":        [{"id", "navn", "aktiv", "kategori", "tone",
                           "frist_dage", "emne", "broedtekst"}],
         "paamindelser": [{"id", "navn", "aktiv", "regel", "dage",
-                          "titel", "tekst"}]
+                          "gentag_dage", "titel", "tekst"}]
     }
+
+En opgave i en arbejdsgangsskabelon: {"navn", "beskrivelse", "ansvarlig",
+"udstyr", "milepael", "frist_dage", "obligatorisk"}. frist_dage regnes fra
+sagens startdato (offboarding: sidste arbejdsdag, onboarding: ansættelsesdato).
+Milepælen styrer, hvornår opgaven aktiveres (efter de tidligere milepæle).
 
 Tekster kan indeholde variabler som {navn} og {frist}. De flettes med flet(),
 som afviser beskeden, hvis en variabel er ukendt eller mangler en værdi.
 """
+import copy
 import re
 import uuid
 from datetime import date, timedelta
 
-from app.data_manager import DataFejl, gem_json, hent_json
-from app.medarbejder import Medarbejder, frist_fra_dage
-from app.opgave import Opgave, laes_iso_dato, udled_udstyr
-from app.stier import SKABELON_FIL
+from app.domain.offboarding import Medarbejder
+from app.domain.onboarding import OnboardingForloeb
+from app.domain.opgave import Opgave, laes_iso_dato, udled_udstyr
 
 SAG = "sager"
 MAIL = "mails"
@@ -52,6 +63,11 @@ PAAMINDELSE_VARIABLER = {
     "manglende_udstyr": "Udstyr, der ikke er afleveret",
 }
 
+PROCESSER = {
+    Medarbejder.PROCES: "Offboarding",
+    OnboardingForloeb.PROCES: "Onboarding",
+}
+
 # Foruddefinerede regler for påmindelser: nøgle -> (beskrivelse, bruger "dage").
 REGLER = {
     "opgave_forsinket": ("En opgave er over sin frist", False),
@@ -59,12 +75,33 @@ REGLER = {
     "fratraedelse_naermer_sig": ("Sidste arbejdsdag er om X dage", True),
     "rykker_ikke_sendt": ("En rykker-kladde er ikke markeret som sendt efter X dage", True),
     "intet_svar_efter_rykker": ("Udstyr mangler stadig X dage efter sendt rykker", True),
+    "sag_stillestaaende": ("En sag har ikke bevæget sig i X dage", True),
 }
+
+_ONBOARDING_BASIS = [
+    {"navn": "Kandidat godkendt", "ansvarlig": "HR", "milepael": "kandidat",
+     "frist_dage": -14, "obligatorisk": True},
+    {"navn": "Kontrakt sendt", "ansvarlig": "HR", "milepael": "kontrakt",
+     "frist_dage": -10, "obligatorisk": True},
+    {"navn": "Kontrakt underskrevet og bekræftet", "ansvarlig": "HR",
+     "milepael": "kontrakt", "frist_dage": -3, "obligatorisk": True},
+    {"navn": "Lønnr. tildelt", "ansvarlig": "Løn", "milepael": "kontrakt",
+     "frist_dage": -1, "obligatorisk": True},
+    {"navn": "Første oplæring planlagt", "ansvarlig": "Butik", "milepael": "oplaering",
+     "frist_dage": 0, "obligatorisk": True},
+    {"navn": "Første oplæring gennemført", "ansvarlig": "Butik", "milepael": "oplaering",
+     "frist_dage": 7, "obligatorisk": True},
+    {"navn": "Oprettet i medarbejderappen", "ansvarlig": "Butik", "milepael": "jobs",
+     "frist_dage": 7, "obligatorisk": True},
+    {"navn": "Første job tildelt", "ansvarlig": "Butik", "milepael": "jobs",
+     "frist_dage": 14, "obligatorisk": True},
+]
 
 _STANDARD = {
     SAG: [
         {
             "navn": "Standard",
+            "proces": "offboarding",
             "opgaver": [
                 {"navn": "Er lukket i NAV?", "ansvarlig": "IT", "udstyr": "",
                  "frist_dage": 0, "obligatorisk": True},
@@ -78,7 +115,24 @@ _STANDARD = {
                  "udstyr": "", "frist_dage": 21, "obligatorisk": True},
             ],
         },
-        {"navn": "Tom sag (tilføj opgaver selv)", "opgaver": []},
+        {"navn": "Tom sag (tilføj opgaver selv)", "proces": "offboarding", "opgaver": []},
+        {
+            "navn": "Onboarding – standard",
+            "proces": "onboarding",
+            "beskrivelse": "Ad Hoc og Afløsere",
+            "stillinger": ["Ad Hoc", "Afløser"],
+            "opgaver": _ONBOARDING_BASIS,
+        },
+        {
+            "navn": "Onboarding – FM/DM",
+            "proces": "onboarding",
+            "beskrivelse": "Ledere: ekstra introduktion",
+            "stillinger": ["FM", "DM"],
+            "opgaver": _ONBOARDING_BASIS + [
+                {"navn": "Introduktion til ledelsesopgaver", "ansvarlig": "Områdeleder",
+                 "milepael": "oplaering", "frist_dage": 14, "obligatorisk": True},
+            ],
+        },
     ],
     MAIL: [
         {
@@ -130,28 +184,41 @@ _STANDARD = {
         {"navn": "Fratrædelse nærmer sig", "regel": "fratraedelse_naermer_sig", "dage": 3,
          "titel": "{navn} stopper om {dage} dage",
          "tekst": "Sørg for, at opgaverne er fordelt inden sidste arbejdsdag."},
+        {"navn": "Stillestående sag", "regel": "sag_stillestaaende", "dage": 14,
+         "gentag_dage": 7,
+         "titel": "Ingen bevægelse: {navn}",
+         "tekst": "Sagen har ikke ændret sig i {dage} dage."},
     ],
 }
 
 
-### ----- indlæsning og lagring ----------------------------------------------
+### ----- normalisering ------------------------------------------------------
 
 def ny_id():
     return uuid.uuid4().hex[:12]
 
 
-def _klargoer(skabelon, slags):
+def klargoer(skabelon, slags):
     """Udfylder manglende felter, så resten af programmet kan stole på dem."""
-    s = dict(skabelon)
+    s = copy.deepcopy(skabelon)
     s.setdefault("id", ny_id())
     s.setdefault("navn", "Uden navn")
     s["aktiv"] = bool(s.get("aktiv", True))
     if slags == SAG:
+        s.setdefault("proces", Medarbejder.PROCES)
+        s.setdefault("beskrivelse", "")
+        s.setdefault("stillinger", [])
+        s.setdefault("version", 1)
+        s.setdefault("versioner", [])
         opgaver = []
         for post in s.get("opgaver") or []:
             if isinstance(post, dict) and post.get("navn"):
                 post = dict(post)
                 post.setdefault("udstyr", udled_udstyr(post["navn"]))
+                post.setdefault("beskrivelse", "")
+                post.setdefault("milepael", "")
+                post.setdefault("frist_dage", 0)
+                post.setdefault("obligatorisk", True)
                 opgaver.append(post)
         s["opgaver"] = opgaver
     elif slags == MAIL:
@@ -163,79 +230,61 @@ def _klargoer(skabelon, slags):
     else:
         s.setdefault("regel", next(iter(REGLER)))
         s.setdefault("dage", 0)
+        # Hvor ofte samme påmindelse må gentages (dage). 0 = kun én gang.
+        s.setdefault("gentag_dage", 1)
         s.setdefault("titel", "")
         s.setdefault("tekst", "")
     return s
 
 
-def hent_alle():
-    """Alle skabeloner som {slags: [skabelon, ...]}. Kaster DataFejl ved ugyldig fil."""
-    data = hent_json(SKABELON_FIL, forventet=(list, dict))
+def normaliser_alle(data):
+    """Rå fildata -> {slags: [skabelon, ...]}.
+
+    Mangler en slags (fx ældre filer), bruges standardskabelonerne. Har filen
+    ingen onboarding-skabeloner, tilføjes standarderne til onboarding.
+    Kaster ValueError ved et ugyldigt format.
+    """
     if isinstance(data, list):          # format fra V0.5.4: kun sagsskabeloner
         data = {SAG: data}
     data = data or {}
-
     alle = {}
     for slags in SLAGS:
         liste = data.get(slags)
         if liste is None:
             liste = _STANDARD[slags]
         if not isinstance(liste, list) or not all(isinstance(s, dict) for s in liste):
-            raise DataFejl(
-                f"{SKABELON_FIL.name} har en ugyldig liste \"{slags}\".\n\n"
-                "Slet filen for at få standardskabelonerne tilbage."
-            )
-        alle[slags] = [_klargoer(s, slags) for s in liste]
-
-    if data != alle:
-        gem_alle(alle)   # skriv ids og nye standardskabeloner til filen
+            raise ValueError(f'ugyldig liste "{slags}"')
+        alle[slags] = [klargoer(s, slags) for s in liste]
+    if not any(s["proces"] == OnboardingForloeb.PROCES for s in alle[SAG]):
+        alle[SAG] += [
+            klargoer(s, SAG) for s in _STANDARD[SAG] if s.get("proces") == OnboardingForloeb.PROCES
+        ]
     return alle
 
 
-def gem_alle(alle):
-    gem_json({slags: alle[slags] for slags in SLAGS}, SKABELON_FIL)
-
-
-def aktive(alle, slags):
-    return [s for s in alle[slags] if s["aktiv"]]
-
-
-def kopier(skabelon):
-    kopi = dict(skabelon, id=ny_id(), navn=f"Kopi af {skabelon['navn']}")
-    if "opgaver" in kopi:
-        kopi["opgaver"] = [dict(o) for o in kopi["opgaver"]]
-    return kopi
-
-
-def ny_skabelon(slags):
-    return _klargoer({"navn": "Ny skabelon"}, slags)
-
-
-### ----- sager --------------------------------------------------------------
-
-def opret_opgaver(skabelon, fratraedelsesdato):
-    """Laver nye opgaver ud fra en sagsskabelon, med frister fra fratrædelsen."""
+def aktive(alle, slags, proces=None):
     return [
-        Opgave(
-            post["navn"],
-            post.get("ansvarlig", ""),
-            frist_fra_dage(fratraedelsesdato, post.get("frist_dage", 0)),
-            obligatorisk=post.get("obligatorisk", True),
-            udstyr=post.get("udstyr", ""),
-        )
-        for post in skabelon.get("opgaver", [])
+        s for s in alle[slags]
+        if s["aktiv"] and (proces is None or s.get("proces") == proces)
     ]
 
 
-def kendte_ansvarlige(alle, medarbejdere=()):
-    """Alle ansvarlige nævnt i sagsskabeloner og eksisterende opgaver (til forslag)."""
-    navne = {
-        str(post.get("ansvarlig", "")).strip()
-        for skabelon in alle.get(SAG, [])
-        for post in skabelon.get("opgaver", [])
-    }
-    navne.update(o.ansvarlig for m in medarbejdere for o in m.opgaver)
-    return sorted(n for n in navne if n)
+def til_stilling(skabeloner, stilling):
+    """Skabeloner der passer til stillingen (tom "stillinger" = alle)."""
+    return [s for s in skabeloner if not s.get("stillinger") or stilling in s["stillinger"]]
+
+
+def kopier(skabelon):
+    kopi = copy.deepcopy(skabelon)
+    kopi.update(id=ny_id(), navn=f"Kopi af {skabelon['navn']}", version=1, versioner=[])
+    return kopi
+
+
+def ny_skabelon(slags, proces=None):
+    data = {"navn": "Ny skabelon"}
+    if slags == SAG and proces:
+        data["proces"] = proces
+    return klargoer(data, slags)
 
 
 ### ----- fletning og validering ---------------------------------------------
@@ -314,14 +363,16 @@ def byg_mail(skabelon, medarbejder, frist_iso):
 def relevant_mailskabelon(alle, medarbejder):
     """Vælger skabelon ud fra antal tidligere rykkere.
 
-    0 tidligere -> "Første påmindelse", 1 -> "Anden rykker", 2+ -> "Sidste rykker".
+    0 sendte -> "Første påmindelse", 1 -> "Anden rykker", 2+ -> "Sidste rykker".
+    Kun sendte rykkere tæller – en kladde, der aldrig blev sendt, eskalerer ikke.
     Findes kategorien ikke, bruges den nærmeste mildere kategori.
     """
     mails = aktive(alle, MAIL)
     if not mails:
         return None
     rykker_kategorier = MAIL_KATEGORIER[:-1]          # uden "Andet"
-    nummer = min(len(medarbejder.rykkere), len(rykker_kategorier) - 1)
+    sendte = sum(1 for r in medarbejder.rykkere if r.sendt)
+    nummer = min(sendte, len(rykker_kategorier) - 1)
     for kategori in reversed(rykker_kategorier[:nummer + 1]):
         for skabelon in mails:
             if skabelon["kategori"] == kategori:

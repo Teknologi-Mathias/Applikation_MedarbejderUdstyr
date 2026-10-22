@@ -20,15 +20,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app import data_manager, datasikkerhed as ds, indstillinger
-from app.data_manager import DataFejl
-from app.stier import DATA_MAPPE
+from app.services.backup_service import udloebne
+from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, vis_dato
 
 _AARSAGER = {
     "daglig": "Daglig (automatisk)",
     "manuel": "Manuel",
     "foer-gendannelse": "Før gendannelse",
+    "foer-migrering": "Før migrering",
 }
 
 
@@ -51,8 +51,10 @@ class DataSide(QWidget):
     # Udsendes når data er ændret her (gendannelse/sletning), så vinduet genindlæser.
     data_aendret = Signal()
 
-    def __init__(self, hent_arkiv):
+    def __init__(self, tjenester, hent_arkiv):
+        """hent_arkiv: () -> arkiverede sager fra begge moduler."""
         super().__init__()
+        self.t = tjenester
         self.hent_arkiv = hent_arkiv
 
         ydre = QVBoxLayout(self)
@@ -66,7 +68,7 @@ class DataSide(QWidget):
         scroll.setWidget(indre)
 
         layout = QVBoxLayout(indre)
-        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setContentsMargins(0, 12, 8, 12)
         layout.setSpacing(18)
         hoved, _ = lav_sidehoved(
             "Data & sikkerhed",
@@ -128,7 +130,7 @@ class DataSide(QWidget):
 
         self.backup_tabel = QTableWidget(0, 5)
         self.backup_tabel.setHorizontalHeaderLabels(
-            ["Tidspunkt", "Type", "Bruger", "Aktive", "Arkiverede"]
+            ["Tidspunkt", "Type", "Bruger", "Aktive (offboarding)", "Arkiv · onboarding"]
         )
         self.backup_tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.backup_tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -193,12 +195,11 @@ class DataSide(QWidget):
             "automatisk, når de er ældre end det valgte antal.",
         )
         raekke = QHBoxLayout()
-        felt = QLineEdit(str(DATA_MAPPE))
+        mappe = self.t.datakilde.central_mappe
+        felt = QLineEdit(str(mappe))
         felt.setReadOnly(True)
         aabn = lav_knap("Åbn datamappe")
-        aabn.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(DATA_MAPPE)))
-        )
+        aabn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(mappe))))
         raekke.addWidget(felt, 1)
         raekke.addWidget(aabn)
         layout.addLayout(raekke)
@@ -207,12 +208,12 @@ class DataSide(QWidget):
     ### ----- visning --------------------------------------------------------
 
     def opdater(self):
-        ind = indstillinger.hent()
-        self.mappe_felt.setText(str(indstillinger.backup_mappe(ind)))
+        ind = self.t.indstillinger.hent()
+        self.mappe_felt.setText(str(self.t.backup.mappe()))
         self.antal_input.setValue(int(ind["backup_antal"]))
         self.maaneder_input.setValue(int(ind["opbevaring_maaneder"]))
 
-        self.backups = ds.liste(ind)
+        self.backups = self.t.backup.liste()
         self.backup_tabel.setRowCount(len(self.backups))
         for raekke, b in enumerate(self.backups):
             celler = (
@@ -220,19 +221,19 @@ class DataSide(QWidget):
                 _AARSAGER.get(b.aarsag, b.aarsag),
                 b.bruger,
                 str(b.antal_aktive),
-                str(b.antal_arkiv),
+                f"{b.antal_arkiv} · onboarding {b.antal_onboarding}",
             )
             for kolonne, tekst in enumerate(celler):
                 self.backup_tabel.setItem(raekke, kolonne, QTableWidgetItem(tekst))
 
-        self.udloebne = ds.udloebne(self.hent_arkiv(), ind["opbevaring_maaneder"], date.today())
+        self.udloebne = udloebne(self.hent_arkiv(), ind["opbevaring_maaneder"], date.today())
         self.udloebne_label.setText(
             f"{len(self.udloebne)} arkiverede sager har overskredet opbevaringsperioden"
         )
         self.udloebne_liste.clear()
         for m, dato in self.udloebne:
             self.udloebne_liste.addItem(
-                f"{m.navn} (lønnr. {m.loennr}) – kunne slettes fra {dato:%d-%m-%Y}"
+                f"{m.navn} ({m.PROCES}, lønnr. {m.loennr or '–'}) – kunne slettes fra {dato:%d-%m-%Y}"
             )
         self.udloebne_liste.setVisible(bool(self.udloebne))
         self.slet_knap.setEnabled(bool(self.udloebne))
@@ -254,38 +255,32 @@ class DataSide(QWidget):
     ### ----- handlinger -----------------------------------------------------
 
     def _skift_mappe(self):
-        ind = indstillinger.hent()
         mappe = QFileDialog.getExistingDirectory(
-            self, "Vælg mappe til sikkerhedskopier", str(indstillinger.backup_mappe(ind))
+            self, "Vælg mappe til sikkerhedskopier", str(self.t.backup.mappe())
         )
-        if mappe:
-            ind["backup_mappe"] = mappe
-            indstillinger.gem(ind)
+        if mappe and udfoer(self, self.t.indstillinger.opdater, backup_mappe=mappe) is not FEJL:
             self.opdater()
 
     def _aabn_backupmappe(self):
-        mappe = indstillinger.backup_mappe(indstillinger.hent())
+        mappe = self.t.backup.mappe()
         mappe.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(mappe)))
 
     def _gem_antal(self):
-        ind = indstillinger.hent()
-        ind["backup_antal"] = self.antal_input.value()
-        indstillinger.gem(ind)
-        ds.ryd_gamle(ind)
-        self.opdater()
+        if udfoer(self, self.t.indstillinger.opdater,
+                  backup_antal=self.antal_input.value()) is not FEJL:
+            self.t.backup.ryd_gamle()
+            self.opdater()
 
     def _gem_maaneder(self):
-        ind = indstillinger.hent()
-        ind["opbevaring_maaneder"] = self.maaneder_input.value()
-        indstillinger.gem(ind)
-        self.opdater()
+        if udfoer(self, self.t.indstillinger.opdater,
+                  opbevaring_maaneder=self.maaneder_input.value()) is not FEJL:
+            self.opdater()
 
     def _tag_backup(self):
-        try:
-            info = ds.tag_backup(indstillinger.hent(), "manuel")
-        except (DataFejl, OSError) as fejl:
-            self._vis_status(f"Backup mislykkedes: {fejl}", fejl=True)
+        info = udfoer(self, self.t.backup.tag_backup, "manuel")
+        if info is FEJL:
+            self._vis_status("Backup mislykkedes – se fejlbeskeden.", fejl=True)
             return
         self.opdater()
         self._vis_status(f"Backup taget og testet: {info.sti.name}")
@@ -293,7 +288,7 @@ class DataSide(QWidget):
     def _test_backup(self):
         valgt = self._valgt_backup()
         if valgt:
-            ok, besked = ds.test_backup(valgt.sti)
+            ok, besked = self.t.backup.test_backup(valgt.sti)
             self._vis_status(("✓ " if ok else "✗ ") + besked, fejl=not ok)
 
     def _gendan(self):
@@ -312,10 +307,9 @@ class DataSide(QWidget):
         )
         if svar != QMessageBox.StandardButton.Yes:
             return
-        try:
-            besked = ds.gendan(valgt.sti, indstillinger.hent())
-        except (DataFejl, OSError) as fejl:
-            self._vis_status(f"Gendannelse mislykkedes: {fejl}", fejl=True)
+        besked = udfoer(self, self.t.backup.gendan, valgt.sti)
+        if besked is FEJL:
+            self._vis_status("Gendannelse mislykkedes – de nuværende data er urørte.", fejl=True)
             return
         self.data_aendret.emit()
         self.opdater()
@@ -338,7 +332,7 @@ class DataSide(QWidget):
         )
         if svar != QMessageBox.StandardButton.Yes:
             return
-        for m, _ in self.udloebne:
-            data_manager.slet_fra_arkiv(m)
+        for sag, _ in self.udloebne:
+            udfoer(self, self.t.modul(sag.PROCES).slet, sag)
         self.data_aendret.emit()
         self.opdater()

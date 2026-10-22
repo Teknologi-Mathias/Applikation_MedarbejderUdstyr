@@ -1,157 +1,107 @@
-"""Hovedvinduet: sidebar, sider og alle handlinger på medarbejdere."""
+"""Hovedvinduet: sætter siderne sammen, holder data friske og styrer log på,
+roller, tema og baggrundsdrift.
+
+Hovedvinduet indeholder ingen forretningsregler. Handlinger på sager går
+til modulernes controllere (app/ui/modul_controller.py), som kalder
+services. Data hentes fra services og deles ud til siderne.
+"""
+import logging
 from datetime import date
 
 from PySide6.QtCore import QTime, QTimer, Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
-    QFrame,
     QHBoxLayout,
-    QInputDialog,
-    QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPushButton,
     QStackedWidget,
     QToolButton,
-    QVBoxLayout,
     QWidget,
 )
 
-from app import (
-    APP_BESKRIVELSE,
-    APP_NAVN,
-    APP_SLOGAN,
-    VERSION,
-    data_manager,
-    session,
-    datasikkerhed,
-    indstillinger,
-    skabeloner as sk,
-)
-from app.data_manager import DataFejl
-from app.historik import registrer_aendringer
-from app.medarbejder import Medarbejder
-from app.ui.bruger_side import BrugerSide
+from app import APP_NAVN, session
+from app.domain import skabelon as sk
+from app.domain.offboarding import Medarbejder
+from app.domain.onboarding import OnboardingForloeb
+from app.repositories.fejl import DataFejl
+from app.services import action_center
+from app.ui.action_liste import ANSVARLIG
 from app.ui.dashboard_side import DashboardSide
-from app.ui.data_side import DataSide
-from app.ui.hjaelpere import lav_app_ikon, lav_knap, vis_dato
+from app.ui.fejl import FEJL, udfoer
+from app.ui.hjaelpere import lav_app_ikon, lav_knap
+from app.ui.indstillinger_side import IndstillingerSide
 from app.ui.login_dialog import LoginDialog
-from app.ui.medarbejder_dialog import MedarbejderDialog
-from app.ui.medarbejder_side import MedarbejderSide
+from app.ui.modul_controller import OffboardingController, OnboardingController
+from app.ui.modul_oversigt import ModulOversigtSide, alarmer_for
+from app.ui.moduler import offboarding_modul, onboarding_modul
 from app.ui.notifikationer import Notifikationer
-from app.ui.rykker_dialog import RykkerDialog
-from app.ui.sag_dialog import SagDialog
+from app.ui.opgave_oversigt_side import OpgaveOversigtSide
+from app.ui.sag_liste_side import SagListeSide
+from app.ui.sidebar import Sidebar
 from app.ui.skabelon_side import SkabelonSide
+from app.ui.theme import anvend_tema
+
+log = logging.getLogger(__name__)
+
+ON, OFF = OnboardingForloeb.PROCES, Medarbejder.PROCES
+
+# Venstremenuen: Onboarding og Offboarding er separate hovedpunkter.
+STRUKTUR = [
+    (None, [("dashboard", "Dashboard")]),
+    ("Onboarding - MERCH", [
+        ("on_oversigt", "Oversigt"),
+        ("on_aktive", "Aktive forløb"),
+        ("on_opgaver", "Opgaver og milepæle"),
+        ("on_skabeloner", "Skabeloner"),
+        ("on_arkiv", "Arkiv og annullerede"),
+    ]),
+    ("Offboarding - HAFRA", [
+        ("off_oversigt", "Oversigt"),
+        ("off_aktive", "Aktive forløb"),
+        ("off_opgaver", "Opgaver og udstyr"),
+        ("off_skabeloner", "Skabeloner og mails"),
+        ("off_arkiv", "Arkiv"),
+    ]),
+    (None, [("indstillinger", "Indstillinger")]),
+]
 
 
 class MainWindow(QMainWindow):
     OPDATERINGS_INTERVAL = 60_000  # 60 sekunder, angivet i millisekunder
 
-    SIDE_DASHBOARD = 0
-    SIDE_HOVED = 1
-    SIDE_ARKIV = 2
-    SIDE_SKABELONER = 3
-    SIDE_DATA = 4
-    SIDE_BRUGERE = 5
-
-    # Sider kun administratorer kan se.
-    ADMIN_SIDER = (SIDE_DATA, SIDE_BRUGERE)
-
-    def __init__(self):
+    def __init__(self, tjenester):
         super().__init__()
-
+        self.t = tjenester
         self.setWindowTitle(APP_NAVN)
         self.setWindowIcon(lav_app_ikon())
-        self.resize(1320, 860)
-        self.setMinimumSize(1020, 700)
+        self.resize(1360, 880)
+        self.setMinimumSize(1100, 720)
 
         self.notifikationer = Notifikationer(lav_app_ikon(), self)
         self.notifikationer.vis_vindue.connect(self.vis_fra_baggrund)
         self.notifikationer.afslut.connect(self.afslut)
+        self.notifikationer.aabn_sag.connect(self.aabn_sag)
         self._afslutter = False
         self._baggrund_forklaret = False
         self._backup_fejl_vist = False
         # Med ikon ved uret lukkes programmet kun via "Afslut".
-        QApplication.instance().setQuitOnLastWindowClosed(
-            not self.notifikationer.tilgaengelig
-        )
+        QApplication.instance().setQuitOnLastWindowClosed(not self.notifikationer.tilgaengelig)
 
-        self.medarbejdere_liste = []
-        self.medarbejdere_liste_arkiv = []
+        self.ctrl = {
+            ON: OnboardingController(self, tjenester, tjenester.onboarding),
+            OFF: OffboardingController(self, tjenester, tjenester.offboarding),
+        }
+        self.data = {ON: ([], []), OFF: ([], [])}   # proces -> (aktive, arkiverede)
         self._signatur = None
-        # Kan kaste DataFejl; main.py viser fejlen pænt.
-        self._laes_data()
-        self._daglig_backup()
 
         self._opbyg_gui()
+        self._daglig_backup()
 
-        self.opdaterings_timer = QTimer(self)
-        self.opdaterings_timer.setInterval(self.OPDATERINGS_INTERVAL)
-        self.opdaterings_timer.timeout.connect(self._minut_tik)
-        self.opdaterings_timer.start()
-
-    ### ----- data -----------------------------------------------------------
-
-    def _laes_data(self):
-        self.medarbejdere_liste = data_manager.hent_medarbejdere()
-        self.medarbejdere_liste_arkiv = data_manager.hent_arkiverede_medarbejdere()
-        self._signatur = data_manager.fil_signatur()
-
-    def synkroniser(self):
-        """Genindlæser data, hvis filerne er ændret udefra (fx af en kollega)."""
-        if data_manager.fil_signatur() == self._signatur:
-            return False
-        try:
-            self._laes_data()
-        except DataFejl:
-            return False
-        return True
-
-    def _gem_aktive(self):
-        data_manager.gem_medarbejdere(self.medarbejdere_liste)
-        self._signatur = data_manager.fil_signatur()
-
-    @staticmethod
-    def _find(liste, loennr):
-        for medarbejder in liste:
-            if str(medarbejder.loennr) == str(loennr):
-                return medarbejder
-        return None
-
-    def _alle_loennumre(self, undtagen=None):
-        return {
-            str(m.loennr)
-            for m in self.medarbejdere_liste + self.medarbejdere_liste_arkiv
-            if str(m.loennr) != str(undtagen)
-        }
-
-    def _hent_skabeloner(self, vis_fejl=True):
-        try:
-            return sk.hent_alle()
-        except DataFejl as fejl:
-            if vis_fejl:
-                QMessageBox.warning(self, "Skabeloner", str(fejl))
-            return None
-
-    def _ansvarlige(self):
-        alle = self._hent_skabeloner(vis_fejl=False) or {}
-        return sk.kendte_ansvarlige(alle, self.medarbejdere_liste)
-
-    def _daglig_backup(self):
-        """Tager dagens backup (én gang pr. dag). Fejl vises én gang pr. kørsel."""
-        try:
-            datasikkerhed.daglig_backup(indstillinger.hent())
-        except (DataFejl, OSError) as fejl:
-            if not self._backup_fejl_vist:
-                self._backup_fejl_vist = True
-                QMessageBox.warning(
-                    self, "Sikkerhedskopi",
-                    f"Dagens automatiske backup kunne ikke tages:\n{fejl}\n\n"
-                    "Se Data & sikkerhed.",
-                )
+        self.timer = QTimer(self)
+        self.timer.setInterval(self.OPDATERINGS_INTERVAL)
+        self.timer.timeout.connect(self._minut_tik)
+        self.timer.start()
 
     ### ----- opbygning ------------------------------------------------------
 
@@ -159,575 +109,286 @@ class MainWindow(QMainWindow):
         central = QWidget()
         central.setObjectName("pageRoot")
         self.setCentralWidget(central)
-
         rod = QHBoxLayout(central)
         rod.setContentsMargins(0, 0, 0, 0)
         rod.setSpacing(0)
 
-        self.dashboard = DashboardSide()
-        self.dashboard.aabn_sag.connect(self.aabn_sag)
-        self.hovedside = self._opbyg_hovedside()
-        self.arkivside = self._opbyg_arkivside()
-        self.skabelon_side = SkabelonSide(
-            lambda: self.medarbejdere_liste, self.notifikationer.vis_besked
+        self.sidebar = Sidebar(STRUKTUR)
+        self.sidebar.side_valgt.connect(self.vis_side)
+        self.sidebar.log_ud.connect(self.log_ud)
+        self.stak = QStackedWidget()
+        rod.addWidget(self.sidebar)
+        rod.addWidget(self.stak, 1)
+
+        self.sider = {}
+        self.dashboard = DashboardSide(self.t.rapporter)
+        self._forbind_action(self.dashboard.action, self.dashboard.dag)
+        self._tilfoej("dashboard", self.dashboard)
+        self._opbyg_onboarding()
+        self._opbyg_offboarding()
+        self.indstillinger = IndstillingerSide(
+            self.t, self._alle_arkiverede, self._alle_aktive, self.notifikationer.vis_besked,
         )
-        self.data_side = DataSide(lambda: self.medarbejdere_liste_arkiv)
-        self.data_side.data_aendret.connect(self._data_gendannet)
-        self.bruger_side = BrugerSide()
+        self.indstillinger.generelt.tema_valgt.connect(self.skift_tema)
+        self.indstillinger.generelt.notifikationer_valgt.connect(self._saet_notifikationer)
+        self.indstillinger.generelt.lagring_skiftet.connect(self._lagring_skiftet)
+        self.indstillinger.data.data_aendret.connect(self.opdater_alle)
+        self._tilfoej("indstillinger", self.indstillinger)
+        self.vis_side("dashboard")
 
-        self.sider = QStackedWidget()
-        self.sider.addWidget(self.dashboard)        # SIDE_DASHBOARD
-        self.sider.addWidget(self.hovedside)        # SIDE_HOVED
-        self.sider.addWidget(self.arkivside)        # SIDE_ARKIV
-        self.sider.addWidget(self.skabelon_side)    # SIDE_SKABELONER
-        self.sider.addWidget(self.data_side)        # SIDE_DATA
-        self.sider.addWidget(self.bruger_side)      # SIDE_BRUGERE
+    def _tilfoej(self, noegle, side):
+        self.sider[noegle] = side
+        self.stak.addWidget(side)
 
-        rod.addWidget(self._opbyg_sidebar())
-        rod.addWidget(self.sider, 1)
+    def _forbind_action(self, *lister):
+        for liste in lister:
+            liste.aabn_sag.connect(self.aabn_sag)
+            liste.handling.connect(
+                lambda handling, proces, sag_id, opgave_id:
+                self.ctrl[proces].action_handling(handling, sag_id, opgave_id)
+            )
 
-        self.sider.currentChanged.connect(self._fane_skiftet)
-        self.opdater_alle_visninger()
-        self.sider.setCurrentIndex(self.SIDE_DASHBOARD)
+    def _paa_valgt(self, side, funktion):
+        sag_id = side.valgt_id()
+        if sag_id is None:
+            QMessageBox.information(self, "Ingen valgt", "Vælg en sag i listen først.")
+            return
+        funktion(sag_id)
 
-    def _opbyg_sidebar(self):
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(232)
-
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(18, 26, 18, 18)
-        layout.setSpacing(6)
-
-        titel = QLabel(APP_NAVN)
-        titel.setObjectName("appTitle")
-        titel.setToolTip(APP_BESKRIVELSE)
-        slogan = QLabel(APP_SLOGAN)
-        slogan.setObjectName("appSlogan")
-        slogan.setWordWrap(True)
-        slogan.setToolTip(APP_BESKRIVELSE)
-        layout.addWidget(titel)
-        layout.addWidget(slogan)
-        layout.addSpacing(12)
-
-        self.nav_gruppe = QButtonGroup(self)
-        self.nav_gruppe.setExclusive(True)
-        self.nav_knapper = {}
-
-        for sektion, punkter in (
-            ("MEDARBEJDERAFVIKLING", (
-                ("Dashboard", self.SIDE_DASHBOARD),
-                ("Hovedside", self.SIDE_HOVED),
-                ("Arkiv", self.SIDE_ARKIV),
-            )),
-            ("SYSTEM", (
-                ("Skabeloner", self.SIDE_SKABELONER),
-                ("Data & sikkerhed", self.SIDE_DATA),
-                ("Brugerkartotek", self.SIDE_BRUGERE),
-            )),
-        ):
-            sektion_label = QLabel(sektion)
-            sektion_label.setObjectName("navSektion")
-            layout.addWidget(sektion_label)
-            for tekst, index in punkter:
-                knap = QPushButton(tekst)
-                knap.setProperty("nav", True)
-                knap.setCheckable(True)
-                knap.setCursor(Qt.CursorShape.PointingHandCursor)
-                knap.clicked.connect(lambda _=False, i=index: self.sider.setCurrentIndex(i))
-                self.nav_gruppe.addButton(knap, index)
-                self.nav_knapper[index] = knap
-                layout.addWidget(knap)
-
-        self.nav_knapper[self.SIDE_DASHBOARD].setChecked(True)
-
-        layout.addStretch()
-
-        self.sidst_opdateret_label = QLabel("")
-        self.sidst_opdateret_label.setObjectName("sidebarFod")
-        version_label = QLabel(f"{VERSION} · opdaterer hvert minut")
-        version_label.setObjectName("sidebarFod")
-        skaber_label = QLabel("© MASAN")
-        skaber_label.setObjectName("sidebarFod")
-
-        bruger_raekke = QHBoxLayout()
-        self.bruger_label = QLabel("")
-        self.bruger_label.setObjectName("sidebarBruger")
-        self.bruger_label.setWordWrap(True)
-        log_ud = lav_knap("Log ud")
-        log_ud.setStyleSheet("padding: 5px 12px; font-size: 12px;")
-        log_ud.clicked.connect(self.log_ud)
-        bruger_raekke.addWidget(self.bruger_label, 1)
-        bruger_raekke.addWidget(log_ud)
-        layout.addLayout(bruger_raekke)
-        layout.addSpacing(8)
-        layout.addWidget(self.sidst_opdateret_label)
-        layout.addWidget(version_label)
-        layout.addWidget(skaber_label)
-
-        return sidebar
-
-    def _opbyg_hovedside(self):
-        opret_knap = lav_knap("+ Opret medarbejder", "primary")
-        sag_knap = lav_knap(
-            "Åbn sag", tooltip="Opgaver, ansvarlige og frister (eller dobbeltklik)"
-        )
-        rediger_knap = lav_knap(
-            "Rediger", tooltip="Navn, e-mail, sidste arbejdsdag og manuel status"
-        )
-        arkiver_knap = lav_knap("Arkiver", "danger")
-
-        opret_knap.clicked.connect(self.opret_medarbejder)
-        sag_knap.clicked.connect(self.aabn_valgt_sag)
-        rediger_knap.clicked.connect(self.rediger_medarbejder)
-        arkiver_knap.clicked.connect(self.arkiver_medarbejder)
-
-        side = MedarbejderSide(
-            "Medarbejdere",
-            "Aktive afviklingssager. Status beregnes ud fra sagens opgaver.",
-            [opret_knap, sag_knap, rediger_knap, arkiver_knap],
-            [self._opbyg_handling_knap()],
-        )
-        side.tabel.doubleClicked.connect(lambda _index: self.aabn_valgt_sag())
-        return side
-
-    def _opbyg_handling_knap(self):
-        """Dropdown "Handling" med handlinger på den valgte medarbejder."""
+    def _handlingsmenu(self, side, punkter):
         menu = QMenu(self)
-        self.handling_opret_rykker = menu.addAction("Opret rykker…", self.opret_rykker)
-        self.handling_marker_sendt = menu.addAction(
-            "Marker rykker som sendt…", self.marker_rykker_sendt
-        )
-        self.handling_returlabel = menu.addAction(
-            "Registrér returlabel som sendt…", self.registrer_returlabel
-        )
-        self.handling_notat = menu.addAction(
-            "Tilføj notat til tidslinjen…", self.tilfoej_notat
-        )
-        menu.addSeparator()
-        self.handling_tidslinje = menu.addAction("Vis tidslinje", self.vis_tidslinje)
-        menu.aboutToShow.connect(self._opdater_handlingsmenu)
-
+        for tekst, funktion in punkter:
+            if tekst is None:
+                menu.addSeparator()
+            else:
+                menu.addAction(tekst, lambda f=funktion: self._paa_valgt(side, f))
         knap = QToolButton()
         knap.setText("Handling")
         knap.setProperty("variant", "menu")
         knap.setCursor(Qt.CursorShape.PointingHandCursor)
         knap.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         knap.setMenu(menu)
-        knap.setToolTip("Handlinger på den valgte medarbejder")
+        knap.setToolTip("Handlinger på den valgte sag")
         return knap
 
-    def _opbyg_arkivside(self):
-        goer_aktiv_knap = lav_knap("Gør medarbejder aktiv")
-        self.slet_knap = slet_knap = lav_knap("Slet permanent", "danger")
+    def _modul_sider(self, prefix, modul, ctrl, opgave_titel, ekstra, knapper, handlinger,
+                     skabelon_slags, arkiv_titel):
+        """Bygger et moduls fem undersider ud fra samme fælles komponenter."""
+        oversigt = ModulOversigtSide(modul)
+        self._forbind_action(oversigt.action, oversigt.dag)
 
-        goer_aktiv_knap.clicked.connect(self.aktiver_medarbejder)
-        slet_knap.clicked.connect(self.slet_medarbejder)
+        aktive = SagListeSide(f"{modul.navn} – aktive forløb",
+                              f"Aktive {modul.flertal}. Status beregnes ud fra opgaver og milepæle.",
+                              modul.kolonner, filtre=modul.filtre)
+        opret = lav_knap(modul.opret_tekst, "primary")
+        opret.clicked.connect(ctrl.opret)
+        aktive.tilfoej_knap(opret)
+        for tekst, funktion, variant in knapper:
+            knap = lav_knap(tekst, variant)
+            knap.clicked.connect(lambda _=False, f=funktion: self._paa_valgt(aktive, f))
+            aktive.tilfoej_knap(knap)
+        aktive.tilfoej_handling(self._handlingsmenu(aktive, handlinger))
+        aktive.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(aktive, ctrl.aabn_sag))
 
-        side = MedarbejderSide(
-            "Arkiv",
-            "Afsluttede sager. Dobbeltklik for at se sagen. "
-            "Kan gøres aktive igen eller slettes.",
-            [goer_aktiv_knap, slet_knap],
+        opgaver = OpgaveOversigtSide(f"{modul.navn} – {opgave_titel.lower()}",
+                                     f"Åbne opgaver på tværs af alle aktive {modul.flertal}. "
+                                     "Dobbeltklik for at åbne sagen.", ekstra)
+        opgaver.aabn_sag.connect(self.aabn_sag)
+
+        skabeloner = SkabelonSide(self.t.skabeloner, skabelon_slags, proces=modul.proces,
+                                  titel=f"{modul.navn} – skabeloner",
+                                  hent_sager=lambda p=modul.proces: self.data[p][0])
+
+        arkiv = SagListeSide(arkiv_titel, "Afsluttede forløb. Dobbeltklik for at se sagen.",
+                             modul.kolonner, filtre=modul.filtre)
+        arkiv.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(arkiv, ctrl.aabn_sag))
+        slet = lav_knap("Slet permanent", "danger")
+        for knap, funktion in ((lav_knap("Vis sag"), ctrl.aabn_sag),
+                               (lav_knap("Gør aktiv igen"), ctrl.aktiver), (slet, ctrl.slet)):
+            knap.clicked.connect(lambda _=False, f=funktion: self._paa_valgt(arkiv, f))
+            arkiv.tilfoej_knap(knap)
+
+        for navn, side in (("oversigt", oversigt), ("aktive", aktive), ("opgaver", opgaver),
+                           ("skabeloner", skabeloner), ("arkiv", arkiv)):
+            self._tilfoej(f"{prefix}_{navn}", side)
+        return slet
+
+    def _opbyg_onboarding(self):
+        modul = onboarding_modul(self._omraader, self._ansvarlige)
+        ctrl = self.ctrl[ON]
+        self.on_slet = self._modul_sider(
+            "on", modul, ctrl, "Opgaver og milepæle", "milepael",
+            [("Åbn forløb", ctrl.aabn_sag, None), ("Rediger / status", ctrl.rediger, None),
+             ("Arkivér", ctrl.arkiver, "danger")],
+            [("Tildel ansvarlig…", lambda sag_id: ctrl.action_handling(ANSVARLIG, sag_id, "")),
+             ("Tilføj notat til tidslinjen…", ctrl.tilfoej_notat), (None, None),
+             ("Vis tidslinje", ctrl.vis_historik)],
+            [sk.SAG], "Onboarding – arkiv og annullerede",
         )
-        side.tabel.doubleClicked.connect(lambda _index: self.vis_arkiveret_sag())
-        return side
 
-    ### ----- visning --------------------------------------------------------
+    def _opbyg_offboarding(self):
+        modul = offboarding_modul()
+        ctrl = self.ctrl[OFF]
+        self.off_slet = self._modul_sider(
+            "off", modul, ctrl, "Opgaver og udstyr", "udstyr",
+            [("Åbn sag", ctrl.aabn_sag, None), ("Rediger", ctrl.rediger, None),
+             ("Arkivér", ctrl.arkiver, "danger")],
+            [("Opret rykker…", ctrl.opret_rykker),
+             ("Marker rykker som sendt…", ctrl.marker_rykker_sendt),
+             ("Registrér returlabel som sendt…", ctrl.registrer_returlabel),
+             ("Tilføj notat til tidslinjen…", ctrl.tilfoej_notat), (None, None),
+             ("Vis tidslinje", ctrl.vis_historik)],
+            [sk.SAG, sk.MAIL], "Offboarding – arkiv",
+        )
 
-    def _fane_skiftet(self, index):
-        if index in self.nav_knapper:
-            self.nav_knapper[index].setChecked(True)
-        if index == self.SIDE_DASHBOARD:
-            self.dashboard.opdater(self.medarbejdere_liste, self.medarbejdere_liste_arkiv)
-        elif index == self.SIDE_SKABELONER:
-            self.skabelon_side.opdater()
-        elif index == self.SIDE_BRUGERE:
-            self.bruger_side.opdater()
-        elif index == self.SIDE_DATA:
-            self.data_side.opdater()
+    ### ----- data -----------------------------------------------------------
 
-    def opdater_alle_visninger(self):
-        self.synkroniser()
-        self.hovedside.vis(self.medarbejdere_liste)
-        self.arkivside.vis(self.medarbejdere_liste_arkiv)
-        self.dashboard.opdater(self.medarbejdere_liste, self.medarbejdere_liste_arkiv)
-        alle = self._hent_skabeloner(vis_fejl=False)
-        if alle:
-            self.notifikationer.tjek(
-                self.medarbejdere_liste, sk.aktive(alle, sk.PAAMINDELSE)
+    def _alle_aktive(self):
+        return self.data[ON][0] + self.data[OFF][0]
+
+    def _alle_arkiverede(self):
+        return self.data[ON][1] + self.data[OFF][1]
+
+    def _omraader(self):
+        ind = udfoer(self, self.t.indstillinger.hent)
+        return [] if ind is FEJL else ind["omraader"]
+
+    def _ansvarlige(self):
+        return sorted({s.ansvarlig for s in self.data[ON][0] + self.data[ON][1] if s.ansvarlig})
+
+    def _signatur_nu(self):
+        return (self.t.onboarding.signatur(), self.t.offboarding.signatur(),
+                self.t.datakilde.offline)
+
+    def _laes_data(self) -> bool:
+        try:
+            for proces, service in ((ON, self.t.onboarding), (OFF, self.t.offboarding)):
+                self.data[proces] = (service.hent_aktive(), service.hent_arkiverede())
+            self._signatur = self._signatur_nu()
+            return True
+        except DataFejl as fejl:
+            log.exception("Data kunne ikke indlæses")
+            QMessageBox.critical(self, "Datafejl", str(fejl))
+            return False
+
+    def opdater_alle(self, tving=True):
+        """Genindlæser data (altid, eller kun hvis filerne er ændret) og opdaterer siderne."""
+        if (tving or self._signatur_nu() != self._signatur) and not self._laes_data():
+            return
+        indstillinger = udfoer(self, self.t.indstillinger.hent)
+        regler = action_center.Regler.fra_indstillinger(
+            {} if indstillinger is FEJL else indstillinger)
+        i_dag = date.today()
+        aktive = self._alle_aktive()
+        alarmer = action_center.action_center(aktive, i_dag, regler)
+        dagens = action_center.dagsoversigt(aktive, i_dag)
+
+        self.dashboard.opdater({ON: self.data[ON][0] + self.data[ON][1],
+                                OFF: self.data[OFF][0] + self.data[OFF][1]}, alarmer, dagens)
+        for proces, prefix in ((ON, "on"), (OFF, "off")):
+            aktive_sager, arkiv = self.data[proces]
+            self.sider[f"{prefix}_oversigt"].opdater(
+                aktive_sager, arkiv, alarmer_for(proces, alarmer),
+                [(s, o) for s, o in dagens if s.PROCES == proces],
             )
-        self.sidst_opdateret_label.setText(
-            f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}"
-        )
+            self.sider[f"{prefix}_aktive"].vis(aktive_sager)
+            self.sider[f"{prefix}_opgaver"].opdater(aktive_sager)
+            self.sider[f"{prefix}_arkiv"].vis(arkiv)
+        aktuel = self.stak.currentWidget()
+        if isinstance(aktuel, (SkabelonSide, IndstillingerSide)):
+            aktuel.opdater()
+        self.sidebar.saet_lagring(self.t.datakilde.offline,
+                                  len(self.t.lagring.ventende_aendringer()))
+        self.sidebar.opdateret_label.setText(
+            f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}")
 
     def _minut_tik(self):
         self._daglig_backup()   # programmet kan køre i flere døgn i baggrunden
-        self.opdater_alle_visninger()
+        self.opdater_alle(tving=False)
+        self._vis_paamindelser()
 
-    def _data_gendannet(self):
+    def _vis_paamindelser(self):
+        """Windows-notifikationer – kun hvis brugeren har dem slået til."""
+        if not self.notifikationer.slaaet_til or session.bruger() is None:
+            return
+        skabeloner = udfoer(self, self.t.skabeloner.aktive, sk.PAAMINDELSE)
+        if skabeloner is FEJL:
+            return
+        self.notifikationer.vis_paamindelser(
+            self.t.paamindelser.nye_paamindelser(skabeloner, self._alle_aktive(), date.today())
+        )
+
+    def _daglig_backup(self):
+        """Tager dagens backup (én gang pr. dag). Fejl vises én gang pr. kørsel."""
         try:
-            self._laes_data()
-        except DataFejl as fejl:
-            QMessageBox.critical(self, "Datafejl", str(fejl))
-            return
-        self.opdater_alle_visninger()
+            self.t.backup.daglig_backup()
+        except (DataFejl, OSError) as fejl:
+            log.exception("Daglig backup mislykkedes")
+            if not self._backup_fejl_vist:
+                self._backup_fejl_vist = True
+                QMessageBox.warning(self, "Sikkerhedskopi",
+                                    f"Dagens automatiske backup kunne ikke tages:\n{fejl}\n\n"
+                                    "Se Indstillinger → Data & sikkerhed.")
 
-    ### ----- fælles for handlinger ------------------------------------------
+    ### ----- navigation -----------------------------------------------------
 
-    def _hent_valgt(self, side, arkiv=False):
-        """Finder den markerede medarbejder på siden, med friske data.
+    def vis_side(self, noegle):
+        side = self.sider[noegle]
+        self.stak.setCurrentWidget(side)
+        self.sidebar.marker(noegle)
+        if isinstance(side, (SkabelonSide, IndstillingerSide)):
+            side.opdater()
 
-        Returnerer None (og har vist en besked), hvis intet kan bruges.
-        """
-        loennr = side.valgt_loennr()
-        if loennr is None:
-            QMessageBox.information(self, "Ingen valgt", "Vælg en medarbejder først.")
-            return None
+    def aabn_sag(self, proces, sag_id, opgave_id=""):
+        self.ctrl[proces].aabn_sag(sag_id, opgave_id)
 
-        self.synkroniser()
-        # Listen slås først op nu, da synkroniseringen kan have udskiftet den.
-        liste = self.medarbejdere_liste_arkiv if arkiv else self.medarbejdere_liste
-        medarbejder = self._find(liste, loennr)
-        if medarbejder is None:
-            QMessageBox.warning(
-                self,
-                "Medarbejder ikke fundet",
-                "Medarbejderen findes ikke længere (er den ændret af en anden?). "
-                "Visningen er opdateret.",
-            )
-            self.opdater_alle_visninger()
-        return medarbejder
+    ### ----- log på, roller, tema -------------------------------------------
 
-    def _bekraeft(self, titel, tekst, advarsel=False):
-        knapper = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        vis = QMessageBox.warning if advarsel else QMessageBox.question
-        svar = vis(self, titel, tekst, knapper, QMessageBox.StandardButton.No)
-        return svar == QMessageBox.StandardButton.Yes
-
-    def _loennr_optaget(self, loennr, undtagen=None):
-        if loennr not in self._alle_loennumre(undtagen=undtagen):
-            return False
-        QMessageBox.warning(
-            self,
-            "Lønnr. findes allerede",
-            "Der findes allerede en medarbejder med dette lønnr.",
-        )
-        return True
-
-    def _gem_aendret(self, loennr, ny, registrer=True):
-        """Erstatter medarbejderen med dette lønnr. med den ændrede kopi og gemmer.
-
-        registrer=True skriver forskellene (opgaver, stamdata, status) i
-        tidslinjen. Data kan være ændret af en kollega, mens en dialog var
-        åben, så der synkroniseres og tjekkes igen først.
-        """
-        self.synkroniser()
-        gammel = self._find(self.medarbejdere_liste, loennr)
-        if gammel is None:
-            self.opdater_alle_visninger()
-            QMessageBox.warning(
-                self,
-                "Medarbejder ikke fundet",
-                "Medarbejderen findes ikke længere (er den ændret af en anden?).",
-            )
-            return False
-        if self._loennr_optaget(ny.loennr, undtagen=loennr):
-            return False
-
-        if registrer:
-            registrer_aendringer(gammel, ny)
-        index = self.medarbejdere_liste.index(gammel)
-        self.medarbejdere_liste[index] = ny
-        self._gem_aktive()
-        self.opdater_alle_visninger()
-        return True
-
-    ### ----- handlinger: hovedside ------------------------------------------
-
-    def opret_medarbejder(self):
-        self.synkroniser()
-        alle = self._hent_skabeloner()
-        if alle is None:
-            return
-        dialog = MedarbejderDialog(
-            self,
-            optagede_loennumre=self._alle_loennumre(),
-            skabeloner=sk.aktive(alle, sk.SAG),
-        )
-        if not dialog.exec():
-            return
-
-        data = dialog.hent_data()
-
-        # Tjek igen: en kollega kan have oprettet samme lønnr. imens.
-        self.synkroniser()
-        if self._loennr_optaget(data["loennr"]):
-            return
-
-        skabelon = data["skabelon"]
-        medarbejder = Medarbejder(
-            data["loennr"],
-            data["navn"],
-            data["fratraedelsesdato"],
-            data["kommentar"],
-            sk.opret_opgaver(skabelon, data["fratraedelsesdato"]) if skabelon else [],
-            data["status_manuel"],
-            data["status_begrundelse"],
-            data["email"],
-            data["tracking_link"],
-        )
-        medarbejder.historik.tilfoej(
-            "Afviklingssag oprettet",
-            f"Skabelon: {skabelon['navn']}" if skabelon else "Uden skabelon",
-        )
-        if medarbejder.status_manuel:
-            medarbejder.historik.tilfoej(
-                f"Status låst manuelt: {medarbejder.status_manuel}",
-                medarbejder.status_begrundelse,
-            )
-        self.medarbejdere_liste.append(medarbejder)
-        self._gem_aktive()
-        self.opdater_alle_visninger()
-        # Vis den nye sag med det samme, så opgaverne kan gennemgås.
-        self.aabn_sag(medarbejder.loennr)
-
-    def rediger_medarbejder(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is None:
-            return
-        loennr = medarbejder.loennr
-
-        dialog = MedarbejderDialog(
-            self, medarbejder, optagede_loennumre=self._alle_loennumre(undtagen=loennr)
-        )
-        if not dialog.exec():
-            return
-
-        data = dialog.hent_data()
-        ny = medarbejder.kopi()
-        ny.loennr = data["loennr"]
-        ny.navn = data["navn"]
-        ny.flyt_fratraedelse(data["fratraedelsesdato"])
-        ny.kommentar = data["kommentar"]
-        ny.email = data["email"]
-        ny.tracking_link = data["tracking_link"]
-        ny.status_manuel = data["status_manuel"]
-        ny.status_begrundelse = data["status_begrundelse"]
-        self._gem_aendret(loennr, ny)
-
-    def aabn_valgt_sag(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is not None:
-            self.aabn_sag(medarbejder.loennr)
-
-    def aabn_sag(self, loennr, opgave_id="", start_fane=SagDialog.FANE_OPGAVER):
-        """Åbner afviklingssagen; opgave_id fremhæver en bestemt opgave."""
-        self.synkroniser()
-        medarbejder = self._find(self.medarbejdere_liste, loennr)
-        if medarbejder is None:
-            self.opdater_alle_visninger()
-            return
-        dialog = SagDialog(
-            self, medarbejder, self._ansvarlige(),
-            fokus_opgave_id=opgave_id or None, start_fane=start_fane,
-        )
-        if dialog.exec():
-            self._gem_aendret(loennr, dialog.medarbejder)
-
-    def vis_arkiveret_sag(self):
-        medarbejder = self._hent_valgt(self.arkivside, arkiv=True)
-        if medarbejder is not None:
-            SagDialog(self, medarbejder, kun_laesning=True).exec()
-
-    def arkiver_medarbejder(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is None:
-            return
-        if not self._bekraeft(
-            "Arkiver medarbejder", f"Vil du arkivere {medarbejder.navn}?"
-        ):
-            return
-
-        ny = medarbejder.kopi()
-        ny.arkiveret = date.today().isoformat()
-        ny.historik.tilfoej("Sag arkiveret", f"Status ved arkivering: {ny.status}")
-        data_manager.arkiver_medarbejder(ny)
-        self._laes_data()
-        self.opdater_alle_visninger()
-
-    ### ----- handlinger: Handling-menuen ------------------------------------
-
-    def _opdater_handlingsmenu(self):
-        """Slår menupunkter til/fra efter den valgte medarbejder."""
-        loennr = self.hovedside.valgt_loennr()
-        m = self._find(self.medarbejdere_liste, loennr) if loennr else None
-        for handling in (
-            self.handling_opret_rykker, self.handling_returlabel,
-            self.handling_notat, self.handling_tidslinje,
-        ):
-            handling.setEnabled(m is not None)
-        self.handling_marker_sendt.setEnabled(bool(m and m.usendte_rykkere()))
-
-    def opret_rykker(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is None:
-            return
-        alle = self._hent_skabeloner()
-        if alle is None:
-            return
-        dialog = RykkerDialog(
-            self, medarbejder, sk.aktive(alle, sk.MAIL),
-            sk.relevant_mailskabelon(alle, medarbejder),
-        )
-        if not dialog.exec():
-            return
-
-        rykker = dialog.rykker
-        ny = medarbejder.kopi()
-        ny.rykkere.append(rykker)
-        ny.historik.tilfoej(
-            f"{rykker.kategori} oprettet som kladde",
-            f"Skabelon: {rykker.skabelon_navn} · Frist: {vis_dato(rykker.frist)} "
-            f"· Til: {ny.email}",
-            rykker.id,
-        )
-        self._gem_aendret(medarbejder.loennr, ny, registrer=False)
-
-    def marker_rykker_sendt(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is None:
-            return
-        usendte = medarbejder.usendte_rykkere()
-        if not usendte:
-            QMessageBox.information(
-                self, "Ingen kladder", "Der er ingen rykkere, som venter på at blive sendt."
-            )
-            return
-
-        valg = [
-            f"{r.kategori} – oprettet {vis_dato(r.oprettet[:10])} – {r.emne}"
-            for r in usendte
-        ]
-        tekst, ok = QInputDialog.getItem(
-            self, "Marker rykker som sendt",
-            "Hvilken rykker er sendt?\nMarker den først, når mailen faktisk er afsendt.",
-            valg, 0, False,
-        )
-        if not ok:
-            return
-        rykker_id = usendte[valg.index(tekst)].id
-
-        ny = medarbejder.kopi()
-        rykker = ny.find_rykker(rykker_id)
-        rykker.marker_sendt()
-        ny.historik.tilfoej(
-            f"{rykker.kategori} markeret som sendt", f"Emne: {rykker.emne}", rykker.id
-        )
-        self._gem_aendret(medarbejder.loennr, ny, registrer=False)
-
-    def registrer_returlabel(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is None:
-            return
-        link, ok = QInputDialog.getText(
-            self, "Returlabel sendt",
-            "Tracking-link til returpakken (valgfrit):",
-            QLineEdit.EchoMode.Normal, medarbejder.tracking_link,
-        )
-        if not ok:
-            return
-        ny = medarbejder.kopi()
-        ny.tracking_link = link.strip()
-        ny.historik.tilfoej("Returlabel registreret som sendt", ny.tracking_link)
-        self._gem_aendret(medarbejder.loennr, ny, registrer=False)
-
-    def tilfoej_notat(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is None:
-            return
-        tekst, ok = QInputDialog.getMultiLineText(
-            self, "Tilføj notat",
-            f"Notat til {medarbejder.navn}s tidslinje.\n"
-            "Notatet kan ikke ændres, når det er gemt.",
-        )
-        if not ok or not tekst.strip():
-            return
-        ny = medarbejder.kopi()
-        ny.historik.tilfoej("Notat", tekst.strip())
-        self._gem_aendret(medarbejder.loennr, ny, registrer=False)
-
-    def vis_tidslinje(self):
-        medarbejder = self._hent_valgt(self.hovedside)
-        if medarbejder is not None:
-            self.aabn_sag(medarbejder.loennr, start_fane=SagDialog.FANE_TIDSLINJE)
-
-    ### ----- handlinger: arkiv ----------------------------------------------
-
-    def aktiver_medarbejder(self):
-        medarbejder = self._hent_valgt(self.arkivside, arkiv=True)
-        if medarbejder is None:
-            return
-        if not self._bekraeft(
-            "Aktivér medarbejder", f"Vil du gøre {medarbejder.navn} aktiv igen?"
-        ):
-            return
-
-        ny = medarbejder.kopi()
-        ny.arkiveret = ""
-        ny.historik.tilfoej("Sag gjort aktiv igen")
-        data_manager.aktiver_medarbejder(ny)
-        self._laes_data()
-        self.opdater_alle_visninger()
-
-    def slet_medarbejder(self):
-        if not session.er_admin():
-            return
-        medarbejder = self._hent_valgt(self.arkivside, arkiv=True)
-        if medarbejder is None:
-            return
-        if not self._bekraeft(
-            "Slet medarbejder permanent",
-            f"Vil du slette {medarbejder.navn} (lønnr. {medarbejder.loennr}) "
-            "permanent fra arkivet?\n\nHandlingen kan ikke fortrydes.",
-            advarsel=True,
-        ):
-            return
-
-        data_manager.slet_fra_arkiv(medarbejder)
-        self._laes_data()
-        self.opdater_alle_visninger()
-
-    ### ----- log på og roller ---------------------------------------------
+    def efter_log_paa(self):
+        bruger = session.bruger() or {}
+        praef = self.t.indstillinger.praeference(bruger.get("brugernavn", ""))
+        anvend_tema(QApplication.instance(), praef["tema"])
+        self.notifikationer.slaaet_til = bool(praef["windows_notifikationer"])
+        self.sidebar.saet_bruger(bruger)
+        self.anvend_rolle()
+        self.vis_side("dashboard")
+        self.opdater_alle()
+        self._vis_paamindelser()
 
     def anvend_rolle(self):
-        """Viser/skjuler det, der kræver administratorrettigheder."""
-        bruger = session.bruger() or {}
         admin = session.er_admin()
-        self.bruger_label.setText(
-            f"{bruger.get('navn') or bruger.get('brugernavn', '')}\n{bruger.get('rolle', '')}"
-        )
-        for index in self.ADMIN_SIDER:
-            self.nav_knapper[index].setVisible(admin)
-        self.slet_knap.setVisible(admin)
-        self.skabelon_side.saet_redigerbar(admin)
-        if not admin and self.sider.currentIndex() in self.ADMIN_SIDER:
-            self.sider.setCurrentIndex(self.SIDE_DASHBOARD)
+        redigerbar = admin and not self.t.datakilde.offline
+        for noegle in ("on_skabeloner", "off_skabeloner"):
+            self.sider[noegle].saet_redigerbar(redigerbar)
+        for knap in (self.on_slet, self.off_slet):
+            knap.setVisible(admin)
+        self.indstillinger.anvend_rolle(admin)
+
+    def skift_tema(self, tema):
+        anvend_tema(QApplication.instance(), tema)
+        self.opdater_alle()
+
+    def _saet_notifikationer(self, til):
+        self.notifikationer.slaaet_til = til
+
+    def _lagring_skiftet(self):
+        self.anvend_rolle()
+        self.opdater_alle()
 
     def log_ud(self):
+        log.info("Bruger %s logger ud", session.brugernavn())
         session.log_ud()
         self.hide()
         self.log_paa()
 
     def log_paa(self):
         """Viser log på-skærmen. Annulleres den, afsluttes programmet."""
-        dialog = LoginDialog()
+        dialog = LoginDialog(self.t.auth)
         if not dialog.exec():
             self.afslut()
             return
         session.log_ind(dialog.bruger)
-        self.anvend_rolle()
-        self.sider.setCurrentIndex(self.SIDE_DASHBOARD)
+        self.efter_log_paa()
         self.showNormal()
         self.raise_()
         self.activateWindow()
@@ -745,8 +406,7 @@ class MainWindow(QMainWindow):
             self._baggrund_forklaret = True
             self.notifikationer.vis_besked(
                 f"{APP_NAVN} kører i baggrunden",
-                "Du får påmindelser som Windows-notifikationer. Højreklik på "
-                "ikonet ved uret og vælg Afslut for at lukke helt.",
+                "Højreklik på ikonet ved uret og vælg Afslut for at lukke helt.",
             )
 
     def vis_fra_baggrund(self):
@@ -755,7 +415,6 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        self.sider.setCurrentIndex(self.SIDE_DASHBOARD)
 
     def afslut(self):
         self._afslutter = True

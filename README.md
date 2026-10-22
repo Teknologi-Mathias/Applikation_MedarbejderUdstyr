@@ -4,115 +4,117 @@
 Et fælles sted til opfølgning, automatisering, dokumentation og sammenhæng
 mellem virksomhedens eksisterende systemer.
 
-Første modul er **medarbejderafvikling**: hver fratrådt medarbejder får en
-afviklingssag med opgaver (fx "Modtag telefon", "Er lukket i NAV?"),
-rykkere og en tidslinje over hele forløbet.
+Moduler:
+
+* **Onboarding** – fra kandidat til aktiv medarbejder (stilling, område,
+  milepæle: kandidat → kontrakt → første oplæring → jobs).
+* **Offboarding** – afvikling af fratrådte medarbejdere: udstyr, rykkere,
+  arkiv.
+* **Dashboard / Action Center** – det, der kræver handling, på tværs af
+  modulerne, samt nøgletal.
+* **Indstillinger** – tema, notifikationer, adgangskode, offline, påmindelser
+  og (for administratorer) organisation, brugere og data & sikkerhed.
+
+Arkitekturen er beskrevet i [docs/ARKITEKTUR.md](docs/ARKITEKTUR.md), og
+databaseforberedelsen i
+[app/infrastructure/database/README.md](app/infrastructure/database/README.md).
+
+## Kom i gang (udvikling)
+
+```
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+Første gang findes kun brugeren **admin / admin** – skift koden under
+*Indstillinger → Generelt*.
+
+Valgfrie miljøvariabler (se `.env.example`):
+
+| Variabel | Betydning |
+|---|---|
+| `INBASE_DATA` | Central datamappe (standard: `Data/` ved programmet). Kan være et netværksdrev. |
+| `INBASE_LOKAL` | Lokal mappe til offline-kopi, log og præferencer (standard: `Lokal/`). |
+| `INBASE_SUPABASE_*` | Forberedt – Supabase er ikke tilsluttet endnu. |
+
+## Tests
+
+```
+python -m unittest discover -s tests -t .
+```
+
+Testene kører i midlertidige mapper og rører aldrig rigtige data. UI-testene
+kører offscreen.
 
 ## Struktur
 
 ```
-main.py                     Starter programmet
+main.py                         Opstart: logning → services → data → log på → vindue
 app/
-  __init__.py               Navn, slogan og VERSION
-  stier.py                  Alle stier (Data-mappe, backup, assets) – ét sted
-  medarbejder.py            Medarbejder + beregnet status, konvertering af gamle data
-  opgave.py                 Én opgave: ansvarlig, frist, status, udstyr
-  rykker.py                 Én rykker: kladde oprettet / sendt
-  historik.py               Tidslinjen (kun tilføjelser, hash-kæde)
-  skabeloner.py             Sags-, mail- og påmindelsesskabeloner, variabler, validering
-  alarmer.py                Regler for Action Center, Dagsoversigt og påmindelser
-  datasikkerhed.py          Backup, test af backup, gendannelse, slettepolitik
-  brugere.py                Brugerkartotek, roller og log på (BETA)
-  session.py                Hvem er logget ind lige nu
-  indstillinger.py          Data/indstillinger.json
-  data_manager.py           Læser/skriver JSON-filerne sikkert
-  ui/
-    theme.py                Farver og stylesheet
-    hjaelpere.py            Små byggeklodser: knapper, kort, datoer, piller
-    widgets.py              Tabel-hjælpere (sortering, farvede piller)
-    diagrammer.py           Donut- og søjlediagram
-    hovedvindue.py          Vinduet: sidebar, sider og alle handlinger
-    dashboard_side.py       Dashboard med Action Center og Dagsoversigt
-    medarbejder_side.py     Side med søgning + tabel (Hovedside og Arkiv)
-    skabelon_side.py        Siden Skabeloner (tre faner)
-    skabelon_dialoger.py    Editorer til skabeloner med forhåndsvisning
-    data_side.py            Siden Data & sikkerhed
-    bruger_side.py          Siden Brugerkartotek (kun administratorer)
-    login_dialog.py         Log på-skærmen
-    medarbejder_dialog.py   Opret/rediger stamdata, e-mail, skabelon, manuel status
-    sag_dialog.py           Afviklingssagen: opgaver og tidslinje
-    opgave_dialog.py        Rediger/undtag/slet én opgave
-    rykker_dialog.py        Opret rykker -> kladde i mailprogrammet (mailto:)
-    notifikationer.py       Ikon ved uret + Windows-notifikationer
-assets/                     Ikoner (pakkes med i .exe)
+  bootstrap.py                  Vælger implementeringer og bygger alle services
+  session.py                    Hvem er logget ind
+  domain/                       Sager, opgaver, tidslinje, skabelonregler (ingen I/O)
+    sag.py                      Fælles basis: opgaver, milepæle, version, manuel status
+    onboarding.py / offboarding.py   Modulernes sagstyper og statusregler
+    opgave.py, rykker.py, historik.py, skabelon.py
+  services/                     Forretningsregler – det eneste UI'en kalder
+    workflow.py                 Fælles arbejdsgangsmotor (opgaver fra skabelon, tidslinje)
+    sag_service.py              Fælles sagshandlinger + onboarding_/offboarding_service.py
+    action_center.py, paamindelser.py, rapport_service.py
+    skabelon_service.py, auth_service.py, indstillinger_service.py
+    backup_service.py, lagring_service.py (online/offline + synkronisering)
+  repositories/                 base.py (grænseflader), fejl.py, json/ (nuværende lagring)
+  infrastructure/               stier.py, logning.py, database/ (Supabase – forberedt)
+  ui/                           Vinduer, sider, dialoger og controllere
+tests/                          unittest-tests
+docs/ARKITEKTUR.md              Lag, indgangspunkter og begrænsninger
 ```
 
-## Brugere og roller (BETA)
+## Status og regler
 
-Programmet åbner først efter log på. Første gang findes kun brugeren
-**admin / admin** – skift koden under *Brugerkartotek*.
-
-- **Administrator:** alt, inkl. Brugerkartotek, Data & sikkerhed, redigering
-  af skabeloner og permanent sletning i arkivet.
-- **Bruger:** sager, rykkere, tidslinjer og arkiv; kan se skabeloner.
-
-Brugerne gemmes i `Data/brugere.json` (kode som saltet PBKDF2-hash). Filen
-kan dog læses og ændres af alle med adgang til datamappen, så løsningen er
-**ikke sikker** – brug ikke private adgangskoder. Tidslinjen registrerer den
-bruger, der er logget ind.
-
-## Tema
-
-Mørkt, blødt lilla tema bygget op om `#341539`. Alle farver ligger i
-`FARVER` i `app/ui/theme.py`.
+* **Offboarding:** alle obligatoriske opgaver udført/undtaget → *Afviklet*;
+  noget påbegyndt → *Delvist afleveret*; ellers *Afventer Udstyr*.
+* **Onboarding:** den første milepæl, der ikke er færdig, bestemmer status;
+  opgaver under senere milepæle er låste. Springer en manuel status over
+  manglende krav, er det en *kritisk overstyring* (begrundelse påkrævet,
+  registreres i tidslinjen). Annullering arkiverer forløbet.
+* Alle statusskift registreres i tidslinjen og bruges af nøgletallene.
 
 ## Skabeloner
 
-Redigeres på siden **Skabeloner** (gemmes i `Data/skabeloner.json`):
+Rettes under *Onboarding → Skabeloner*, *Offboarding → Skabeloner og mails*
+og *Indstillinger → Påmindelser* (kun administratorer, kun online).
+Arbejdsgangsskabeloner versionsstyres: ændringer gemmes som ny version og
+påvirker kun nye forløb.
 
-- **Udstyr ved oprettelse** – opgaver der oprettes for nye medarbejdere.
-  `Frist (dage)` regnes fra sidste arbejdsdag. Opgaver med *Udstyr* udfyldt
-  nævnes i rykkere som manglende udstyr.
-- **Mails** – rykkere. Variabler: `{navn}`, `{fornavn}`, `{loennr}`, `{email}`,
-  `{sidste_arbejdsdag}`, `{manglende_udstyr}`, `{frist}`, `{tracking_link}`.
-  Kategorien styrer, hvilken skabelon der foreslås (1. rykker -> *Første
-  påmindelse*, 2. -> *Anden rykker*, 3.+ -> *Sidste rykker*).
-- **Påmindelser** – Windows-notifikationer knyttet til foruddefinerede regler
-  (se `REGLER` i `app/skabeloner.py` og `paamindelser()` i `app/alarmer.py`).
+## Data, offline og sikkerhed
 
-Mangler en variabel en værdi (fx e-mail), kan beskeden ikke oprettes.
-
-## Status
-
-- Alle obligatoriske opgaver udført/undtaget -> **Afviklet**
-- Mindst én opgave i gang, afventer eller udført -> **Delvist afleveret**
-- Ellers -> **Afventer Udstyr**
-
-Status kan låses manuelt under *Rediger*, men kun med en begrundelse.
-
-## Rykkere
-
-*Handling -> Opret rykker* åbner en kladde i standardmailprogrammet via
-`mailto:`. Programmet kan ikke se, om mailen sendes, så rykkeren står som
-*Kladde oprettet*, indtil den markeres som sendt (*Handling -> Marker rykker
-som sendt*). Begge dele registreres i tidslinjen.
-
-## Data og sikkerhed
-
-- **Udvikling:** `Data/` i projektmappen. **Færdig .exe:** `Data/` ved siden af
-  programfilen, fx `C:\IN-BASE\Data`. Miljøvariablen `INBASE_DATA` kan pege på
-  en anden mappe.
-- **Backup:** én automatisk backup om dagen (i `Data/Backup` eller en valgt
-  mappe), testet straks efter. Gendannelse tager først en backup af de
-  nuværende data.
-- **Slettepolitik:** arkiverede sager kan slettes efter en valgt periode
-  (standard 12 måneder – aftal perioden med HR).
-- **Adgang:** styres af Windows-rettighederne på `Data`- og backupmappen.
+* **Central datamappe** (`Data/`): sager, skabeloner, brugere, indstillinger.
+  Ældre data migreres automatisk ved opstart – efter en backup.
+* **Arbejd offline** (*Indstillinger → Generelt*): lokal kopi + ændringslog;
+  synkroniseres med versionskontrol, når du går online. Konflikter
+  overskrives aldrig – du vælger selv. Der skiftes aldrig automatisk.
+* **Backup:** dagligt og testet; gendannelse tager først en backup.
+* **Login er BETA:** adgangskoder gemmes som saltede hashes, men brugerfilen
+  er ikke beskyttet. Reel adgangskontrol kommer med Supabase Auth + RLS.
 
 Læg programmet i en mappe brugerne kan skrive i, **ikke** i `C:\Program Files`.
 
-## Byg
+## Byg Windows-program
 
 ```
 pyinstaller MedarbejderUdstyr.spec
 ```
+
+Resultatet er `dist/IN-BASE.exe`. `Data/` og `Lokal/` oprettes ved siden af.
+Versionen (vist i Jobliste og Egenskaber) læses fra `VERSION` i `app/__init__.py`.
+
+## Logo og ikon
+
+* `assets/IN-BASE-logo.svg` / `IN-BASE logo.png` – det originale logo.
+* `assets/IN-BASE-ikon.svg` – samme grafik, kvadratisk beskåret, så det er
+  tydeligt i små størrelser (proceslinje, Jobliste, notifikationer).
+* `assets/IN-BASE.ico` – Windows-ikonet (16–256 px). Ændres logoet, så ret
+  `IN-BASE-ikon.svg` og kør `python tools/lav_ikon.py`.

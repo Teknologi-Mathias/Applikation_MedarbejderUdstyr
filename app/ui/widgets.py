@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from app.ui.theme import FARVER
 
-LOENNR_ROLE = Qt.ItemDataRole.UserRole          # lønnr. på hver celle i rækken
+ID_ROLE = Qt.ItemDataRole.UserRole              # sagens id på hver celle i rækken
 SORT_ROLE = Qt.ItemDataRole.UserRole + 1        # nøgle til korrekt sortering
 STIL_ROLE = Qt.ItemDataRole.UserRole + 2        # {"bg", "tekst"} til PilleDelegate
 

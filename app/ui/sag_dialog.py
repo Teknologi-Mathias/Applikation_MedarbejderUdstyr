@@ -1,4 +1,8 @@
-"""Afviklingssagen for én medarbejder: opgaver, ansvarlige, frister og fremdrift."""
+"""En sag (onboarding eller offboarding): opgaver, milepæle, fremdrift og tidslinje.
+
+Dialogen arbejder på en kopi af sagen (self.sag). Controlleren gemmer kopien
+via servicen, når brugeren trykker "Gem sag".
+"""
 from datetime import date
 
 from PySide6.QtCore import QTimer, Qt
@@ -20,19 +24,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.opgave import Opgave
-from app.ui.hjaelpere import dansk_dato, laes_dato, lav_knap, pille_css, vis_dato
+from app.domain.opgave import Opgave
+from app.ui.hjaelpere import lav_knap, pille_css, vis_dato
 from app.ui.opgave_dialog import OpgaveDialog
-from app.ui.theme import OPGAVE_STIL, STATUS_STIL
+from app.ui.theme import OPGAVE_STIL, TONER, status_stil
 
 
 class OpgaveRaekke(QFrame):
     """Én opgave: status-vælger, navn, ansvarlig/frist og Rediger-knap."""
 
-    def __init__(self, sag, opgave, fokus=False, kun_laesning=False):
+    def __init__(self, dialog, opgave, fokus=False, kun_laesning=False):
         super().__init__()
-        self.sag = sag
+        self.dialog = dialog
         self.opgave = opgave
+        self.laast = dialog.sag.er_laast(opgave)
         self.setObjectName("opgaveRaekke")
         self.setProperty("fokus", fokus)
 
@@ -44,7 +49,7 @@ class OpgaveRaekke(QFrame):
         self.status_input.addItems(Opgave.STATUSER)
         self.status_input.setFixedWidth(130)
         self.status_input.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.status_input.setEnabled(not kun_laesning)
+        self.status_input.setEnabled(not kun_laesning and not self.laast)
         self.status_input.currentTextChanged.connect(self._status_valgt)
 
         tekst = QVBoxLayout()
@@ -65,7 +70,7 @@ class OpgaveRaekke(QFrame):
         layout.addLayout(tekst, 1)
         if not kun_laesning:
             rediger = lav_knap("Rediger")
-            rediger.clicked.connect(lambda: self.sag.rediger_opgave(self.opgave))
+            rediger.clicked.connect(lambda: self.dialog.rediger_opgave(self.opgave))
             layout.addWidget(rediger, 0, Qt.AlignmentFlag.AlignTop)
 
         self.opdater()
@@ -75,16 +80,17 @@ class OpgaveRaekke(QFrame):
         self.status_input.blockSignals(True)
         self.status_input.setCurrentText(o.status)
         self.status_input.blockSignals(False)
-        stil = OPGAVE_STIL[o.status]
+        stil = TONER["graa"] if self.laast else OPGAVE_STIL[o.status]
         self.status_input.setStyleSheet(
             f"QComboBox {{ background: {stil['bg']}; color: {stil['tekst']};"
             f" border: none; font-weight: 700; }}"
         )
 
         self.navn_label.setText(o.navn + ("" if o.obligatorisk else "  (valgfri)"))
-        self.meta_label.setText(
-            f"{o.ansvarlig or 'Ingen ansvarlig'} · Frist: {vis_dato(o.frist) or 'ingen'}"
-        )
+        meta = f"{o.ansvarlig or 'Ingen ansvarlig'} · Frist: {vis_dato(o.frist) or 'ingen'}"
+        if o.udstyr:
+            meta += f" · Udstyr: {o.udstyr}"
+        self.meta_label.setText(meta)
 
         dage_over = o.dage_over_frist(date.today())
         if dage_over is not None and dage_over > 0:
@@ -98,6 +104,11 @@ class OpgaveRaekke(QFrame):
         self.forsinket_label.setVisible(bool(self.forsinket_label.text()))
 
         noter = []
+        if self.laast:
+            aktiv = self.dialog.sag.milepael_navn(self.dialog.sag.aktiv_milepael())
+            noter.append(f"Låst – bliver tilgængelig, når '{aktiv}' er færdig")
+        if o.beskrivelse:
+            noter.append(o.beskrivelse)
         if o.begrundelse:
             noter.append(f"Begrundelse: {o.begrundelse}")
         if o.naeste_handling and not o.afsluttet:
@@ -108,29 +119,34 @@ class OpgaveRaekke(QFrame):
     def _status_valgt(self, status):
         if status == Opgave.UNDTAGET and not self.opgave.begrundelse:
             # En undtagelse skal begrundes – åbn opgaven og bed om årsagen.
-            if not self.sag.rediger_opgave(self.opgave, ny_status=status):
+            if not self.dialog.rediger_opgave(self.opgave, ny_status=status):
                 self.opdater()   # annulleret: sæt vælgeren tilbage
             return
-        self.opgave.status = status
-        self.opdater()
-        self.sag.opgaver_aendret()
+        milepael_foer = self.dialog.sag.aktiv_milepael()
+        self.opgave.saet_status(status)
+        if self.dialog.sag.aktiv_milepael() != milepael_foer:
+            # En milepæl er blevet færdig (eller genåbnet): lås op/lås rækkerne.
+            QTimer.singleShot(0, self.dialog.byg_raekker)
+        else:
+            self.opdater()
+        self.dialog.opgaver_aendret()
 
 
 class SagDialog(QDialog):
-    """Arbejder på en kopi af medarbejderen; hent resultatet i self.medarbejder."""
+    """Arbejder på en kopi af sagen; hent resultatet i self.sag."""
 
     FANE_OPGAVER = 0
     FANE_TIDSLINJE = 1
 
-    def __init__(self, parent, medarbejder, ansvarlige=(), fokus_opgave_id=None,
+    def __init__(self, parent, sag, ansvarlige=(), fokus_opgave_id=None,
                  kun_laesning=False, start_fane=FANE_OPGAVER):
         super().__init__(parent)
-        self.medarbejder = medarbejder.kopi()
+        self.sag = sag.kopi()
         self.ansvarlige = list(ansvarlige)
         self.fokus_opgave_id = fokus_opgave_id
         self.kun_laesning = kun_laesning
 
-        self.setWindowTitle(f"Afviklingssag: {self.medarbejder.navn}")
+        self.setWindowTitle(f"{self._titel()}: {self.sag.navn}")
         self.setMinimumSize(720, 620)
 
         layout = QVBoxLayout(self)
@@ -151,9 +167,12 @@ class SagDialog(QDialog):
         layout.addWidget(self._streg())
         layout.addLayout(self._opbyg_bund())
 
-        self._byg_raekker()
+        self.byg_raekker()
         self.opgaver_aendret()
         self._byg_tidslinje()
+
+    def _titel(self):
+        return "Onboarding" if self.sag.MILEPAELE else "Afviklingssag"
 
     ### ----- opbygning ------------------------------------------------------
 
@@ -232,16 +251,15 @@ class SagDialog(QDialog):
         return streg
 
     def _opbyg_hoved(self):
-        m = self.medarbejder
+        m = self.sag
         hoved = QHBoxLayout()
         tekst = QVBoxLayout()
         tekst.setSpacing(2)
-        titel = QLabel(f"Afviklingssag: {m.navn}")
+        titel = QLabel(f"{self._titel()}: {m.navn}")
         titel.setObjectName("sagTitel")
-        dato = laes_dato(m.fratraedelsesdato)
-        sidste_dag = dansk_dato(dato) if dato.isValid() else str(m.fratraedelsesdato)
-        under = QLabel(f"Lønnummer {m.loennr} · Sidste arbejdsdag {sidste_dag}")
+        under = QLabel(m.beskrivelse())
         under.setObjectName("pageSub")
+        under.setWordWrap(True)
         tekst.addWidget(titel)
         tekst.addWidget(under)
         if m.status_manuel:
@@ -303,21 +321,42 @@ class SagDialog(QDialog):
         bund.addWidget(knapper)
         return bund
 
-    def _byg_raekker(self):
+    def _grupper(self):
+        """[(overskrift eller None, [opgaver])] – opgaver grupperet efter milepæl."""
+        sag = self.sag
+        if not sag.MILEPAELE:
+            return [(None, sag.opgaver)]
+        grupper = []
+        for noegle, navn in sag.MILEPAELE:
+            opgaver = [o for o in sag.opgaver if o.milepael == noegle]
+            if opgaver:
+                faerdig = "  ✓" if sag.milepael_faerdig(noegle) else ""
+                grupper.append((navn.upper() + faerdig, opgaver))
+        uden = [o for o in sag.opgaver if o.milepael not in dict(sag.MILEPAELE)]
+        if uden:
+            grupper.append(("ØVRIGE OPGAVER", uden))
+        return grupper
+
+    def byg_raekker(self):
         while self.raekke_layout.count():
             widget = self.raekke_layout.takeAt(0).widget()
             if widget is not None:
                 widget.deleteLater()
 
         fokus_raekke = None
-        for opgave in self.medarbejder.opgaver:
-            fokus = opgave.id == self.fokus_opgave_id
-            raekke = OpgaveRaekke(self, opgave, fokus, self.kun_laesning)
-            self.raekke_layout.addWidget(raekke)
-            if fokus:
-                fokus_raekke = raekke
+        for overskrift, opgaver in self._grupper():
+            if overskrift:
+                label = QLabel(overskrift)
+                label.setObjectName("milepaelTitel")
+                self.raekke_layout.addWidget(label)
+            for opgave in opgaver:
+                fokus = opgave.id == self.fokus_opgave_id
+                raekke = OpgaveRaekke(self, opgave, fokus, self.kun_laesning)
+                self.raekke_layout.addWidget(raekke)
+                if fokus:
+                    fokus_raekke = raekke
 
-        if not self.medarbejder.opgaver:
+        if not self.sag.opgaver:
             tom = QLabel("Sagen har ingen opgaver endnu. Tilføj dem med '+ Tilføj opgave'.")
             tom.setObjectName("hjaelpTekst")
             tom.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -337,53 +376,55 @@ class SagDialog(QDialog):
 
     def opgaver_aendret(self):
         """Opdaterer overskriftens status og fremdrift efter en ændring."""
-        m = self.medarbejder
+        m = self.sag
         afsluttede, total = m.opgave_optaelling()
         self.antal_label.setText(f"{afsluttede} af {total}")
         self.fremdrift.setMaximum(max(total, 1))
         self.fremdrift.setValue(afsluttede)
 
         self.status_badge.setText(m.status + (" (manuel)" if m.status_manuel else ""))
-        self.status_badge.setStyleSheet(pille_css(STATUS_STIL[m.status]))
+        self.status_badge.setStyleSheet(pille_css(status_stil(m.status)))
 
     def rediger_opgave(self, opgave, ny_status=None):
         """Åbner opgaven. Returnerer True hvis noget blev gemt eller slettet."""
-        dialog = OpgaveDialog(self, opgave, self.ansvarlige)
+        dialog = OpgaveDialog(self, opgave, self.ansvarlige, milepaele=self.sag.MILEPAELE)
         if ny_status:
             dialog.status_input.setCurrentText(ny_status)
             dialog.fokuser_begrundelse()
         if not dialog.exec():
             return False
         if dialog.slettet:
-            self.medarbejder.opgaver.remove(opgave)
-        self._byg_raekker()
+            self.sag.opgaver.remove(opgave)
+        self.byg_raekker()
         self.opgaver_aendret()
         return True
 
     def tilfoej_opgave(self):
         dialog = OpgaveDialog(
-            self, None, self.ansvarlige, standard_frist=self.medarbejder.fratraedelsesdato
+            self, None, self.ansvarlige, standard_frist=self.sag.startdato(),
+            milepaele=self.sag.MILEPAELE,
         )
         if dialog.exec():
-            self.medarbejder.opgaver.append(dialog.opgave)
+            self.sag.opgaver.append(dialog.opgave)
             self.fokus_opgave_id = dialog.opgave.id
-            self._byg_raekker()
+            self.byg_raekker()
             self.opgaver_aendret()
 
     ### ----- tidslinje ------------------------------------------------------
 
     def _reference_tekst(self, reference):
         """Viser opgavens navn i stedet for dens id, hvis referencen er en opgave."""
-        opgave = self.medarbejder.find_opgave(reference)
+        opgave = self.sag.find_opgave(reference)
         if opgave is not None:
             return opgave.navn
-        rykker = self.medarbejder.find_rykker(reference)
+        find_rykker = getattr(self.sag, "find_rykker", None)
+        rykker = find_rykker(reference) if find_rykker else None
         if rykker is not None:
             return f"Rykker: {rykker.emne}"
         return reference
 
     def _byg_tidslinje(self):
-        historik = self.medarbejder.historik
+        historik = self.sag.historik
         self.manipuleret_label.setVisible(not historik.er_intakt())
         haendelser = historik.haendelser()
         self.tidslinje.setRowCount(len(haendelser))
@@ -410,5 +451,5 @@ class SagDialog(QDialog):
             "Det gemmes sammen med sagen.",
         )
         if ok and tekst.strip():
-            self.medarbejder.historik.tilfoej("Notat", tekst.strip())
+            self.sag.historik.tilfoej("Notat", tekst.strip())
             self._byg_tidslinje()

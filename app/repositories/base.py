@@ -1,0 +1,53 @@
+"""Grænseflader for datalagringen.
+
+Services kender kun disse grænseflader – ikke JSON-filer eller databaser.
+I dag findes JSON-implementeringer (app/repositories/json/). En fremtidig
+Supabase/PostgreSQL-implementering skal implementere de samme metoder
+(se app/infrastructure/database/README.md).
+
+Fælles regler for alle implementeringer:
+- Hver sag har et versionsnummer. gem() afviser med KonfliktFejl, hvis den
+  gemte version ikke er den samme, som sagen blev hentet med (optimistisk
+  låsning), og tæller versionen op ved succes.
+- Fejl meldes som DataFejl/KonfliktFejl/OfflineFejl (app/repositories/fejl.py).
+"""
+from typing import Optional, Protocol
+
+from app.domain.sag import Sag
+
+
+class SagRepository(Protocol):
+    proces: str
+
+    def hent_aktive(self) -> list[Sag]: ...
+    def hent_arkiverede(self) -> list[Sag]: ...
+    def hent(self, sag_id: str) -> Optional[Sag]: ...
+    def gem(self, sag: Sag) -> Sag: ...
+    def arkiver(self, sag: Sag) -> Sag: ...
+    def aktiver(self, sag: Sag) -> Sag: ...
+    def slet(self, sag: Sag) -> None: ...
+    def signatur(self) -> tuple: ...
+
+
+class SkabelonRepository(Protocol):
+    def hent_alle(self) -> dict: ...
+    def gem_alle(self, alle: dict) -> None: ...
+
+
+class BrugerRepository(Protocol):
+    def hent_alle(self) -> list[dict]: ...
+    def gem_alle(self, brugere: list[dict]) -> None: ...
+
+
+class IndstillingRepository(Protocol):
+    """Fælles indstillinger (backup, slettepolitik, områder, regler)."""
+
+    def hent(self) -> dict: ...
+    def gem(self, indstillinger: dict) -> None: ...
+
+
+class PraeferenceRepository(Protocol):
+    """Den enkelte brugers præferencer (tema, notifikationer)."""
+
+    def hent(self, brugernavn: str) -> dict: ...
+    def gem(self, brugernavn: str, praeferencer: dict) -> None: ...

@@ -1,0 +1,51 @@
+<!-- Ikon-udgave af IN-BASE-logo.svg: samme grafik, kvadratisk beskåret til små størrelser. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" viewBox="256 258 761 761" width="761" height="761" role="img" aria-label="iNB ikon">
+  <metadata>
+    <rdf:RDF>
+      <rdf:Description rdf:about="">
+        <dc:creator>Mathias Sander</dc:creator>
+        <dc:rights>© Mathias Sander</dc:rights>
+      </rdf:Description>
+    </rdf:RDF>
+  </metadata>
+  <defs>
+    <style>
+      .white { fill: #F5F5F5; }
+      .black { fill: #050508; }
+      .red { fill: #E53030; }
+      .cut { fill: none; stroke: #050508; stroke-width: 8; }
+      .trace { fill: none; stroke: #050508; stroke-width: 10; }
+      .gap { stroke-linecap: round; }
+    </style>
+    <g id="node-ring">
+      <circle class="white" r="40"/>
+      <circle class="black" r="26"/>
+      <circle class="red" r="13.5"/>
+    </g>
+    <g id="node-inner">
+      <circle class="white" r="27"/>
+      <circle class="red" r="14"/>
+    </g>
+  </defs>
+
+  <rect class="black" x="256" y="258" width="761" height="761" rx="150"/>
+
+  <rect class="red" x="317" y="460" width="65" height="67" rx="9"/>
+  <path class="white" d="M326 548 H373 Q383 548 383 558 V757 H408 V800 H326 Q316 800 316 790 V558 Q316 548 326 548 Z"/>
+
+  <path class="white" d="M417 461 H494 L665 680 V545 H720 V470 Q720 460 730 460 H858 C913 460 957 503 957 557 C957 591 944 617 925 635 C945 653 957 680 957 712 C957 764 914 805 862 805 H667 L482 568 V777 H407 V471 Q407 461 417 461 Z"/>
+
+  <path class="black" d="M790 522 H858 A38 38 0 0 1 858 598 H805 Q790 598 790 583 Z"/>
+  <path class="black" d="M805 665 H858 A38.5 38.5 0 0 1 858 742 H790 V680 Q790 665 805 665 Z"/>
+
+  <path class="trace" d="M735 535 H792"/>
+  <path class="trace" d="M733 556 V738 H792"/>
+
+  <use href="#node-ring" x="695" y="526"/>
+  <use href="#node-ring" x="447" y="777"/>
+  <use href="#node-inner" x="845" y="560"/>
+  <use href="#node-inner" x="845" y="704"/>
+
+  <path class="cut gap" d="M715.7 487.2 A44 44 0 0 1 690.4 569.8"/>
+  <path class="cut gap" d="M408.9 799.0 A44 44 0 0 1 464.9 736.8"/>
+</svg>

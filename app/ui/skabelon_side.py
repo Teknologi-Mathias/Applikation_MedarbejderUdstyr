@@ -1,11 +1,15 @@
-"""Siden Skabeloner: faner for sager (udstyr), mails og påmindelser."""
+"""Skabelonsider: arbejdsgange, mails og påmindelser.
+
+Samme komponent bruges under Onboarding (arbejdsgange), Offboarding
+(arbejdsgange + mails) og Indstillinger (påmindelser). Alle ændringer går
+gennem SkabelonService (versionering, offline-spærring).
+"""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -13,8 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app import skabeloner as sk
-from app.data_manager import DataFejl
+from app.domain import skabelon as sk
+from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved
 from app.ui.theme import FARVER
 from app.ui.skabelon_dialoger import (
@@ -26,12 +30,14 @@ from app.ui.skabelon_dialoger import (
 # Pr. slags: (fanens navn, forklaring, kolonner, funktion der giver kolonneværdier)
 _FANER = {
     sk.SAG: (
-        "Udstyr ved oprettelse",
-        "Opgaver og udstyr, der oprettes automatisk, når en medarbejder registreres.",
-        ("Navn", "Opgaver", "Udstyr"),
+        "Arbejdsgange",
+        "Opgaver der oprettes automatisk, når et forløb oprettes. Ændringer gemmes som "
+        "ny version og påvirker kun nye forløb.",
+        ("Navn", "Version · opgaver", "Stillinger / udstyr"),
         lambda s: (
-            str(len(s["opgaver"])),
-            ", ".join(o["udstyr"] for o in s["opgaver"] if o.get("udstyr")) or "–",
+            f"v{s.get('version', 1)} · {len(s['opgaver'])} opgaver",
+            ", ".join(s.get("stillinger") or []) or ", ".join(
+                o["udstyr"] for o in s["opgaver"] if o.get("udstyr")) or "Alle",
         ),
     ),
     sk.MAIL: (
@@ -59,6 +65,7 @@ class SkabelonListe(QWidget):
         super().__init__()
         self.side = side
         self.slags = slags
+        self._skabeloner = []
         _, forklaring, kolonner, _ = _FANER[slags]
 
         layout = QVBoxLayout(self)
@@ -106,7 +113,9 @@ class SkabelonListe(QWidget):
     ### ----- visning --------------------------------------------------------
 
     def vis(self):
-        skabeloner = self.side.alle[self.slags]
+        skabeloner = [s for s in self.side.alle[self.slags]
+                      if self.slags != sk.SAG or s.get("proces") == self.side.proces]
+        self._skabeloner = skabeloner
         valgt = self._valgt_id()
         vaerdier = _FANER[self.slags][3]
         self.tabel.setRowCount(len(skabeloner))
@@ -131,7 +140,7 @@ class SkabelonListe(QWidget):
 
     def _valgt(self):
         valgt_id = self._valgt_id()
-        return next((s for s in self.side.alle[self.slags] if s["id"] == valgt_id), None)
+        return next((s for s in self._skabeloner if s["id"] == valgt_id), None)
 
     def _opdater_knapper(self):
         valgt = self._valgt()
@@ -153,7 +162,7 @@ class SkabelonListe(QWidget):
         return dialog.skabelon if dialog.exec() else None
 
     def ny(self):
-        resultat = self._aabn_editor(sk.ny_skabelon(self.slags))
+        resultat = self._aabn_editor(sk.ny_skabelon(self.slags, self.side.proces))
         if resultat:
             self.side.gem(self.slags, resultat)
 
@@ -174,42 +183,50 @@ class SkabelonListe(QWidget):
     def skift_aktiv(self):
         valgt = self._valgt()
         if valgt:
-            self.side.gem(self.slags, dict(valgt, aktiv=not valgt["aktiv"]))
+            self.side.skift_aktiv(self.slags, valgt)
 
 
 class SkabelonSide(QWidget):
-    def __init__(self, hent_medarbejdere, vis_testnotifikation=None):
+    def __init__(self, skabeloner, slags, proces=None, titel="Skabeloner", undertitel="",
+                 hent_sager=lambda: [], vis_testnotifikation=None, indlejret=False):
+        """slags: hvilke skabelontyper der vises som faner. proces: filter for arbejdsgange."""
         super().__init__()
-        self.hent_medarbejdere = hent_medarbejdere
+        self.skabeloner = skabeloner
+        self.proces = proces
+        self.hent_medarbejdere = hent_sager
         self.vis_testnotifikation = vis_testnotifikation
-        self.alle = {slags: [] for slags in sk.SLAGS}
+        self.alle = {s: [] for s in sk.SLAGS}
         # Kun administratorer må ændre skabeloner; brugere kan se dem.
         self.redigerbar = True
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 28, 32, 28)
+        margin = 0 if indlejret else 32
+        layout.setContentsMargins(margin, 0 if indlejret else 28, margin, 0 if indlejret else 28)
         layout.setSpacing(10)
-        hoved, _ = lav_sidehoved(
-            "Skabeloner",
-            "Opret, redigér, kopiér og deaktivér skabeloner. "
-            "Deaktiverede skabeloner bevares, men kan ikke vælges.",
-        )
-        layout.addLayout(hoved)
+        if not indlejret:
+            hoved, _ = lav_sidehoved(titel, undertitel or (
+                "Opret, redigér, kopiér og deaktivér skabeloner. "
+                "Deaktiverede skabeloner bevares, men kan ikke vælges."))
+            layout.addLayout(hoved)
 
-        self.faner = QTabWidget()
-        self.faner.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
-        self.lister = {}
-        for slags in sk.SLAGS:
-            liste = SkabelonListe(self, slags)
-            self.lister[slags] = liste
-            index = self.faner.addTab(liste, _FANER[slags][0])
-            self.faner.setTabToolTip(index, _FANER[slags][1])
-        self.laast_label = QLabel(
-            "Kun administratorer kan ændre skabeloner. Du kan se dem her."
-        )
+        self.laast_label = QLabel("Kun administratorer kan ændre skabeloner, og ikke offline.")
         self.laast_label.setObjectName("info")
         layout.addWidget(self.laast_label)
-        layout.addWidget(self.faner, 1)
+
+        self.lister = {}
+        if len(slags) == 1:
+            liste = SkabelonListe(self, slags[0])
+            self.lister[slags[0]] = liste
+            layout.addWidget(liste, 1)
+        else:
+            self.faner = QTabWidget()
+            self.faner.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
+            for slag in slags:
+                liste = SkabelonListe(self, slag)
+                self.lister[slag] = liste
+                index = self.faner.addTab(liste, _FANER[slag][0])
+                self.faner.setTabToolTip(index, _FANER[slag][1])
+            layout.addWidget(self.faner, 1)
 
     def saet_redigerbar(self, redigerbar):
         self.redigerbar = redigerbar
@@ -218,26 +235,17 @@ class SkabelonSide(QWidget):
             liste._opdater_knapper()
 
     def opdater(self):
-        try:
-            self.alle = sk.hent_alle()
-        except DataFejl as fejl:
-            QMessageBox.warning(self, "Skabeloner", str(fejl))
+        alle = udfoer(self, self.skabeloner.hent_alle)
+        if alle is FEJL:
             return
+        self.alle = alle
         for liste in self.lister.values():
             liste.vis()
 
     def gem(self, slags, skabelon):
-        """Gemmer én skabelon (ny eller ændret) – genindlæser først filen."""
-        try:
-            alle = sk.hent_alle()
-            liste = alle[slags]
-            for i, eksisterende in enumerate(liste):
-                if eksisterende["id"] == skabelon["id"]:
-                    liste[i] = skabelon
-                    break
-            else:
-                liste.append(skabelon)
-            sk.gem_alle(alle)
-        except (DataFejl, OSError) as fejl:
-            QMessageBox.warning(self, "Skabeloner", f"Skabelonen kunne ikke gemmes:\n{fejl}")
+        udfoer(self, self.skabeloner.gem, slags, skabelon)
+        self.opdater()
+
+    def skift_aktiv(self, slags, skabelon):
+        udfoer(self, self.skabeloner.skift_aktiv, slags, skabelon)
         self.opdater()
