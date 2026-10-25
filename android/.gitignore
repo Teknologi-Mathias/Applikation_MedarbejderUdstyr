@@ -2,5 +2,6 @@
 build/
 app/build/
 local.properties
+reservekode.txt
 .idea/
 *.iml

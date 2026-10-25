@@ -16,6 +16,7 @@ import android.widget.TextView;
  * Administrator-menu på telefonen (åbnes med *#*#46227#*#* i Telefon-appen).
  * Med telefonens nulstillingskode (se IN-BASE → Handling → Vis nulstillingskode)
  * kan telefonen fabriksnulstilles – også selvom nulstilling ellers er spærret.
+ * Telefoner uden egen kode (klargjort med v1) bruger reservekoden (assets/mdm/reservekode.txt).
  */
 public class AdminActivity extends Activity {
     static final String PREFS = "inbase";
@@ -54,6 +55,10 @@ public class AdminActivity extends Activity {
 
     private void kontroller(String indtastet, TextView tekst) {
         String rigtig = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KODE, "");
+        if (rigtig.isEmpty()) {
+            // Telefon klargjort før nulstillingskoden fandtes: reservekoden fra IN-BASE gælder.
+            rigtig = getString(R.string.reservekode);
+        }
         if (rigtig.isEmpty() || !rigtig.equals(indtastet)) {
             forsoeg++;
             tekst.setText("Forkert kode (" + forsoeg + "/5).");

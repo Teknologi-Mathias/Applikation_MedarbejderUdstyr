@@ -147,6 +147,12 @@ class MdmService:
         return "" if APK.is_file() else (
             f"Styrings-appen mangler ({APK}). Byg den med scripts\\byg_klargoering_apk.ps1.")
 
+    def reservekode(self) -> str:
+        """Kode til telefoner klargjort uden egen nulstillingskode (styrings-app v1)."""
+        self._kraev_admin()
+        fil = APK.with_name("reservekode.txt")
+        return fil.read_text(encoding="utf-8").strip() if fil.is_file() else ""
+
     def huskede_indstillinger(self) -> dict:
         data = self.lokal.hent() if self.lokal else {}
         return {k: str(data.get(k, "")) for k in HUSKEDE}

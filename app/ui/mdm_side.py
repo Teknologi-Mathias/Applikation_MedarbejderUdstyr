@@ -144,9 +144,14 @@ class MdmSide(SagListeSide):
 
     def vis_kode(self, enhed) -> None:
         if not enhed.nulstillingskode:
-            QMessageBox.information(self, "Nulstillingskode",
-                                    f"{enhed.navn} har ingen nulstillingskode. Den får en, næste "
-                                    "gang den klargøres.")
+            reserve = self.service.reservekode()
+            QMessageBox.information(
+                self, "Nulstillingskode",
+                f"{enhed.navn} er klargjort uden egen nulstillingskode.\n\n"
+                + (f"Brug reservekoden: {reserve}\n\nKræver, at telefonen har IN-BASE Klargøring "
+                   "version 2 (opdatér den via Bluetooth – se docs/MDM_OPSAETNING.md).\n"
+                   "Tast derefter *#*#46227#*#* i Telefon-appen."
+                   if reserve else "Der findes ingen reservekode på denne pc."))
             return
         QMessageBox.information(
             self, "Nulstillingskode",

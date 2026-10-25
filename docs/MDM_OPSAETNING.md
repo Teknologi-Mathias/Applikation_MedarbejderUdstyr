@@ -73,10 +73,19 @@ nulstillingskode:
 2. Åbn Telefon-appen på telefonen og tast `*#*#46227#*#*`. Det er I-N-B-A-S på tastaturet.
 3. Indtast koden, og vælg **Fabriksnulstil telefonen**.
 
-Telefoner, der er klargjort før nulstillingskoden blev indført (fx ISM321), kan kun
-genskabes med Motorolas værktøj *Rescue and Smart Assistant* på pc'en
-(<https://support.lenovo.com/rescue>). Brug funktionen *Rescue* til at installere telefonens
-officielle software igen. Det sletter alt.
+**Telefoner klargjort før nulstillingskoden (version 1, fx ISM321).** De kan hverken
+nulstilles i recovery, med Rescue-værktøjet eller med fastboot (`Permission denied`). Opdatér
+i stedet styrings-appen via Bluetooth, som ikke er spærret:
+1. På pc'en: højreklik på `assets/mdm/inbase-klargoering.apk` (version 2) og vælg
+   **Send til → Bluetooth-enhed**. Vælg telefonen. Den skal først parres via
+   Indstillinger → Bluetooth på telefonen.
+2. På telefonen: accepter filen. Tryk på den i notifikationen, tillad installation fra
+   *Bluetooth*, og vælg **Opdater**.
+3. Tast `*#*#46227#*#*` i Telefon-appen, og indtast **reservekoden** (IN-BASE → Handling →
+   Vis nulstillingskode). Telefonen nulstilles.
+
+Reservekoden ligger i `android/reservekode.txt` og `assets/mdm/reservekode.txt` (ikke i git).
+Den virker kun på telefoner uden egen kode.
 
 **Firma-mail.** Når telefonen er klargjort med "Firma-mail", gør medarbejderen sådan:
 1. Åbn Gmail.

@@ -29,3 +29,5 @@ migrering_ud/
 # Færdige installere (bygges med scripts/build_windows.ps1)
 release/
 
+# Telefoner (MDM): reservekode til ældre telefoner – kun lokalt
+assets/mdm/reservekode.txt
