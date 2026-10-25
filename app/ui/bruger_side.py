@@ -1,5 +1,5 @@
-"""Siden Brugerkartotek: opret, (de)aktivér, skift rolle, nulstil kode og slet
-brugere (kun administratorer).
+"""Siden Brugerkartotek: opret, (de)aktivér, skift rolle, moduladgang, nulstil kode
+og slet brugere (kun administratorer).
 
 Brugere logger på med brugernavn (fx HAFRA) – der bruges ingen e-mail. I
 Supabase-tilstand opretter "Opret bruger" en rigtig Supabase Auth-konto via
@@ -27,8 +27,9 @@ from PySide6.QtWidgets import (
 )
 
 from app import session
+from app.domain import adgang
 from app.repositories.fejl import DataFejl, ValideringsFejl
-from app.services.auth_service import ROLLE_BRUGER, ROLLER
+from app.services.auth_service import ROLLE_ADMIN, ROLLE_BRUGER, ROLLER
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, vis_dato
 
@@ -146,6 +147,47 @@ class KodeDialog(QDialog):
         super().accept()
 
 
+class ModulDialog(QDialog):
+    """Flueben pr. modul for én bruger. Efter exec(): self.moduler."""
+
+    def __init__(self, parent, bruger: dict):
+        super().__init__(parent)
+        self.setWindowTitle(f"Moduladgang – {bruger['brugernavn']}")
+        self.moduler = None
+        valgte = adgang.moduler_for(bruger)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        intro = QLabel("Vælg de moduler, brugeren må se. Moduler uden adgang vises med 🔒 i "
+                       "menuen. Dashboard og Indstillinger kan alle altid se.")
+        intro.setObjectName("hjaelpTekst")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.felter = {}
+        for modul, navn in adgang.MODULER.items():
+            felt = QCheckBox(navn)
+            felt.setChecked(modul in valgte)
+            self.felter[modul] = felt
+            layout.addWidget(felt)
+        knapper = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        knapper.button(QDialogButtonBox.StandardButton.Save).setText("Gem")
+        knapper.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuller")
+        knapper.accepted.connect(self.accept)
+        knapper.rejected.connect(self.reject)
+        layout.addWidget(knapper)
+
+    def accept(self):
+        self.moduler = [m for m, felt in self.felter.items() if felt.isChecked()]
+        super().accept()
+
+
+def _moduler_tekst(bruger: dict) -> str:
+    if bruger.get("rolle") == ROLLE_ADMIN:
+        return "Alle (administrator)"
+    navne = [adgang.MODULER[m].split(" - ")[0] for m in adgang.moduler_for(bruger)]
+    return ", ".join(navne) or "Ingen"
+
+
 class BrugerSide(QWidget):
     def __init__(self, auth):
         super().__init__()
@@ -167,6 +209,7 @@ class BrugerSide(QWidget):
         opret = lav_knap("+ Opret bruger", "primary")
         kode = lav_knap("Nulstil adgangskode")
         rolle = lav_knap("Skift rolle")
+        moduler = lav_knap("Moduladgang…", tooltip="Hvilke moduler brugeren må se")
         self.aktiv_knap = lav_knap("Deaktivér / aktivér",
                                    tooltip="En deaktiveret bruger kan ikke logge på og har "
                                            "ingen adgang til data")
@@ -174,18 +217,20 @@ class BrugerSide(QWidget):
         opret.clicked.connect(self.opret)
         kode.clicked.connect(self.skift_kode)
         rolle.clicked.connect(self.skift_rolle)
+        moduler.clicked.connect(self.skift_moduler)
         self.aktiv_knap.clicked.connect(self.skift_aktiv)
         slet.clicked.connect(self.slet)
         knapper.addStretch()
-        for knap in (opret, kode, rolle, self.aktiv_knap, slet):
+        for knap in (opret, kode, rolle, moduler, self.aktiv_knap, slet):
             knapper.addWidget(knap)
         layout.addLayout(knapper)
 
         kort = lav_kort(skygge=False)
         kort_layout = QVBoxLayout(kort)
         kort_layout.setContentsMargins(8, 8, 8, 8)
-        self.tabel = QTableWidget(0, 5)
-        self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "Rolle", "Status", "Oprettet"])
+        self.tabel = QTableWidget(0, 6)
+        self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "Rolle", "Status", "Oprettet",
+                                              "Moduler"])
         self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -194,7 +239,7 @@ class BrugerSide(QWidget):
         self.tabel.verticalHeader().setVisible(False)
         self.tabel.verticalHeader().setDefaultSectionSize(42)
         self.tabel.horizontalHeader().setStretchLastSection(True)
-        for kolonne, bredde in enumerate((170, 240, 140, 130)):
+        for kolonne, bredde in enumerate((170, 240, 140, 130, 120)):
             self.tabel.setColumnWidth(kolonne, bredde)
         kort_layout.addWidget(self.tabel)
         layout.addWidget(kort, 1)
@@ -213,6 +258,7 @@ class BrugerSide(QWidget):
                 b.get("rolle", ""),
                 "Aktiv" if b.get("aktiv", True) else "Deaktiveret",
                 vis_dato(b.get("oprettet", "")[:10]),
+                _moduler_tekst(b),
             )
             for kolonne, tekst in enumerate(celler):
                 item = QTableWidgetItem(tekst)
@@ -249,6 +295,20 @@ class BrugerSide(QWidget):
             list(ROLLER).index(nuvaerende) if nuvaerende in ROLLER else 0, False)
         if ok and rolle != nuvaerende:
             udfoer(self, self.auth.saet_rolle, brugernavn, rolle, session.brugernavn())
+            self.opdater()
+
+    def skift_moduler(self):
+        brugernavn = self._valgt()
+        if brugernavn is None:
+            return
+        bruger = self._brugere.get(brugernavn, {})
+        if bruger.get("rolle") == ROLLE_ADMIN:
+            QMessageBox.information(self, "Moduladgang",
+                                    "Administratorer har altid adgang til alle moduler.")
+            return
+        dialog = ModulDialog(self, bruger)
+        if dialog.exec() and udfoer(self, self.auth.saet_moduler, brugernavn,
+                                    dialog.moduler) is not FEJL:
             self.opdater()
 
     def skift_aktiv(self):

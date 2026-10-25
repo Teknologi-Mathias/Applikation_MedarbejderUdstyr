@@ -1,10 +1,12 @@
 """Telefoner (MDM): QR-kode, lokal klargøringsserver og MdmService (JSON-lagring)."""
+import io
 import json
 import re
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 from app import session
 from app.domain import mdm_enhed as md
@@ -19,6 +21,7 @@ MIGRERINGER = Path(__file__).resolve().parents[1] / "app/infrastructure/database
 MIGRERING_008 = MIGRERINGER / "008_mdm_lokal_klargoering.sql"
 MIGRERING_009 = MIGRERINGER / "009_mdm_nulstillingskode.sql"
 E = "android.app.extra."
+APK_DATA = b"PK falsk apk"
 
 
 class QrTest(unittest.TestCase):
@@ -85,15 +88,23 @@ class MdmServiceTest(TjenesteTest):
         with self.assertRaises(ValideringsFejl, msg="FL-UPDATE er påkrævet"):
             self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme"})
         fil = self.central / "FL-UPDATE.apk"
-        fil.write_bytes(b"apk")
+        fil.write_bytes(APK_DATA)
         k = self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme", "wifi_kode": "hemmelig",
                                           "fl_kilde": "fil", "fl_fil": str(fil), "mail": True})
         self.assertEqual(k.fl_update_fil, fil)
-        link = self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme", "fl_kilde": "link", "fl_fil": str(fil),
-                                             "fl_link": "https://mx.fl-it.net/FL-UPDATE.apk"})
-        self.assertIsNone(link.fl_update_fil, "link valgt – filen bruges ikke")
+        with self.assertRaises(ValideringsFejl, msg="ekstra apps skal være pakkenavne"):
+            self.s.ny_klargoering(enhed, {"fl_kilde": "fil", "fl_fil": str(fil),
+                                          "ekstra_apps": "Foto"})
         with self.assertRaises(ValideringsFejl):
             self.s.ny_klargoering(enhed, {"fl_kilde": "link", "fl_fil": str(fil)})
+        # Link: IN-BASE henter selv filen og afviser alt, der ikke er en APK (fx en forside).
+        with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"<html>forside")):
+            with self.assertRaises(ValideringsFejl):
+                self.s.ny_klargoering(enhed, {"fl_kilde": "link", "fl_link": "https://mx.fl-it.net"})
+        with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(APK_DATA)),                 mock.patch("app.infrastructure.stier.LOKAL_MAPPE", self.central):
+            link = self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme", "fl_kilde": "link",
+                                                 "fl_link": "https://mx.fl-it.net/FL-UPDATE.apk"})
+        self.assertEqual(link.fl_update_fil.read_bytes(), APK_DATA, "pc'en serverer den hentede fil")
         ekstra = json.loads(k.qr_tekst("http://pc:8765"))[E + "PROVISIONING_ADMIN_EXTRAS_BUNDLE"]
         self.assertEqual((ekstra["fl_update_url"], ekstra["mail"]),
                          ("http://pc:8765/fl-update.apk", "1"), "filen serveres fra pc'en")
@@ -101,7 +112,10 @@ class MdmServiceTest(TjenesteTest):
                          ("ISM589", enhed.id, k.token))
         self.assertEqual(ekstra["tilladte"], "", "standardlisten ligger i styrings-appen")
         husket = self.s.huskede_indstillinger()
-        self.assertEqual(husket["wifi_ssid"], "Hjemme")
+        self.assertEqual((husket["wifi_ssid"], husket["wifi_kode"]), ("FLFL", "frodefrode"),
+                         "Wi-Fi forudfyldes altid med standarden")
+        self.assertTrue(husket["baggrund"].endswith("INSTORE_LOCK.png"))
+        self.assertIn("+45 8764 6576", husket["kontakt"])
         self.assertNotIn("hemmelig", json.dumps(self.lokal.hent()), "Wi-Fi-koden huskes ikke")
 
         with self.assertRaises(ValideringsFejl):

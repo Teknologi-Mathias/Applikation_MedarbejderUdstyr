@@ -143,7 +143,7 @@ class KlargoeringDialog(QDialog):
         husk = service.huskede_indstillinger()
         self.ssid = QLineEdit(husk["wifi_ssid"])
         self.ssid.setPlaceholderText("Samme net som denne pc")
-        self.kode = QLineEdit()
+        self.kode = QLineEdit(husk["wifi_kode"])
         self.kode.setEchoMode(QLineEdit.EchoMode.Password)
         vis_kode = QCheckBox("Vis")
         vis_kode.toggled.connect(lambda vis: self.kode.setEchoMode(
@@ -189,7 +189,12 @@ class KlargoeringDialog(QDialog):
         self.ekstra_apps = QLineEdit(husk["ekstra_apps"])
         self.ekstra_apps.setPlaceholderText("Valgfrit – pakkenavne, kommasepareret")
         self.ekstra_apps.setToolTip("Apps, der skal kunne ses ud over Telefon, SMS, Kontakter, "
-                                    "Kamera, Ur, Lommeregner og Indstillinger (fx com.android.chrome).")
+                                    "Kamera, Galleri, Ur, Lommeregner og Indstillinger "
+                                    "(fx com.android.chrome).")
+        self.kontakt = QLineEdit(husk["kontakt"])
+        self.kontakt.setMaxLength(120)
+        self.kontakt.setToolTip("Vises på telefonens låseskærm og når brugeren rammer en spærret "
+                                "funktion.")
 
         form = QFormLayout()
         form.addRow("Wi-Fi (SSID)", self.ssid)
@@ -199,6 +204,7 @@ class KlargoeringDialog(QDialog):
         form.addRow("", fl_raekke)
         form.addRow("Baggrundsbillede", baggrund_raekke)
         form.addRow("Ekstra apps", self.ekstra_apps)
+        form.addRow("Kontakt (låseskærm)", self.kontakt)
         form.addRow("", self.mail)
 
         self.vis_knap = lav_knap("Vis QR-kode", "primary")
@@ -280,7 +286,7 @@ class KlargoeringDialog(QDialog):
                 "fl_kilde": "fil" if self.fl_som_fil.isChecked() else "link",
                 "fl_fil": self.fl_fil.text(), "fl_link": self.fl_link.text(),
                 "baggrund": self.baggrund.text(), "ekstra_apps": self.ekstra_apps.text(),
-                "mail": self.mail.isChecked()}
+                "kontakt": self.kontakt.text(), "mail": self.mail.isChecked()}
 
     def _vis_qr(self):
         self.fejl_label.setText("")

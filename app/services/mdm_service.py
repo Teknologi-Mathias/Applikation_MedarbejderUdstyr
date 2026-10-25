@@ -5,16 +5,19 @@ fra pc'en (app/infrastructure/mdm). Telefonen låser og klargør sig selv og
 melder tilbage. Supabase får kun én række pr. telefon, og der skrives kun ved
 oprettelse, rettelser og når en telefon melder sig klargjort.
 
-Kun administratorer bruger modulet (håndhæves af RLS i migrering 007/008; her
-gives blot en pæn besked først).
+Kun brugere med modulet Telefoner (og administratorer) bruger det – håndhæves af
+RLS i migrering 010; her gives blot en pæn besked først.
 """
 import logging
+import re
 import secrets
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from app.domain import adgang
 from app.domain import mdm_enhed as md
 from app.domain.historik import nu
 from app.domain.mdm_enhed import MdmEnhed
@@ -22,17 +25,31 @@ from app.infrastructure import stier
 from app.infrastructure.mdm.qr import apk_kontrolsum, byg_qr_payload
 from app.repositories.base import MdmRepository
 from app.repositories.fejl import ValideringsFejl
-from app.services.auth_service import ROLLE_ADMIN
 
 log = logging.getLogger(__name__)
 
-KUN_ADMIN = "Kun administratorer kan administrere telefoner."
+INGEN_ADGANG = "Du har ikke adgang til Telefoner. Kontakt en administrator."
 APK = stier.ASSETS_MAPPE / "mdm" / "inbase-klargoering.apk"
-# Klargøringsindstillinger, som huskes på denne pc (aldrig Wi-Fi-koden).
-HUSKEDE = ("wifi_ssid", "wifi_type", "fl_kilde", "fl_fil", "fl_link", "baggrund", "ekstra_apps")
+# Standardværdier i klargøringsvinduet. Wi-Fi og baggrund forudfyldes altid med dem
+# (kan ændres pr. klargøring); de øvrige felter huskes på denne pc.
+STANDARD = {
+    "wifi_ssid": "FLFL",
+    "wifi_kode": "frodefrode",
+    "baggrund": str(stier.ASSETS_MAPPE / "INSTORE_LOCK.png"),
+    "kontakt": "Kontakt din IT-administrator (Mathias – +45 8764 6576)",
+}
+HUSKEDE = ("wifi_type", "fl_kilde", "fl_fil", "fl_link", "ekstra_apps", "kontakt")
+INDSTILLINGER = HUSKEDE + ("wifi_ssid", "baggrund")
 FL_FIL, FL_LINK = "fil", "link"        # hvor FL-UPDATE kommer fra
+MAKS_APK = 200 * 1024 * 1024
+PAKKENAVN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
 # Sti på klargøringsserveren, når FL-UPDATE er valgt som fil på pc'en.
 FL_UPDATE_STI = "/fl-update.apk"
+
+
+def er_apk(start: bytes) -> bool:
+    """En APK er en ZIP-fil: starter med "PK\\x03\\x04"."""
+    return start[:4] == b"PK\x03\x04"
 
 
 @dataclass
@@ -47,6 +64,7 @@ class Klargoering:
     baggrund: str = ""                 # sti til billede på pc'en ("" = intet)
     ekstra_apps: str = ""              # kommaseparerede pakkenavne
     mail: bool = False                 # firma-mail (IMAP) i Gmail-appen
+    kontakt: str = ""                  # låseskærm og spærrede funktioner
     nulstillingskode: str = field(default_factory=lambda: f"{secrets.randbelow(10**8):08d}")
     apk: Path = field(default=APK)
 
@@ -63,7 +81,7 @@ class Klargoering:
             "navn": self.enhed.navn,
             "fl_update_url": server + FL_UPDATE_STI if self.fl_update_fil else self.fl_update,
             "baggrund": "1" if self.baggrund else "0", "mail": "1" if self.mail else "0",
-            "nulstillingskode": self.nulstillingskode,
+            "nulstillingskode": self.nulstillingskode, "kontakt": self.kontakt,
             "tilladte": ",".join(p.strip() for p in self.ekstra_apps.split(",") if p.strip()),
         }
         return byg_qr_payload(server, apk_kontrolsum(self.apk), ekstra, self.wifi_ssid,
@@ -94,13 +112,13 @@ class MdmService:
 
     ### ----- adgang ---------------------------------------------------------
 
-    def er_administrator(self) -> bool:
-        bruger = self._aktuel_bruger()
-        return bool(bruger) and bruger.get("rolle") == ROLLE_ADMIN
+    def har_adgang(self) -> bool:
+        """Administratorer og brugere med modulet Telefoner (app/domain/adgang.py)."""
+        return adgang.har_adgang(self._aktuel_bruger(), adgang.TELEFONER)
 
     def _kraev_admin(self) -> None:
-        if not self.er_administrator():
-            raise ValideringsFejl(KUN_ADMIN)
+        if not self.har_adgang():
+            raise ValideringsFejl(INGEN_ADGANG)
 
     ### ----- telefoner ------------------------------------------------------
 
@@ -154,35 +172,71 @@ class MdmService:
         return fil.read_text(encoding="utf-8").strip() if fil.is_file() else ""
 
     def huskede_indstillinger(self) -> dict:
+        """Startværdier i klargøringsvinduet: standardværdierne + det, der huskes på pc'en."""
         data = self.lokal.hent() if self.lokal else {}
-        return {k: str(data.get(k, "")) for k in HUSKEDE}
+        start = {k: str(data.get(k, "")) for k in HUSKEDE}
+        start.update(wifi_ssid=STANDARD["wifi_ssid"], wifi_kode=STANDARD["wifi_kode"],
+                     baggrund=STANDARD["baggrund"] if Path(STANDARD["baggrund"]).is_file() else "",
+                     kontakt=start["kontakt"] or STANDARD["kontakt"])
+        return start
 
     def ny_klargoering(self, enhed: MdmEnhed, indstillinger: dict) -> Klargoering:
         """indstillinger: wifi_ssid, wifi_kode, wifi_type, fl_kilde (fil/link), fl_fil, fl_link,
-        baggrund, ekstra_apps, mail."""
+        baggrund, ekstra_apps, kontakt, mail."""
         self._kraev_admin()
         mangler = self.klargoering_mangler()
         if mangler:
             raise ValideringsFejl(mangler)
-        v = {k: str(indstillinger.get(k) or "").strip() for k in HUSKEDE}
+        v = {k: str(indstillinger.get(k) or "").strip() for k in INDSTILLINGER}
+        if len(v["kontakt"]) > 120:
+            raise ValideringsFejl("Kontaktteksten må højst være 120 tegn.")
         v["fl_kilde"] = FL_LINK if v["fl_kilde"] == FL_LINK else FL_FIL
         if v["fl_kilde"] == FL_FIL:
             fl = v["fl_fil"]
             if not fl:
                 raise ValideringsFejl("Vælg FL-UPDATE.apk på pc'en (eller skift til link).")
-            if not (Path(fl).is_file() and fl.lower().endswith(".apk")):
-                raise ValideringsFejl(f"FL-UPDATE-filen findes ikke eller er ikke en .apk: {fl}")
+            if not Path(fl).is_file():
+                raise ValideringsFejl(f"FL-UPDATE-filen findes ikke: {fl}")
+            if not er_apk(Path(fl).read_bytes()[:4]):
+                raise ValideringsFejl(f"Filen er ikke en Android-app (APK): {fl}")
         else:
-            fl = v["fl_link"]
-            if not fl.startswith(("https://", "http://")):
-                raise ValideringsFejl("Skriv linket til FL-UPDATE.apk (skal starte med https://).")
+            # Linket hentes og kontrolleres her – telefonen får filen fra pc'en.
+            fl = str(self._hent_link(v["fl_link"]))
+        ugyldige = [p for p in v["ekstra_apps"].replace(" ", "").split(",")
+                    if p and not PAKKENAVN.match(p)]
+        if ugyldige:
+            raise ValideringsFejl(
+                f"\"{', '.join(ugyldige)}\" er ikke et pakkenavn. Ekstra apps skal angives som "
+                "pakkenavne, fx com.google.android.apps.photos (Google Fotos).")
         if v["baggrund"] and not Path(v["baggrund"]).is_file():
             raise ValideringsFejl(f"Baggrundsbilledet findes ikke: {v['baggrund']}")
         if self.lokal:
-            self.lokal.gem(v)
+            self.lokal.gem({k: v[k] for k in HUSKEDE})
         return Klargoering(enhed, secrets.token_urlsafe(24), v["wifi_ssid"],
                            str(indstillinger.get("wifi_kode") or ""), v["wifi_type"] or "WPA",
-                           fl, v["baggrund"], v["ekstra_apps"], bool(indstillinger.get("mail")))
+                           fl, v["baggrund"], v["ekstra_apps"], bool(indstillinger.get("mail")),
+                           v["kontakt"])
+
+    def _hent_link(self, link: str) -> Path:
+        """Henter FL-UPDATE fra linket til en lokal fil og kontrollerer, at det er en APK."""
+        if not link.startswith(("https://", "http://")):
+            raise ValideringsFejl("Skriv linket til FL-UPDATE.apk (skal starte med https://).")
+        try:
+            with urllib.request.urlopen(link, timeout=30) as svar:
+                data = svar.read(MAKS_APK + 1)
+        except (OSError, ValueError) as fejl:
+            raise ValideringsFejl(f"FL-UPDATE kunne ikke hentes fra {link} ({fejl}).") from fejl
+        if not er_apk(data[:4]):
+            raise ValideringsFejl(
+                f"Linket giver ikke en APK-fil, men fx en hjemmeside: {link}\nBrug det direkte "
+                "link til FL-UPDATE.apk – eller hent filen og vælg \"APK-fil på pc'en\".")
+        if len(data) > MAKS_APK:
+            raise ValideringsFejl("Filen fra linket er for stor til at være FL-UPDATE.")
+        fil = stier.LOKAL_MAPPE / "fl-update-hentet.apk"
+        fil.parent.mkdir(parents=True, exist_ok=True)
+        fil.write_bytes(data)
+        log.info("FL-UPDATE hentet fra %s (%s KB)", link, len(data) // 1024)
+        return fil
 
     def registrer_klargjort(self, klargoering: Klargoering, rapport: dict) -> MdmEnhed:
         """Telefonens rapport (efter tjek af engangskoden i serveren) -> én skrivning."""

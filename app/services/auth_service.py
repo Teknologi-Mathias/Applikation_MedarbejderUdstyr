@@ -20,6 +20,7 @@ import hmac
 import logging
 import secrets
 
+from app.domain import adgang
 from app.domain.bruger import BRUGERNAVN_REGEL, er_gyldigt_brugernavn, normaliser_brugernavn
 from app.domain.historik import nu
 from app.repositories.base import BrugerRepository, KontoRepository
@@ -43,6 +44,7 @@ DEAKTIVERET = "Kontoen er deaktiveret. Kontakt en administrator."
 INGEN_ADGANG = "Kontoen har ikke adgang til IN-BASE. Kontakt en administrator."
 ADGANG_LUKKET = "Din adgang til IN-BASE er lukket. Kontakt en administrator."
 ROLLE_AENDRET = "Din rolle er ændret af en administrator. Log på igen for at fortsætte."
+ADGANG_AENDRET = "Din adgang er ændret af en administrator. Log på igen for at fortsætte."
 
 
 def _hash(kode: str, salt_hex: str) -> str:
@@ -225,6 +227,11 @@ class AuthService:
         bruger["rolle"] = rolle
         self.repo.gem_alle(brugere)
 
+    def saet_moduler(self, brugernavn: str, moduler) -> None:
+        brugere = self._alle()
+        self._hent(brugere, brugernavn)["moduler"] = adgang.normaliser(moduler)
+        self.repo.gem_alle(brugere)
+
 
 ### ===== Supabase Auth ======================================================
 
@@ -306,6 +313,8 @@ class SupabaseAuthService:
             raise SessionUdloebetFejl(ADGANG_LUKKET)
         if profil["rolle"] != self._aktuel["rolle"]:
             raise SessionUdloebetFejl(ROLLE_AENDRET)
+        if profil.get("moduler") != self._aktuel.get("moduler"):
+            raise SessionUdloebetFejl(ADGANG_AENDRET)
 
     def brugere(self) -> list[dict]:
         """Administratorer: alle profiler. Brugere: kun aktive navne (til "Ansvarlig")."""
@@ -377,6 +386,12 @@ class SupabaseAuthService:
             raise ValideringsFejl("Du kan ikke ændre din egen rolle.")
         self.repo.saet_rolle(profil["id"], rolle)
         log.info("Bruger %s har nu rollen %s", profil["brugernavn"], rolle)
+
+    def saet_moduler(self, brugernavn: str, moduler) -> None:
+        profil = self._profil_for(brugernavn)
+        self.repo.saet_moduler(profil["id"], adgang.normaliser(moduler))
+        log.info("Bruger %s har nu adgang til: %s", profil["brugernavn"],
+                 ", ".join(adgang.normaliser(moduler)) or "ingen moduler")
 
     def slet(self, brugernavn: str, aktuel_brugernavn: str) -> None:
         profil = self._profil_for(brugernavn)

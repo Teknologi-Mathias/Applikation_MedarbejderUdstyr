@@ -65,9 +65,11 @@ i denne rækkefølge, og tjek at hver giver "Success":
 8. `008_mdm_lokal_klargoering.sql` – Telefoner klargøres lokalt fra IN-BASE
    (statusser og felter uden Google AMAPI).
 9. `009_mdm_nulstillingskode.sql` – nulstillingskode pr. telefon (kun administratorer).
+10. `010_moduladgang.sql` – adgang pr. modul på brugerprofilen (Indstillinger → Brugere →
+    Moduladgang). Telefoner åbnes for brugere med modulet.
 
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004). Fremtidige ændringer kommer som nye filer `010_...`, `011_...`.
+fra 004). Fremtidige ændringer kommer som nye filer `011_...`, `012_...`.
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 

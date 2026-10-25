@@ -111,6 +111,20 @@ arbejdsgange.
   beskrivelse, filtre for visning/status/kategori/prioritet);
   `IndmeldingDialog` har fanerne Detaljer, Behandling, Kommentarer og Historik.
 
+## Adgang pr. modul
+
+Administratorer ser alt. Andre brugere har en liste af moduler på profilen
+(`user_profiles.module_access`, migrering 010). Listen sættes under Indstillinger →
+Brugere → Moduladgang. NULL betyder standarden: Onboarding, Offboarding og Ønsker &
+Udvikling. Reglerne ligger i `app/domain/adgang.py`.
+
+* Moduler uden adgang vises med 🔒 i menuen. I stedet for siden vises `LaastSide`,
+  og modulets data hentes ikke.
+* Låsen gælder i programmet. Kun Telefoner er også låst i databasen
+  (`inbase_has_module('telefoner')`).
+* Ændrer en administrator adgangen, logges brugeren ud ved næste sessionstjek,
+  ligesom ved rolleskift.
+
 ## Telefoner (MDM)
 
 Selvstændigt menupunkt, kun for administratorer. Driftstelefoner registreres ved

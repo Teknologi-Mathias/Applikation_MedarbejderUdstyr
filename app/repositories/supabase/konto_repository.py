@@ -117,6 +117,12 @@ class SupabaseKontoRepository:
             "action": "set_role", "user_id": bruger_id, "role": rolle,
         }, "ændre rollen")
 
+    def saet_moduler(self, bruger_id: str, moduler: list[str]) -> None:
+        """Moduladgang via RPC'en fra migrering 010 (kun administratorer)."""
+        with kald("ændre moduladgang"):
+            self.klient.rpc("inbase_set_module_access",
+                            {"p_user_id": bruger_id, "p_modules": moduler}).execute()
+
     def slet(self, bruger_id: str) -> None:
         self._funktion(FUNKTION_ADMINISTRER, {"action": "delete", "user_id": bruger_id},
                        "slette brugeren")

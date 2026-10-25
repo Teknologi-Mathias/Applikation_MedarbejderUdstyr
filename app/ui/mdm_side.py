@@ -1,6 +1,6 @@
 """Siden Telefoner (MDM): driftstelefoner registreret ved ERP-enhedsnavn og klargjort fra IN-BASE.
 
-Kun for administratorer. Siden henter fra Supabase, når den åbnes eller
+Kun for brugere med modulet Telefoner (og administratorer). Siden henter fra Supabase, når den åbnes eller
 efter en handling – aldrig i baggrunden.
 """
 from PySide6.QtCore import Qt
@@ -48,8 +48,8 @@ class MdmSide(SagListeSide):
         self.layout().insertWidget(1, self.mangler_label)
 
         # Almindelige brugere ser siden, men den er låst (ingen data, ingen knapper).
-        self.laast_label = QLabel("🔒  Telefoner (MDM) er kun for administratorer. Kontakt en "
-                                  "administrator, hvis en telefon skal oprettes eller klargøres.")
+        self.laast_label = QLabel("🔒  Du har ikke adgang til Telefoner (MDM). Kontakt en "
+                                  "administrator, hvis du skal have adgang.")
         self.laast_label.setObjectName("advarsel")
         self.laast_label.setWordWrap(True)
         self.layout().insertWidget(1, self.laast_label)
@@ -96,9 +96,9 @@ class MdmSide(SagListeSide):
     ### ----- data -----------------------------------------------------------
 
     def opdater(self) -> None:
-        admin = self.service.er_administrator()
-        self.anvend_rolle(admin)
-        if not admin:
+        adgang = self.service.har_adgang()
+        self.anvend_rolle(adgang)
+        if not adgang:
             return
         mangler = self.service.klargoering_mangler()
         self.mangler_label.setText(mangler)

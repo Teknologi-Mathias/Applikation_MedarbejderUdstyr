@@ -405,6 +405,9 @@ def bruger_fra_profil(profil: dict) -> dict:
         "aktiv": bool(profil.get("active", True)),
         "oprettet": fra_tidspunkt(profil.get("created_at")),
         "skal_skifte_kode": bool(profil.get("must_change_password")),
+        # None = standardmodulerne (migrering 010); ellers en liste af moduler.
+        "moduler": (list(profil["module_access"])
+                    if profil.get("module_access") is not None else None),
     }
 
 

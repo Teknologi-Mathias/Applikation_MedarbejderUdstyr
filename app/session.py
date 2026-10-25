@@ -1,6 +1,7 @@
 """Den bruger, der er logget ind i denne kørsel af programmet."""
 from typing import Optional
 
+from app.domain import adgang
 from app.services.auth_service import ROLLE_ADMIN
 
 _aktiv: Optional[dict] = None
@@ -22,6 +23,11 @@ def bruger() -> Optional[dict]:
 
 def er_admin() -> bool:
     return bool(_aktiv) and _aktiv.get("rolle") == ROLLE_ADMIN
+
+
+def har_adgang(modul: Optional[str]) -> bool:
+    """Må den aktuelle bruger se modulet (app/domain/adgang.py)? None = altid åbent."""
+    return adgang.har_adgang(_aktiv, modul)
 
 
 def brugernavn() -> Optional[str]:

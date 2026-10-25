@@ -48,6 +48,7 @@ import java.util.function.Consumer;
  *   mail           "1" = firma-mail: Gmail-appen synlig, IMAP-konti tilladt, Google-konti spærret
  *   tilladte       ekstra pakker (kommasepareret), der må ses ud over STANDARD_TILLADTE
  *   organisation   vises på låseskærmen (valgfri)
+ *   kontakt        fx "Kontakt din IT-administrator (…)" – låseskærm og ved spærrede funktioner
  *
  * Hvert trin fanger sine egne fejl: en fejl i ét trin stopper ikke resten.
  */
@@ -73,6 +74,9 @@ class Klargoering {
             "com.google.android.calculator", "com.android.calculator2",
             "com.motorola.camera3", "com.motorola.camera2", "com.motorola.camera",
             "com.android.camera2", "com.google.android.GoogleCamera",
+            // Galleri – ellers kan de billeder, kameraet tager, ikke ses.
+            "com.google.android.apps.photos", "com.google.android.apps.photosgo",
+            "com.motorola.gallery", "com.android.gallery3d",
     };
 
     private static final String GMAIL = "com.google.android.gm";
@@ -137,7 +141,15 @@ class Klargoering {
                 DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
         String org = e("organisation");
         if (!org.isEmpty()) dpm.setOrganizationName(admin, org);
-        dpm.setDeviceOwnerLockScreenInfo(admin, (e("navn") + (org.isEmpty() ? "" : " · " + org)).trim());
+        String kontakt = e("kontakt");
+        dpm.setDeviceOwnerLockScreenInfo(admin, (e("navn") + (org.isEmpty() ? "" : " · " + org)
+                + (kontakt.isEmpty() ? "" : "\n" + kontakt)).trim());
+        if (!kontakt.isEmpty()) {
+            // Vises, når brugeren rammer en spærret funktion (fx nulstilling eller konti).
+            dpm.setShortSupportMessage(admin, kontakt);
+            dpm.setLongSupportMessage(admin, "Telefonen er en firmatelefon (" + e("navn") + "). "
+                    + kontakt);
+        }
     }
 
     private void oplysninger() throws Exception {

@@ -18,15 +18,18 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
     QStackedWidget,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
 from app import APP_NAVN, session
+from app.domain import adgang
 from app.domain import skabelon as sk
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
@@ -36,7 +39,7 @@ from app.ui import fejl as ui_fejl
 from app.ui.action_liste import ANSVARLIG
 from app.ui.dashboard_side import DashboardSide
 from app.ui.fejl import FEJL, udfoer
-from app.ui.hjaelpere import lav_app_ikon, lav_knap
+from app.ui.hjaelpere import lav_app_ikon, lav_knap, lav_sidehoved
 from app.ui.indmelding_side import IndmeldingSide
 from app.ui.indstillinger_side import IndstillingerSide
 from app.ui.login_dialog import LoginDialog
@@ -54,10 +57,12 @@ from app.ui.theme import anvend_tema
 log = logging.getLogger(__name__)
 
 ON, OFF = OnboardingForloeb.PROCES, Medarbejder.PROCES
+MODUL_FOR_PROCES = {ON: adgang.ONBOARDING, OFF: adgang.OFFBOARDING}
+LAAS = "  🔒"
 
 # Venstremenuen: Onboarding og Offboarding er separate hovedpunkter;
 # Ønsker & Udvikling er et selvstændigt punkt (ikke under medarbejderne).
-# Telefoner (MDM) ses af alle, men er låst for andre end administratorer (anvend_rolle).
+# Alle menupunkter ses af alle; moduler uden adgang vises med 🔒 (app/domain/adgang.py).
 STRUKTUR = [
     (None, [("dashboard", "Dashboard")]),
     ("Onboarding - MERCH", [
@@ -78,6 +83,27 @@ STRUKTUR = [
     (None, [("telefoner", "Telefoner (MDM)")]),
     (None, [("indstillinger", "Indstillinger")]),
 ]
+
+
+class LaastSide(QWidget):
+    """Vises i stedet for et modul, brugeren ikke har adgang til."""
+
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 28, 32, 28)
+        hoved, _ = lav_sidehoved("Ingen adgang", "")
+        layout.addLayout(hoved)
+        self.tekst = QLabel("")
+        self.tekst.setObjectName("advarsel")
+        self.tekst.setWordWrap(True)
+        layout.addWidget(self.tekst)
+        layout.addStretch()
+
+    def vis(self, modul: str) -> None:
+        navn = adgang.MODULER.get(modul, modul)
+        self.tekst.setText(f"🔒  Du har ikke adgang til {navn}. Kontakt en administrator, hvis "
+                           "du skal have adgang.")
 
 
 class MainWindow(QMainWindow):
@@ -153,6 +179,8 @@ class MainWindow(QMainWindow):
         self.indstillinger.generelt.lagring_skiftet.connect(self._lagring_skiftet)
         self.indstillinger.data.data_aendret.connect(self.opdater_alle)
         self._tilfoej("indstillinger", self.indstillinger)
+        self.laast_side = LaastSide()
+        self.stak.addWidget(self.laast_side)
         self.vis_side("dashboard")
 
     def _tilfoej(self, noegle, side):
@@ -287,7 +315,9 @@ class MainWindow(QMainWindow):
     def _laes_data(self) -> bool:
         try:
             for proces, service in ((ON, self.t.onboarding), (OFF, self.t.offboarding)):
-                self.data[proces] = (service.hent_aktive(), service.hent_arkiverede())
+                # Moduler uden adgang hentes ikke (vises heller ikke på dashboardet).
+                self.data[proces] = ((service.hent_aktive(), service.hent_arkiverede())
+                                     if session.har_adgang(MODUL_FOR_PROCES[proces]) else ([], []))
             self._signatur = self._signatur_nu()
             return True
         except SessionUdloebetFejl as fejl:
@@ -382,8 +412,13 @@ class MainWindow(QMainWindow):
 
     def vis_side(self, noegle):
         side = self.sider[noegle]
-        self.stak.setCurrentWidget(side)
         self.sidebar.marker(noegle)
+        modul = adgang.modul_for_side(noegle)
+        if not session.har_adgang(modul):
+            self.laast_side.vis(modul)
+            self.stak.setCurrentWidget(self.laast_side)
+            return
+        self.stak.setCurrentWidget(side)
         # Telefoner hentes kun, når siden åbnes (ikke hvert minut) – sparer Supabase-trafik.
         if isinstance(side, (SkabelonSide, IndstillingerSide, IndmeldingSide, MdmSide)):
             side.opdater()
@@ -412,8 +447,12 @@ class MainWindow(QMainWindow):
         for knap in (self.on_slet, self.off_slet):
             knap.setVisible(admin)
         self.oensker.anvend_rolle(admin)
-        self.sidebar.knapper["telefoner"].setText("Telefoner (MDM)" if admin else "Telefoner (MDM)  🔒")
-        self.telefoner.anvend_rolle(admin)
+        for _, punkter in STRUKTUR:
+            for noegle, tekst in punkter:
+                laast = not session.har_adgang(adgang.modul_for_side(noegle))
+                self.sidebar.knapper[noegle].setText(
+                    tekst.replace("&", "&&") + (LAAS if laast else ""))
+        self.telefoner.anvend_rolle(session.har_adgang(adgang.TELEFONER))
         self.indstillinger.anvend_rolle(admin)
 
     def skift_tema(self, tema):
