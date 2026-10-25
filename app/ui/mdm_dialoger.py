@@ -226,6 +226,11 @@ class KlargoeringDialog(QDialog):
         self.qr.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr.setFixedSize(QR_STOERRELSE + 20, QR_STOERRELSE + 20)
         self.qr.setStyleSheet("background: white; color: #666;")
+        self.stor_knap = lav_knap("Vis QR-koden i fuld skærm")
+        self.stor_knap.setToolTip("Hjælper, når telefonen ikke kan læse koden – fx på en bærbar.")
+        self.stor_knap.clicked.connect(self._vis_stor_qr)
+        self.stor_knap.hide()
+        self._qr_tekst = ""
         self.status = QLabel("")
         self.status.setWordWrap(True)
         self.status.setFixedWidth(QR_STOERRELSE + 20)
@@ -250,6 +255,7 @@ class KlargoeringDialog(QDialog):
 
         venstre = QVBoxLayout()
         venstre.addWidget(self.qr)
+        venstre.addWidget(self.stor_knap)
         venstre.addWidget(self.status)
         venstre.addStretch()
         hoejre = QVBoxLayout()
@@ -312,7 +318,9 @@ class KlargoeringDialog(QDialog):
                                              fl_update=k.fl_update_fil,
                                              paa_hentning=self._bro.hentet.emit)
             url = self.server.start()
-            self.qr.setPixmap(qr_pixmap(k.qr_tekst(url), dpr=self.devicePixelRatioF()))
+            self._qr_tekst = k.qr_tekst(url)
+            self.qr.setPixmap(qr_pixmap(self._qr_tekst, dpr=self.devicePixelRatioF()))
+            self.stor_knap.show()
         except OSError as fejl:
             self.fejl_label.setText(f"Klargøringsserveren kunne ikke starte ({fejl}). Er port 8765 "
                                     "optaget af et andet IN-BASE-vindue?")
@@ -325,6 +333,21 @@ class KlargoeringDialog(QDialog):
         self.vis_knap.setText("Lav ny QR-kode")
         self.status.setText(f"Venter på telefonen … (pc: {url})\n\nNulstillingskode: "
                             f"{k.nulstillingskode}  (gemmes i IN-BASE, når telefonen er klargjort)")
+
+    def _vis_stor_qr(self):
+        """QR-koden over hele skærmen – klik eller Esc lukker. Serveren kører videre."""
+        vindue = QDialog(self)
+        vindue.setStyleSheet("background: white;")
+        skaerm = self.screen().geometry()
+        billede = QLabel()
+        billede.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        billede.setPixmap(qr_pixmap(self._qr_tekst, min(skaerm.width(), skaerm.height()) - 40,
+                                    self.devicePixelRatioF()))
+        billede.mousePressEvent = lambda _e: vindue.accept()
+        layout = QVBoxLayout(vindue)
+        layout.addWidget(billede)
+        vindue.showFullScreen()
+        vindue.exec()
 
     def _telefon_hentede(self, sti: str):
         """Viser, at telefonen har nået pc'en – sker det aldrig, er det net/firewall."""

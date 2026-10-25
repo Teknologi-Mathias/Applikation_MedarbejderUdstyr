@@ -95,7 +95,19 @@ class KlargoeringsServer:
                     server.paa_hentning(self.path)
 
             def do_GET(self):
-                if self.path == APK_STI:
+                if self.path == "/":
+                    # Fejlfinding: åbn http://<pc>:8765/ i en browser på samme Wi-Fi.
+                    tekst = "IN-BASE klargøringsserver kører.\n" + "\n".join(
+                        f"{sti}  {'findes' if fil and fil.is_file() else 'MANGLER'}"
+                        for sti, fil in ((APK_STI, server.apk), ("/baggrund", server.baggrund),
+                                         ("/fl-update.apk", server.fl_update)))
+                    data = tekst.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                elif self.path == APK_STI:
                     self._fil(server.apk, "application/vnd.android.package-archive")
                 elif self.path == "/fl-update.apk":
                     self._fil(server.fl_update, "application/vnd.android.package-archive")

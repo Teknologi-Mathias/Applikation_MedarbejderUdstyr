@@ -215,7 +215,9 @@ class MdmService:
             baggrund = ""
         if self.lokal:
             self.lokal.gem({k: v[k] for k in HUSKEDE})
-        return Klargoering(enhed, secrets.token_urlsafe(24), v["wifi_ssid"],
+        # Kort engangskode (16 tegn) – den gælder kun på det lokale net, mens vinduet er
+        # åbent, og hvert tegn gør QR-koden tættere og sværere at scanne.
+        return Klargoering(enhed, secrets.token_urlsafe(12), v["wifi_ssid"],
                            str(indstillinger.get("wifi_kode") or ""), v["wifi_type"] or "WPA",
                            fl, baggrund, ",".join(p for p in apps if p not in ugyldige),
                            bool(indstillinger.get("mail")), v["kontakt"], advarsler=advarsler)
