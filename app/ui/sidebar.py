@@ -54,7 +54,7 @@ class Sidebar(QFrame):
                 hoved.clicked.connect(lambda _=False, s=sektion: self._fold(s))
                 layout.addWidget(hoved)
             for noegle, tekst in punkter:
-                knap = QPushButton(tekst)
+                knap = QPushButton(tekst.replace("&", "&&"))   # "&" er ellers genvejstast i Qt
                 knap.setProperty("navUnder" if sektion else "nav", True)
                 knap.setCheckable(True)
                 knap.setCursor(Qt.CursorShape.PointingHandCursor)

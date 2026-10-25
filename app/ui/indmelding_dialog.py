@@ -34,13 +34,11 @@ from app.ui.hjaelpere import lav_knap, lav_pille, vis_dato
 from app.ui.theme import prioritet_stil, status_stil
 
 # Tekstfelterne i formularen: (domænefelt, etiket, pladsholder, linjer – 0 = én linje).
+# Bevidst kort: detaljerne afklares bagefter med indsenderen. Domænets øvrige
+# tekstfelter (problem, effekt …) findes stadig, men udfyldes ikke herfra.
 TEKST_FORMULAR = (
     ("titel", "Titel *", "Kort og præcis, fx \"Eksport af sager til Excel fejler\"", 0),
-    ("beskrivelse", "Beskrivelse *", "Hvad drejer det sig om?", 4),
-    ("problem", "Problem / nuværende adfærd", "Hvad sker der i dag? Ved fejl: trin for trin", 3),
-    ("oensket_resultat", "Ønsket resultat", "Hvad skal der ske i stedet?", 3),
-    ("effekt", "Forventet effekt", "Fx sparet tid, færre fejl, bedre data", 2),
-    ("supplerende", "Supplerende information", "Links, eksempler, berørte afdelinger …", 2),
+    ("beskrivelse", "Beskrivelse *", "Hvad drejer det sig om? Et par linjer er nok.", 6),
 )
 
 
@@ -95,8 +93,8 @@ class NyIndmeldingDialog(QDialog):
         self.setWindowTitle("Ny indmelding – Ønsker & Udvikling")
         self.setMinimumWidth(620)
 
-        intro = QLabel("Beskriv fejlen, ønsket eller forbedringen. Felter med * skal udfyldes – "
-                       "resten hjælper med at vurdere indmeldingen hurtigere.")
+        intro = QLabel("Beskriv kort fejlen, ønsket eller forbedringen. "
+                       "Detaljerne tager vi med dig bagefter.")
         intro.setObjectName("hjaelpTekst")
         intro.setWordWrap(True)
 

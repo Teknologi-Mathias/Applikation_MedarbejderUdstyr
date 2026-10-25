@@ -324,7 +324,7 @@ QCalendarWidget QToolButton { background: transparent; color: @TEXT; border: non
 QTableWidget {
     background: @SURFACE; border: none; gridline-color: transparent;
     alternate-background-color: @SURFACE_2;
-    selection-background-color: @PRIMARY_SOFT; selection-color: white;
+    selection-background-color: @PRIMARY_SOFT; selection-color: red;
     outline: 0;
 }
 QTableWidget::item { padding: 4px 10px; border: none; }

@@ -27,7 +27,7 @@ STANDARD = {
     "naermer_sig_dage": 7,
 }
 
-TEMAER = {"lilla": "Lilla (standard)", "lys": "Lyst"}
+TEMAER = {"lilla": "Lilla", "lys": "Lyst (Standard)"}
 STANDARD_PRAEFERENCER = {"tema": "lilla", "windows_notifikationer": True}
 
 
