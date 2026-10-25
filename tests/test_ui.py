@@ -109,7 +109,12 @@ class UiTest(TjenesteTest):
         session.log_ind(self.t.auth.log_ind("lise", "hemmelig"))
         self.vindue.anvend_rolle()
         self.assertTrue(self.vindue.on_slet.isHidden())
-        self.assertFalse(self.vindue.sider["on_skabeloner"].redigerbar)
+        # Skabeloner og Organisation er åbne; Brugere og Data & sikkerhed er kun for admin.
+        self.assertTrue(self.vindue.sider["on_skabeloner"].redigerbar)
+        ind = self.vindue.indstillinger
+        synlige = {navn for i, (_, navn, _, _) in enumerate(ind._paneler)
+                   if ind.faner.isTabVisible(i)}
+        self.assertEqual(synlige, {"Generelt", "Påmindelser", "Organisation"})
 
     def ny_indmelding(self, titel="Eksport fejler"):
         return self.t.indmeldinger.opret({"titel": titel, "kategori": "Fejlmelding",

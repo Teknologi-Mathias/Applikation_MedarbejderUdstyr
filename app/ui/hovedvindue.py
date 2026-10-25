@@ -441,7 +441,8 @@ class MainWindow(QMainWindow):
 
     def anvend_rolle(self):
         admin = session.er_admin()
-        redigerbar = admin and not self.t.lagring.offline
+        # Skabeloner må alle ændre (ikke offline); kun det kritiske er for administratorer.
+        redigerbar = not self.t.lagring.offline
         for noegle in ("on_skabeloner", "off_skabeloner"):
             self.sider[noegle].saet_redigerbar(redigerbar)
         for knap in (self.on_slet, self.off_slet):

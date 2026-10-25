@@ -225,12 +225,12 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertNotIn("email", self.anne.konto.katalog()[0])
         self.assertGreaterEqual(len(self.admin.konto.alle_profiler()), 3)
 
-    def test_kun_administrator_aendrer_opsaetning(self):
+    def test_alle_aendrer_opsaetning_men_kun_administrator_data(self):
         self.anne.aktiv()
+        self.anne.indstillinger.opdater(stillestaaende_dage=14)
+        self.anne.skabeloner.gem(sk.MAIL, sk.ny_skabelon(sk.MAIL))
         with self.assertRaises(DataFejl):
-            self.anne.indstillinger.opdater(stillestaaende_dage=99)
-        with self.assertRaises(DataFejl):
-            self.anne.skabeloner.gem(sk.MAIL, sk.ny_skabelon(sk.MAIL))
+            self.anne.indstillinger.opdater(backup_antal=99)
         self.admin.aktiv()
         nyt_omraade = f"Område Test {uuid.uuid4().hex[:4]}"
         ind = self.admin.indstillinger.hent()

@@ -67,9 +67,12 @@ i denne rækkefølge, og tjek at hver giver "Success":
 9. `009_mdm_nulstillingskode.sql` – nulstillingskode pr. telefon (kun administratorer).
 10. `010_moduladgang.sql` – adgang pr. modul på brugerprofilen (Indstillinger → Brugere →
     Moduladgang). Telefoner åbnes for brugere med modulet.
+11. `011_aaben_opsaetning.sql` – alle brugere ændrer skabeloner (i deres moduler),
+    påmindelser og Organisation. Brugere, moduladgang, backup/slettepolitik og
+    permanent sletning er stadig kun for administratorer.
 
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004). Fremtidige ændringer kommer som nye filer `011_...`, `012_...`.
+fra 004). Fremtidige ændringer kommer som nye filer `012_...`, `013_...`.
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 

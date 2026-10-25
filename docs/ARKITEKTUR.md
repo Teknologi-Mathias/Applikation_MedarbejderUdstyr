@@ -120,8 +120,11 @@ Udvikling. Reglerne ligger i `app/domain/adgang.py`.
 
 * Moduler uden adgang vises med 🔒 i menuen. I stedet for siden vises `LaastSide`,
   og modulets data hentes ikke.
-* Låsen gælder i programmet. Kun Telefoner er også låst i databasen
-  (`inbase_has_module('telefoner')`).
+* Låsen gælder i programmet. Telefoner er også låst i databasen
+  (`inbase_has_module('telefoner')`), og arbejdsgangsskabeloner kan kun gemmes
+  for egne moduler (migrering 011).
+* Alle brugere ændrer skabeloner, påmindelser og Organisation. Kun administratorer
+  har Indstillinger → Brugere og Data & sikkerhed samt permanent sletning.
 * Ændrer en administrator adgangen, logges brugeren ud ved næste sessionstjek,
   ligesom ved rolleskift.
 
@@ -155,8 +158,10 @@ uden server. Drift: [MDM_OPSAETNING.md](MDM_OPSAETNING.md).
   Skrivninger gentages aldrig automatisk (ingen dubletter ved netværksfejl).
 * Hovedvinduet tjekker hvert minut en let signatur (antal + seneste
   `updated_at` pr. proces) og genindlæser kun ved ændringer.
-* RLS: alle medlemmer (brugere med aktiv profil) deler sager; opsætning,
-  brugere og permanent sletning kun for administratorer; tidslinjen er insert-only.
+* RLS: alle medlemmer (brugere med aktiv profil) deler sager og ændrer
+  skabeloner (i deres moduler), påmindelser og Organisation (migrering 011);
+  brugere, backup/slettepolitik og permanent sletning kun for administratorer;
+  tidslinjen er insert-only.
 
 ## Data og samtidighed (JSON – kun udvikling/tests)
 

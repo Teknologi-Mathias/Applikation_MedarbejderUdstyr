@@ -1,7 +1,8 @@
 """Indstillinger: fælles (alle brugere) og personlige præferencer.
 
 Fælles indstillinger (Data/indstillinger.json): backup, slettepolitik,
-områder, ansvarlige afdelinger og grænser for Action Center. Kun administratorer ændrer dem.
+områder, ansvarlige afdelinger og grænser for Action Center. Alle brugere ændrer
+Organisation; backup og slettepolitik (Data & sikkerhed) kun administratorer.
 
 Personlige præferencer (Lokal/praeferencer.json, pr. bruger): tema og
 Windows-notifikationer. De gemmes på pc'en, så de også virker offline. Ved

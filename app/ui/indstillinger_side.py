@@ -1,5 +1,5 @@
-"""Indstillinger: personlige valg, påmindelser og (for administratorer)
-organisation, brugere samt data & sikkerhed.
+"""Indstillinger: personlige valg, påmindelser, organisation og (for
+administratorer) brugere samt data & sikkerhed.
 
 Alle ændringer går gennem services:
 - Tema og Windows-notifikationer: IndstillingerService (pr. bruger, lokalt).
@@ -266,7 +266,7 @@ class OrganisationPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 12, 0, 0)
         kort, lag = _kort("Organisation og regler",
-                          "Fælles for alle brugere. Kun administratorer kan ændre.")
+                          "Fælles for alle brugere.")
         form = QFormLayout()
         self.omraader = QPlainTextEdit()
         self.omraader.setPlaceholderText("Ét område pr. linje")
@@ -334,7 +334,7 @@ class IndstillingerSide(QWidget):
         self._paneler = [
             (self.generelt, "Generelt", "Tema, notifikationer, adgangskode og offline", False),
             (self.paamindelser, "Påmindelser", "Regler for Windows-notifikationer", False),
-            (self.organisation, "Organisation", "Områder, ansvarlige og regler for Action Center", True),
+            (self.organisation, "Organisation", "Områder, ansvarlige og regler for Action Center", False),
             (self.brugere, "Brugere", "Brugerkartotek og roller", True),
             (self.data, "Data & sikkerhed", "Backup, gendannelse og slettepolitik", True),
         ]
@@ -347,7 +347,7 @@ class IndstillingerSide(QWidget):
     def anvend_rolle(self, admin: bool):
         for index, (_, _, _, kun_admin) in enumerate(self._paneler):
             self.faner.setTabVisible(index, admin or not kun_admin)
-        self.paamindelser.saet_redigerbar(admin and not self.t.lagring.offline)
+        self.paamindelser.saet_redigerbar(not self.t.lagring.offline)
         if not admin and self._paneler[self.faner.currentIndex()][3]:
             self.faner.setCurrentIndex(0)
 

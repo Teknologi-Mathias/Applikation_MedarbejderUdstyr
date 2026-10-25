@@ -40,8 +40,9 @@ user_profiles ──< development_requests ──< development_request_comments
   transaktion. Forkert version → `IB409` → `KonfliktFejl`. Klienten sender kun
   de rækker, der er ændret siden sagen blev hentet.
 * Tidslinjen er insert-only; hændelser kan kun registreres i eget navn.
-* Skabeloner (arbejdsgange) via `inbase_save_workflow_template` (kun admin);
-  mail-/påmindelsesskabeloner, indstillinger og områder direkte (RLS: kun admin).
+* Skabeloner (arbejdsgange) via `inbase_save_workflow_template` (alle med modulet, 011);
+  mail-/påmindelsesskabeloner, områder og Organisation direkte (RLS: alle medlemmer;
+  backup/slettepolitik kun admin).
 * Permanent sletning via `inbase_delete_case` (kun admin) – sletter også
   personen, hvis ingen anden sag bruger den.
 * Ønsker & Udvikling via `inbase_create_request`, `inbase_update_request`

@@ -196,7 +196,7 @@ class SkabelonSide(QWidget):
         self.hent_medarbejdere = hent_sager
         self.vis_testnotifikation = vis_testnotifikation
         self.alle = {s: [] for s in sk.SLAGS}
-        # Kun administratorer må ændre skabeloner; brugere kan se dem.
+        # Alle brugere må ændre skabeloner – dog ikke offline.
         self.redigerbar = True
 
         layout = QVBoxLayout(self)
@@ -209,7 +209,7 @@ class SkabelonSide(QWidget):
                 "Deaktiverede skabeloner bevares, men kan ikke vælges."))
             layout.addLayout(hoved)
 
-        self.laast_label = QLabel("Kun administratorer kan ændre skabeloner, og ikke offline.")
+        self.laast_label = QLabel("Skabeloner kan ikke ændres offline.")
         self.laast_label.setObjectName("info")
         layout.addWidget(self.laast_label)
 
