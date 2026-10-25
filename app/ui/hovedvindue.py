@@ -4,6 +4,11 @@ roller, tema og baggrundsdrift.
 Hovedvinduet indeholder ingen forretningsregler. Handlinger på sager går
 til modulernes controllere (app/ui/modul_controller.py), som kalder
 services. Data hentes fra services og deles ud til siderne.
+
+Session: hvert minut kontrolleres det, at sessionen stadig er gyldig, og at
+brugeren stadig er aktiv med samme rolle. Er den udløbet, eller er adgangen
+lukket, logges brugeren ud på en kontrolleret måde (åbne dialoger lukkes,
+data fjernes fra siderne, log på-skærmen vises).
 """
 import logging
 from datetime import date
@@ -11,6 +16,7 @@ from datetime import date
 from PySide6.QtCore import QTime, QTimer, Qt
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QHBoxLayout,
     QMainWindow,
     QMenu,
@@ -24,12 +30,14 @@ from app import APP_NAVN, session
 from app.domain import skabelon as sk
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
-from app.repositories.fejl import DataFejl
+from app.repositories.fejl import DataFejl, SessionUdloebetFejl
 from app.services import action_center
+from app.ui import fejl as ui_fejl
 from app.ui.action_liste import ANSVARLIG
 from app.ui.dashboard_side import DashboardSide
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_app_ikon, lav_knap
+from app.ui.indmelding_side import IndmeldingSide
 from app.ui.indstillinger_side import IndstillingerSide
 from app.ui.login_dialog import LoginDialog
 from app.ui.modul_controller import OffboardingController, OnboardingController
@@ -46,7 +54,8 @@ log = logging.getLogger(__name__)
 
 ON, OFF = OnboardingForloeb.PROCES, Medarbejder.PROCES
 
-# Venstremenuen: Onboarding og Offboarding er separate hovedpunkter.
+# Venstremenuen: Onboarding og Offboarding er separate hovedpunkter;
+# Ønsker & Udvikling er et selvstændigt punkt (ikke under medarbejderne).
 STRUKTUR = [
     (None, [("dashboard", "Dashboard")]),
     ("Onboarding - MERCH", [
@@ -63,6 +72,7 @@ STRUKTUR = [
         ("off_skabeloner", "Skabeloner og mails"),
         ("off_arkiv", "Arkiv"),
     ]),
+    (None, [("oensker", "Ønsker & Udvikling")]),
     (None, [("indstillinger", "Indstillinger")]),
 ]
 
@@ -85,6 +95,8 @@ class MainWindow(QMainWindow):
         self._afslutter = False
         self._baggrund_forklaret = False
         self._backup_fejl_vist = False
+        self._logger_ud = False
+        ui_fejl.saet_session_haandtering(self._session_udloebet)
         # Med ikon ved uret lukkes programmet kun via "Afslut".
         QApplication.instance().setQuitOnLastWindowClosed(not self.notifikationer.tilgaengelig)
 
@@ -126,6 +138,8 @@ class MainWindow(QMainWindow):
         self._tilfoej("dashboard", self.dashboard)
         self._opbyg_onboarding()
         self._opbyg_offboarding()
+        self.oensker = IndmeldingSide(self.t.indmeldinger, self._aktive_brugernavne)
+        self._tilfoej("oensker", self.oensker)
         self.indstillinger = IndstillingerSide(
             self.t, self._alle_arkiverede, self._alle_aktive, self.notifikationer.vis_besked,
         )
@@ -256,6 +270,11 @@ class MainWindow(QMainWindow):
     def _ansvarlige(self):
         return sorted({s.ansvarlig for s in self.data[ON][0] + self.data[ON][1] if s.ansvarlig})
 
+    def _aktive_brugernavne(self):
+        brugere = udfoer(self, self.t.auth.brugere)
+        return [] if brugere is FEJL else sorted(
+            b["brugernavn"] for b in brugere if b.get("aktiv", True))
+
     def _signatur_nu(self):
         return (self.t.onboarding.signatur(), self.t.offboarding.signatur(),
                 self.t.lagring.offline)
@@ -266,6 +285,9 @@ class MainWindow(QMainWindow):
                 self.data[proces] = (service.hent_aktive(), service.hent_arkiverede())
             self._signatur = self._signatur_nu()
             return True
+        except SessionUdloebetFejl as fejl:
+            self._session_udloebet(fejl)
+            return False
         except DataFejl as fejl:
             log.exception("Data kunne ikke indlæses")
             QMessageBox.critical(self, "Datafejl", str(fejl))
@@ -295,7 +317,7 @@ class MainWindow(QMainWindow):
             self.sider[f"{prefix}_opgaver"].opdater(aktive_sager)
             self.sider[f"{prefix}_arkiv"].vis(arkiv)
         aktuel = self.stak.currentWidget()
-        if isinstance(aktuel, (SkabelonSide, IndstillingerSide)):
+        if isinstance(aktuel, (SkabelonSide, IndstillingerSide, IndmeldingSide)):
             aktuel.opdater()
         self.sidebar.saet_lagring(self.t.lagring.offline,
                                   len(self.t.lagring.ventende_aendringer()),
@@ -304,9 +326,24 @@ class MainWindow(QMainWindow):
             f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}")
 
     def _minut_tik(self):
+        if session.bruger() is None:
+            return
+        if not self._kontroller_session():
+            return
         self._daglig_backup()   # programmet kan køre i flere døgn i baggrunden
         self.opdater_alle(tving=False)
         self._vis_paamindelser()
+
+    def _kontroller_session(self) -> bool:
+        """False, hvis sessionen er udløbet eller adgangen lukket (brugeren logges ud)."""
+        try:
+            self.t.auth.kontroller_session()
+        except SessionUdloebetFejl as fejl:
+            self._session_udloebet(fejl)
+            return False
+        except DataFejl:   # fx ingen forbindelse – vises af den almindelige opdatering
+            log.warning("Sessionen kunne ikke kontrolleres", exc_info=True)
+        return True
 
     def _vis_paamindelser(self):
         """Windows-notifikationer – kun hvis brugeren har dem slået til."""
@@ -342,7 +379,7 @@ class MainWindow(QMainWindow):
         side = self.sider[noegle]
         self.stak.setCurrentWidget(side)
         self.sidebar.marker(noegle)
-        if isinstance(side, (SkabelonSide, IndstillingerSide)):
+        if isinstance(side, (SkabelonSide, IndstillingerSide, IndmeldingSide)):
             side.opdater()
 
     def aabn_sag(self, proces, sag_id, opgave_id=""):
@@ -368,6 +405,7 @@ class MainWindow(QMainWindow):
             self.sider[noegle].saet_redigerbar(redigerbar)
         for knap in (self.on_slet, self.off_slet):
             knap.setVisible(admin)
+        self.oensker.anvend_rolle(admin)
         self.indstillinger.anvend_rolle(admin)
 
     def skift_tema(self, tema):
@@ -382,11 +420,40 @@ class MainWindow(QMainWindow):
         self.opdater_alle()
 
     def log_ud(self):
+        """Lukker adgangen: ingen session, ingen baggrundsopdatering, ingen data på siderne."""
         log.info("Bruger %s logger ud", session.brugernavn())
+        self._logger_ud = True
+        self.timer.stop()
         self.t.auth.log_ud()
         session.log_ud()
+        self._ryd_sider()
         self.hide()
+        self._logger_ud = False
         self.log_paa()
+
+    def _ryd_sider(self):
+        self.data = {ON: ([], []), OFF: ([], [])}
+        self._signatur = None
+        for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
+                + [self.oensker]:
+            side.ryd()
+
+    def _session_udloebet(self, fejl):
+        """Sessionen er udløbet, eller adgangen er lukket: log ud på en kontrolleret måde.
+
+        Åbne dialoger lukkes, og selve log ud sker, når den aktuelle handling er
+        afsluttet (så ingen dialog fortsætter i den gamle session).
+        """
+        if self._logger_ud or session.bruger() is None:
+            return
+        self._logger_ud = True
+        self.timer.stop()
+        log.warning("Logger %s ud: %s", session.brugernavn(), fejl)
+        QMessageBox.warning(self, "Log på igen", str(fejl))
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, QDialog) and widget.isVisible():
+                widget.reject()
+        QTimer.singleShot(0, self.log_ud)
 
     def log_paa(self):
         """Viser log på-skærmen. Annulleres den, afsluttes programmet."""
@@ -396,6 +463,7 @@ class MainWindow(QMainWindow):
             return
         session.log_ind(dialog.bruger)
         self.efter_log_paa()
+        self.timer.start()
         self.showNormal()
         self.raise_()
         self.activateWindow()

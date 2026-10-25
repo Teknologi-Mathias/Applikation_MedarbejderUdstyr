@@ -1,8 +1,11 @@
-"""Siden Brugerkartotek: opret, slet og skift kode for brugere (kun administratorer).
+"""Siden Brugerkartotek: opret, (de)aktivér, skift rolle, nulstil kode og slet
+brugere (kun administratorer).
 
-I Supabase-tilstand opretter "Opret bruger" en rigtig Supabase Auth-konto via
-Edge Function admin-create-user (serveren tjekker, at du er administrator).
-Den nye bruger får en midlertidig kode og vælger sin egen ved første log på.
+Brugere logger på med brugernavn (fx HAFRA) – der bruges ingen e-mail. I
+Supabase-tilstand opretter "Opret bruger" en rigtig Supabase Auth-konto via
+Edge Function admin-create-user, og de øvrige handlinger går via
+admin-manage-user (serveren tjekker, at du er aktiv administrator). Den nye
+bruger får en midlertidig kode og vælger sin egen ved første log på.
 """
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -13,6 +16,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -53,9 +57,9 @@ class KodeDialog(QDialog):
         self.setMinimumWidth(480)
 
         self.brugernavn_input = QLineEdit(brugernavn)
-        self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("bruges til at logge på")
+        self.brugernavn_input.setPlaceholderText("fx HAFRA – bruges til at logge på")
         self.navn_input = QLineEdit()
+        self.navn_input.setPlaceholderText("Visningsnavn (valgfrit)")
         self.rolle_input = QComboBox()
         self.rolle_input.addItems(ROLLER)
         self.rolle_input.setCurrentText(ROLLE_BRUGER)
@@ -73,11 +77,9 @@ class KodeDialog(QDialog):
         form.setVerticalSpacing(10)
         if ny:
             form.addRow("Brugernavn", self.brugernavn_input)
-            if auth.KRAEVER_EMAIL:
-                form.addRow("E-mail", self.email_input)
             form.addRow("Navn", self.navn_input)
             form.addRow("Rolle", self.rolle_input)
-        form.addRow("Midlertidig kode" if auth.KRAEVER_EMAIL else "Adgangskode", self.kode_input)
+        form.addRow("Midlertidig kode" if auth.MIDLERTIDIG_KODE else "Adgangskode", self.kode_input)
         form.addRow("Gentag kode", self.gentag_input)
 
         rolle_hjaelp = QLabel(
@@ -92,7 +94,7 @@ class KodeDialog(QDialog):
         )
         kode_hjaelp.setObjectName("hjaelpTekst")
         kode_hjaelp.setWordWrap(True)
-        kode_hjaelp.setVisible(auth.KRAEVER_EMAIL)
+        kode_hjaelp.setVisible(auth.MIDLERTIDIG_KODE)
 
         self.fejl_label = QLabel("")
         self.fejl_label.setObjectName("feltFejl")
@@ -135,7 +137,6 @@ class KodeDialog(QDialog):
                     self.navn_input.text(),
                     self.rolle_input.currentText(),
                     self.kode_input.text(),
-                    email=self.email_input.text(),
                 )
             else:
                 self.auth.nulstil_kode(self.brugernavn_input.text(), self.kode_input.text())
@@ -149,6 +150,7 @@ class BrugerSide(QWidget):
     def __init__(self, auth):
         super().__init__()
         self.auth = auth
+        self._brugere = {}             # brugernavn -> brugerdict
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 12, 0, 0)
         layout.setSpacing(16)
@@ -163,13 +165,19 @@ class BrugerSide(QWidget):
 
         knapper = QHBoxLayout()
         opret = lav_knap("+ Opret bruger", "primary")
-        kode = lav_knap("Skift adgangskode")
+        kode = lav_knap("Nulstil adgangskode")
+        rolle = lav_knap("Skift rolle")
+        self.aktiv_knap = lav_knap("Deaktivér / aktivér",
+                                   tooltip="En deaktiveret bruger kan ikke logge på og har "
+                                           "ingen adgang til data")
         slet = lav_knap("Slet bruger", "danger")
         opret.clicked.connect(self.opret)
         kode.clicked.connect(self.skift_kode)
+        rolle.clicked.connect(self.skift_rolle)
+        self.aktiv_knap.clicked.connect(self.skift_aktiv)
         slet.clicked.connect(self.slet)
         knapper.addStretch()
-        for knap in (opret, kode, slet):
+        for knap in (opret, kode, rolle, self.aktiv_knap, slet):
             knapper.addWidget(knap)
         layout.addLayout(knapper)
 
@@ -177,7 +185,7 @@ class BrugerSide(QWidget):
         kort_layout = QVBoxLayout(kort)
         kort_layout.setContentsMargins(8, 8, 8, 8)
         self.tabel = QTableWidget(0, 5)
-        self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "E-mail", "Rolle", "Oprettet"])
+        self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "Rolle", "Status", "Oprettet"])
         self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -186,7 +194,7 @@ class BrugerSide(QWidget):
         self.tabel.verticalHeader().setVisible(False)
         self.tabel.verticalHeader().setDefaultSectionSize(42)
         self.tabel.horizontalHeader().setStretchLastSection(True)
-        for kolonne, bredde in enumerate((170, 200, 240, 130)):
+        for kolonne, bredde in enumerate((170, 240, 140, 130)):
             self.tabel.setColumnWidth(kolonne, bredde)
         kort_layout.addWidget(self.tabel)
         layout.addWidget(kort, 1)
@@ -195,14 +203,15 @@ class BrugerSide(QWidget):
         alle = udfoer(self, self.auth.brugere)
         if alle is FEJL:
             return
+        self._brugere = {b["brugernavn"]: b for b in alle}
         self.tabel.setRowCount(len(alle))
         for raekke, b in enumerate(alle):
             mig = b["brugernavn"] == session.brugernavn()
             celler = (
                 b["brugernavn"] + ("  (dig)" if mig else ""),
                 b.get("navn", ""),
-                b.get("email", ""),
                 b.get("rolle", ""),
+                "Aktiv" if b.get("aktiv", True) else "Deaktiveret",
                 vis_dato(b.get("oprettet", "")[:10]),
             )
             for kolonne, tekst in enumerate(celler):
@@ -227,7 +236,34 @@ class BrugerSide(QWidget):
             QMessageBox.information(
                 self, "Adgangskode",
                 f"Koden for {brugernavn} er skiftet."
-                + (" Brugeren skal vælge en ny kode ved næste log på." if self.auth.KRAEVER_EMAIL else ""))
+                + (" Brugeren skal vælge en ny kode ved næste log på."
+                   if self.auth.MIDLERTIDIG_KODE else ""))
+
+    def skift_rolle(self):
+        brugernavn = self._valgt()
+        if brugernavn is None:
+            return
+        nuvaerende = self._brugere.get(brugernavn, {}).get("rolle", ROLLE_BRUGER)
+        rolle, ok = QInputDialog.getItem(
+            self, "Skift rolle", f"Ny rolle for {brugernavn}:", list(ROLLER),
+            list(ROLLER).index(nuvaerende) if nuvaerende in ROLLER else 0, False)
+        if ok and rolle != nuvaerende:
+            udfoer(self, self.auth.saet_rolle, brugernavn, rolle, session.brugernavn())
+            self.opdater()
+
+    def skift_aktiv(self):
+        brugernavn = self._valgt()
+        if brugernavn is None:
+            return
+        aktiv = self._brugere.get(brugernavn, {}).get("aktiv", True)
+        tekst = (f"Vil du deaktivere {brugernavn}?\n\nBrugeren kan ikke længere logge på, og en "
+                 "igangværende session mister straks adgangen til data. Historikken bevares."
+                 if aktiv else f"Vil du aktivere {brugernavn} igen?")
+        svar = QMessageBox.question(self, "Deaktivér bruger" if aktiv else "Aktivér bruger", tekst)
+        if svar != QMessageBox.StandardButton.Yes:
+            return
+        udfoer(self, self.auth.saet_aktiv, brugernavn, not aktiv, session.brugernavn())
+        self.opdater()
 
     def slet(self):
         brugernavn = self._valgt()
@@ -236,7 +272,8 @@ class BrugerSide(QWidget):
         svar = QMessageBox.warning(
             self, "Slet bruger",
             f"Vil du slette brugeren '{brugernavn}'?\n\n"
-            "Brugerens navn bevares i tidslinjerne, men brugeren kan ikke længere logge på.",
+            "Brugerens navn bevares i tidslinjerne, men brugeren kan ikke længere logge på. "
+            "Overvej at deaktivere i stedet – så kan kontoen genaktiveres.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

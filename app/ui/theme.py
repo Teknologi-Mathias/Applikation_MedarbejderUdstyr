@@ -14,6 +14,7 @@ temaskift, så diagrammer og tabeller følger med uden genstart.
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
+from app.domain import indmelding as im
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb as OB
 from app.domain.opgave import Opgave
@@ -83,7 +84,17 @@ _STATUS_TONE = {
     OB.STATUS_JOBS: "blaa",
     OB.STATUS_AKTIV: "groen",
     OB.STATUS_ANNULLERET: "graa",
+    # Ønsker & Udvikling
+    im.INDSENDT: "intet",
+    im.TIL_VURDERING: "blaa",
+    im.ACCEPTERET: "blaa",
+    im.AFVIST: "graa",
+    im.PLANLAGT: "gul",
+    im.UNDER_UDVIKLING: "gul",
+    im.TIL_TEST: "gul",
+    im.UDGIVET: "groen",
 }
+_PRIORITET_TONE = {im.LAV: "graa", im.NORMAL: "intet", im.HOEJ: "gul", im.KRITISK: "roed"}
 _OPGAVE_TONE = {
     Opgave.IKKE_STARTET: "intet", Opgave.I_GANG: "blaa", Opgave.AFVENTER: "gul",
     Opgave.UDFOERT: "groen", Opgave.UNDTAGET: "graa",
@@ -99,6 +110,7 @@ TONER: dict = {}
 STATUS_STIL: dict = {}
 OPGAVE_STIL: dict = {}
 ALARM_STIL: dict = {}
+PRIORITET_STIL: dict = {}
 INTET_STIL: dict = {}
 aktivt_tema = STANDARD_TEMA
 
@@ -114,7 +126,7 @@ def _saet_palette(navn: str) -> None:
     TONER.clear()
     TONER.update(tema["toner"])
     for maal, kilde in ((STATUS_STIL, _STATUS_TONE), (OPGAVE_STIL, _OPGAVE_TONE),
-                        (ALARM_STIL, _ALARM_TONE)):
+                        (ALARM_STIL, _ALARM_TONE), (PRIORITET_STIL, _PRIORITET_TONE)):
         maal.clear()
         maal.update({noegle: TONER[tone] for noegle, tone in kilde.items()})
     INTET_STIL.clear()
@@ -126,6 +138,10 @@ _saet_palette(STANDARD_TEMA)
 
 def status_stil(status: str) -> dict:
     return STATUS_STIL.get(status, INTET_STIL)
+
+
+def prioritet_stil(prioritet: str) -> dict:
+    return PRIORITET_STIL.get(prioritet, INTET_STIL)
 
 
 def opgaver_stil(afsluttede, total, forsinket):

@@ -1,9 +1,10 @@
 """Generisk side med søgning, filtre, knapper og en tabel over sager.
 
-Bruges til "Aktive forløb" og "Arkiv" i både onboarding og offboarding.
-Modulet bestemmer kolonnerne (Kolonne) og filtrene (Filtervalg); siden
-står for visning, søgning, sortering og for at bevare markeringen.
-Rækkerne bærer sagens id (aldrig lønnr.).
+Bruges til "Aktive forløb" og "Arkiv" i både onboarding og offboarding samt
+til Ønsker & Udvikling. Modulet bestemmer kolonnerne (Kolonne), filtrene
+(Filtervalg) og evt. ekstra søgetekst (soegning); siden står for visning,
+søgning, sortering og for at bevare markeringen. Rækkerne bærer postens id
+(aldrig lønnr.).
 """
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -42,10 +43,12 @@ class Filtervalg:
 
 class SagListeSide(QWidget):
     def __init__(self, titel, undertitel, kolonner, knapper=(), handlinger=(),
-                 filtre=(), sorter_efter=2, parent=None):
+                 filtre=(), sorter_efter=2, parent=None, soegning: Optional[Callable] = None):
+        """soegning: sag -> ekstra tekst, der søges i (ud over cellerne)."""
         super().__init__(parent)
         self.kolonner = list(kolonner)
         self.filtre = list(filtre)
+        self.soegning = soegning
         self._sager = []
 
         layout = QVBoxLayout(self)
@@ -169,6 +172,11 @@ class SagListeSide(QWidget):
         self.anvend_filter()
         tabel.verticalScrollBar().setValue(scroll_position)
 
+    def ryd(self):
+        """Tømmer tabellen uden at hente noget (fx ved log ud)."""
+        self._sager = []
+        self.tabel.setRowCount(0)
+
     @staticmethod
     def _celle(sag, kolonne: Kolonne):
         tekst = str(kolonne.tekst(sag) or "")
@@ -196,6 +204,8 @@ class SagListeSide(QWidget):
                     f"{self.tabel.item(row, k).text()} {self.tabel.item(row, k).toolTip()}"
                     for k in range(self.tabel.columnCount())
                 ).lower()
+                if self.soegning and sag is not None:
+                    tekster += " " + str(self.soegning(sag) or "").lower()
                 skjul = soegetekst not in tekster
             self.tabel.setRowHidden(row, skjul)
 

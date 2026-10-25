@@ -6,8 +6,10 @@ Supabase-projektet eller rigtige medarbejderdata; alle navne er fiktive.
 
 Dækker: delte data mellem brugere, opret/rediger/arkivér, opgaver og
 tidslinje, skabeloner, optimistisk låsning, RLS (konto uden profil, anonym,
-almindelig bruger vs. administrator), forsøg på at ændre egen rolle og
-insert-only tidslinje.
+almindelig bruger vs. administrator, deaktiveret bruger), forsøg på at ændre
+egen rolle/status, insert-only tidslinje og Ønsker & Udvikling (indsender fra
+login, behandling kun for administratorer – også uden om programmet –,
+statusregler, kommentarer/interne noter, historik og sletning).
 """
 import base64
 import hashlib
@@ -24,8 +26,9 @@ from app.domain import skabelon as sk
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
 from app.domain.opgave import Opgave
-from app.repositories.fejl import DataFejl, KonfliktFejl
+from app.repositories.fejl import DataFejl, KonfliktFejl, SessionUdloebetFejl, ValideringsFejl
 from app.repositories.supabase import mapping
+from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRepository
 from app.repositories.supabase.konto_repository import SupabaseKontoRepository
 from app.repositories.supabase.opsaetning_repository import (
     SupabaseIndstillingRepository,
@@ -33,6 +36,8 @@ from app.repositories.supabase.opsaetning_repository import (
     SupabaseSkabelonRepository,
 )
 from app.repositories.supabase.sag_repository import SupabaseSagRepository
+from app.services.auth_service import SupabaseAuthService
+from app.services.indmelding_service import IndmeldingService
 from app.services.indstillinger_service import IndstillingerService
 from app.services.offboarding_service import OffboardingService
 from app.services.onboarding_service import OnboardingService
@@ -69,11 +74,11 @@ class Bruger:
     """En testbruger med egen forbindelse og egne services (som en anden pc)."""
 
     def __init__(self, service_klient, rolle="Bruger", profil=True):
-        endelse = uuid.uuid4().hex[:8]
-        self.brugernavn = f"test_{endelse}" if profil else None
+        navn = f"TEST_{uuid.uuid4().hex[:8].upper()}"
+        self.brugernavn = navn if profil else None
+        self.rolle = rolle
         self.id = service_klient.rpc("test_opret_konto", {
-            "p_email": f"{endelse}@test.invalid", "p_username": self.brugernavn,
-            "p_role": rolle}).execute().data
+            "p_username": navn, "p_role": rolle, "p_profil": profil}).execute().data
         self.klient = klient(jwt("authenticated", self.id))
         self.offboarding = OffboardingService(SupabaseSagRepository(self.klient, Medarbejder))
         self.onboarding = OnboardingService(SupabaseSagRepository(self.klient, OnboardingForloeb))
@@ -81,10 +86,13 @@ class Bruger:
         self.indstillinger = IndstillingerService(SupabaseIndstillingRepository(self.klient),
                                                   SupabasePraeferenceRepository(self.klient))
         self.konto = SupabaseKontoRepository(self.klient)
+        self.indmeldinger = IndmeldingService(
+            SupabaseIndmeldingRepository(self.klient),
+            lambda: {"brugernavn": self.brugernavn, "rolle": self.rolle})
 
     def aktiv(self):
         """Gør brugeren til den, der står i tidslinjen (som efter log på)."""
-        session.log_ind({"brugernavn": self.brugernavn, "rolle": "Bruger"})
+        session.log_ind({"brugernavn": self.brugernavn, "rolle": self.rolle})
         return self
 
 
@@ -285,6 +293,153 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertEqual([o["navn"] for o in hos_bo["opgaver"]], ["Opgave A", "Opgave B"])
         self.assertEqual(hos_bo["opgaver"][0]["frist_dage"], 3)
         self.assertEqual(len(hos_bo["versioner"]), 1)
+
+    # ----- brugernavne og deaktivering -------------------------------------
+
+    def test_profiler_har_normaliseret_brugernavn_og_ingen_email(self):
+        profil = self.anne.konto.profil(self.anne.id)
+        self.assertEqual(profil["brugernavn"], self.anne.brugernavn)
+        self.assertTrue(profil["aktiv"])
+        raekke = self.anne.klient.table("user_profiles").select("*").eq(
+            "id", self.anne.id).execute().data[0]
+        self.assertNotIn("email", raekke)
+
+    def test_bruger_kan_ikke_aendre_egen_status_brugernavn_eller_rolle(self):
+        for felter in ({"active": False}, {"username": "ANDET"}, {"role": "Administrator"},
+                       {"must_change_password": False}):
+            with self.subTest(felter), self.assertRaises(Exception):
+                self.anne.klient.table("user_profiles").update(felter) \
+                    .eq("id", self.anne.id).execute()
+
+    def test_deaktiveret_bruger_mister_adgangen_med_det_samme(self):
+        cecilie = Bruger(self.service)
+        sag = self.ny_offboarding(self.anne)
+        ind = self.ny_indmelding(self.anne)
+        self.assertIsNotNone(cecilie.offboarding.hent(sag.id))
+        self.service.rpc("test_saet_aktiv", {"p_id": cecilie.id, "p_active": False}).execute()
+        # Samme, stadig gyldige token: RLS lukker for alle data.
+        self.assertIsNone(cecilie.offboarding.hent(sag.id))
+        self.assertIsNone(cecilie.indmeldinger.hent(ind.id))
+        cecilie.aktiv()
+        with self.assertRaises(DataFejl):
+            cecilie.offboarding.repo.gem(sag)
+        with self.assertRaises(DataFejl):
+            cecilie.indmeldinger.repo.tilfoej_kommentar(ind.id, "Efter deaktivering", False)
+        # Egen profil kan stadig læses, så programmet opdager det og logger ud.
+        auth = SupabaseAuthService(cecilie.konto)
+        auth._aktuel = cecilie.konto.profil(cecilie.id)
+        self.assertFalse(auth._aktuel["aktiv"])
+        with self.assertRaises(SessionUdloebetFejl):
+            auth.kontroller_session()
+        self.assertNotIn(cecilie.brugernavn, [b["brugernavn"] for b in self.anne.konto.katalog()])
+
+    # ----- Ønsker & Udvikling ----------------------------------------------
+
+    def ny_indmelding(self, bruger, titel="Fiktiv fejl i eksport"):
+        bruger.aktiv()
+        return bruger.indmeldinger.opret({"titel": titel, "kategori": "Fejlmelding",
+                                          "beskrivelse": "Fiktiv testbeskrivelse"})
+
+    def test_indmelding_faar_indsender_fra_login_og_deles(self):
+        ind = self.ny_indmelding(self.anne)
+        self.assertEqual((ind.indsender, ind.status, ind.prioritet, ind.version),
+                         (self.anne.brugernavn, "Indsendt", "Normal", 1))
+        self.assertGreater(ind.nummer, 0)
+        self.assertEqual(self.bo.indmeldinger.hent(ind.id).titel, "Fiktiv fejl i eksport")
+        self.assertIn(ind.id, [i.id for i in self.bo.indmeldinger.hent_alle()])
+        # RPC'en ignorerer forsøg på at angive indsender, status og prioritet.
+        raekke = self.bo.klient.rpc("inbase_create_request", {"p_request": {
+            "title": "Snyd", "category": "Andet", "description": "x",
+            "submitted_by_username": self.admin.brugernavn, "submitted_by": self.admin.id,
+            "status": "Udgivet", "priority": "Kritisk"}}).execute().data
+        self.assertEqual((raekke["submitted_by_username"], raekke["submitted_by"], raekke["status"],
+                          raekke["priority"]), (self.bo.brugernavn, self.bo.id, "Indsendt", "Normal"))
+        historik = self.bo.indmeldinger.detaljer(ind.id).historik
+        self.assertEqual([(a.handling, a.bruger) for a in historik],
+                         [("oprettet", self.anne.brugernavn)])
+
+    def test_kun_administrator_behandler_ogsaa_uden_om_programmet(self):
+        ind = self.ny_indmelding(self.anne)
+        repo = self.anne.indmeldinger.repo          # direkte – uden servicens kontrol
+        for aendring in ({"status": "Til vurdering"}, {"prioritet": "Kritisk"},
+                         {"ansvarlig": self.anne.brugernavn}, {"loesning": "Løst"}):
+            with self.subTest(aendring), self.assertRaises(DataFejl):
+                repo.opdater(ind.id, ind.version, aendring)
+        with self.assertRaises(DataFejl):           # andres tekst
+            self.bo.indmeldinger.repo.opdater(ind.id, ind.version, {"titel": "Overtaget"})
+        ind = repo.opdater(ind.id, ind.version, {"titel": "Rettet af indsender"})
+        self.admin.aktiv()
+        ind = self.admin.indmeldinger.opdater(ind, {
+            "status": "Til vurdering", "prioritet": "Høj",
+            "ansvarlig": self.bo.brugernavn.lower(), "planlagt_version": "V0.8"})
+        self.assertEqual((ind.status, ind.prioritet, ind.ansvarlig, ind.version),
+                         ("Til vurdering", "Høj", self.bo.brugernavn, 3))
+        with self.assertRaises(DataFejl):           # ikke længere Indsendt
+            repo.opdater(ind.id, ind.version, {"titel": "For sent"})
+        historik = self.bo.indmeldinger.detaljer(ind.id).historik
+        self.assertEqual([(a.felt, a.bruger) for a in historik if a.handling == "aendret"],
+                         [("titel", self.anne.brugernavn), ("status", self.admin.brugernavn),
+                          ("prioritet", self.admin.brugernavn), ("ansvarlig", self.admin.brugernavn),
+                          ("planlagt_version", self.admin.brugernavn)])
+        # Direkte skrivning i tabellerne er blokeret – også for administratorer.
+        for forsoeg in (
+            lambda: self.admin.klient.table("development_requests").update(
+                {"status": "Udgivet"}).eq("id", ind.id).execute(),
+            lambda: self.anne.klient.table("development_requests").insert(
+                {"title": "x", "category": "Andet", "submitted_by_username": "x"}).execute(),
+            lambda: self.admin.klient.table("development_request_events").insert(
+                {"request_id": ind.id, "actor_username": "x", "action": "aendret"}).execute(),
+            lambda: self.admin.klient.table("development_request_events").delete().eq(
+                "request_id", ind.id).execute(),
+            lambda: self.anne.klient.table("development_request_comments").insert(
+                {"request_id": ind.id, "author_username": "x", "body": "x"}).execute(),
+        ):
+            with self.assertRaises(Exception):
+                forsoeg()
+
+    def test_statusregler_og_konflikt_haandhaeves_af_databasen(self):
+        ind = self.ny_indmelding(self.anne)
+        repo = self.admin.indmeldinger.repo
+        for aendring in ({"status": "Udgivet"},          # springer trin over
+                         {"status": "Afvist"},           # mangler begrundelse
+                         {"ansvarlig": "FINDES_IKKE"},
+                         {"prioritet": "Akut"}):
+            with self.subTest(aendring), self.assertRaises(ValideringsFejl):
+                repo.opdater(ind.id, ind.version, aendring)
+        repo.opdater(ind.id, ind.version, {"prioritet": "Lav"})
+        with self.assertRaises(KonfliktFejl):
+            repo.opdater(ind.id, ind.version, {"prioritet": "Høj"})
+        self.assertEqual(self.bo.indmeldinger.hent(ind.id).prioritet, "Lav")
+        afvist = repo.opdater(ind.id, ind.version + 1, {"status": "Afvist", "loesning": "Dækkes af ERP"})
+        self.assertEqual(afvist.status, "Afvist")
+
+    def test_kommentarer_og_interne_noter(self):
+        ind = self.ny_indmelding(self.anne)
+        self.anne.indmeldinger.repo.tilfoej_kommentar(ind.id, "Offentlig kommentar", False)
+        with self.assertRaises(DataFejl):
+            self.anne.indmeldinger.repo.tilfoej_kommentar(ind.id, "Intern?", True)
+        self.admin.indmeldinger.repo.tilfoej_kommentar(ind.id, "Intern note", True)
+        hos_bo = self.bo.indmeldinger.repo.kommentarer(ind.id)
+        self.assertEqual([(k.tekst, k.forfatter) for k in hos_bo],
+                         [("Offentlig kommentar", self.anne.brugernavn)])
+        self.assertEqual([k.tekst for k in self.admin.indmeldinger.repo.kommentarer(ind.id)],
+                         ["Offentlig kommentar", "Intern note"])
+        with self.assertRaises(ValideringsFejl):
+            self.bo.indmeldinger.repo.tilfoej_kommentar(ind.id, "   ", False)
+
+    def test_sletning_kun_for_administratorer_og_ingen_adgang_uden_profil(self):
+        ind = self.ny_indmelding(self.anne)
+        with self.assertRaises(DataFejl):
+            self.anne.indmeldinger.repo.slet(ind.id)
+        self.assertIsNotNone(self.bo.indmeldinger.hent(ind.id))
+        self.assertEqual(self.uden_profil.indmeldinger.repo.hent_alle(), [])
+        with self.assertRaises(DataFejl):
+            self.uden_profil.indmeldinger.repo.opret(
+                {"titel": "x", "kategori": "Andet", "beskrivelse": "x"})
+        with self.assertRaises(DataFejl):
+            SupabaseIndmeldingRepository(klient(None)).hent_alle()
+        self.admin.indmeldinger.repo.slet(ind.id)
+        self.assertIsNone(self.bo.indmeldinger.hent(ind.id))
 
 
 if __name__ == "__main__":

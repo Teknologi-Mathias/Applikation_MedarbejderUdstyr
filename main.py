@@ -109,7 +109,8 @@ def selvtest() -> int:
     try:
         for modul in ("supabase", "postgrest", "supabase_auth", "supabase_functions", "httpx",
                       "certifi", "dotenv", "app.repositories.supabase.sag_repository",
-                      "app.repositories.supabase.konto_repository", "app.ui.hovedvindue"):
+                      "app.repositories.supabase.konto_repository",
+                      "app.repositories.supabase.indmelding_repository", "app.ui.hovedvindue"):
             importlib.import_module(modul)
         opret_klient(DatabaseKonfiguration("https://selvtest.supabase.co", "sb_publishable_selvtest"))
         nulstil_klient()

@@ -1,7 +1,8 @@
 -- IN-BASE: ENGANGSPROCEDURE – tøm alle IN-BASE-forretningsdata i Supabase.
 --
 -- ⚠ Sletter ALLE sager, personer, ansættelser, opgaver, rykkere, tidslinjer,
---   skabeloner, indstillinger og områder. Kan ikke fortrydes (kun via
+--   skabeloner, indstillinger, områder og indmeldinger i Ønsker & Udvikling
+--   (med kommentarer og historik). Kan ikke fortrydes (kun via
 --   Supabase-backup). Programmet kører ALDRIG denne fil – den køres manuelt af
 --   projektets ejer i Supabase Dashboard → SQL Editor.
 --
@@ -50,6 +51,14 @@ do $$
 begin
     if to_regclass('public.integration_probe') is not null then
         execute 'truncate table public.integration_probe';
+    end if;
+end $$;
+
+-- Ønsker & Udvikling (migrering 006), hvis den er kørt. Løbenumrene starter forfra.
+do $$
+begin
+    if to_regclass('public.development_requests') is not null then
+        execute 'truncate table public.development_request_events, public.development_request_comments, public.development_requests restart identity';
     end if;
 end $$;
 

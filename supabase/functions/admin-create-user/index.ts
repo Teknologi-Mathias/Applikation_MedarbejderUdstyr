@@ -4,22 +4,27 @@
 // egen session. Opretter en RIGTIG Supabase Auth-konto (auth.users) og præcis
 // én profil i public.user_profiles med samme UUID.
 //
-// Body: { email, username, display_name, role, password }
-//   password er en MIDLERTIDIG kode – brugeren skal vælge sin egen ved første
-//   log på (user_profiles.must_change_password = true).
+// Body: { username, display_name, role, password }
+//   username   normaliseres (trim + STORE bogstaver) og skal være unikt.
+//   password   er en MIDLERTIDIG kode – brugeren skal vælge sin egen ved første
+//              log på (user_profiles.must_change_password = true).
+// Auth-kontoen får brugernavnets interne login-alias som e-mail, bekræftet
+// med det samme (email_confirm) – der sendes ingen mail, og aliaset vises aldrig.
 //
 // Konsistens:
-// - Findes e-mailen allerede i Auth UDEN profil (fx en tidligere afbrudt
+// - Findes aliasset allerede i Auth UDEN profil (fx en tidligere afbrudt
 //   oprettelse), genoptages oprettelsen på den konto (sikker gentagelse).
 // - Fejler profilen efter en NY konto, slettes kontoen igen (oprydning).
 import {
   adminKlient,
   BRUGERNAVN,
-  EMAIL,
+  BRUGERNAVN_REGEL,
   Fejl,
   haandter,
   kraevAdministrator,
   laesJson,
+  loginAlias,
+  normaliserBrugernavn,
   ROLLER,
   svar,
   validerKode,
@@ -30,50 +35,47 @@ Deno.serve(haandter(async (req) => {
   const kalder = await kraevAdministrator(req, admin);
   const body = await laesJson(req);
 
-  const email = String(body.email ?? "").trim().toLowerCase();
-  const username = String(body.username ?? "").trim();
+  const username = normaliserBrugernavn(body.username);
   const displayName = String(body.display_name ?? "").trim().slice(0, 100) || username;
   const role = String(body.role ?? "");
   const password = String(body.password ?? "");
 
-  if (!EMAIL.test(email)) throw new Fejl(422, "Ugyldig e-mailadresse.");
-  if (!BRUGERNAVN.test(username)) {
-    throw new Fejl(422, "Brugernavnet skal være 2-40 tegn: bogstaver, tal, punktum, - eller _.");
-  }
+  if (!BRUGERNAVN.test(username)) throw new Fejl(422, BRUGERNAVN_REGEL);
   if (!(ROLLER as readonly string[]).includes(role)) throw new Fejl(422, "Ukendt rolle.");
   validerKode(password);
+  const alias = loginAlias(username);
 
-  // Brugernavnet skal være unikt (uden forskel på store/små bogstaver).
+  // Brugernavnet skal være unikt (gemmes altid med store bogstaver; databasen
+  // har desuden et unikt indeks på lower(username)).
   const { data: navne, error: navneFejl } = await admin
-    .from("user_profiles").select("username").ilike("username", username);
+    .from("user_profiles").select("id").eq("username", username);
   if (navneFejl) throw new Fejl(500, "Brugernavnet kunne ikke kontrolleres.");
-  if ((navne ?? []).some((p) => String(p.username).toLowerCase() === username.toLowerCase())) {
-    throw new Fejl(409, `Brugernavnet '${username}' er optaget.`);
-  }
+  if ((navne ?? []).length) throw new Fejl(409, `Brugernavnet '${username}' er optaget.`);
 
-  // Findes der allerede en Auth-konto med e-mailen?
+  // Findes der allerede en Auth-konto med login-aliasset?
   const { data: eksisterende, error: opslagFejl } = await admin
-    .rpc("inbase_auth_user_id_by_email", { p_email: email });
-  if (opslagFejl) throw new Fejl(500, "E-mailen kunne ikke kontrolleres.");
+    .rpc("inbase_auth_user_id_by_email", { p_email: alias });
+  if (opslagFejl) throw new Fejl(500, "Brugernavnet kunne ikke kontrolleres.");
 
   let brugerId: string;
   let nyKonto = false;
   if (eksisterende) {
     const { data: profil } = await admin
       .from("user_profiles").select("id").eq("id", eksisterende).maybeSingle();
-    if (profil) throw new Fejl(409, "Der findes allerede en IN-BASE-bruger med denne e-mail.");
-    // Konto uden profil: genoptag oprettelsen (ny midlertidig kode, bekræftet e-mail).
+    if (profil) throw new Fejl(409, `Brugernavnet '${username}' er optaget.`);
+    // Konto uden profil: genoptag oprettelsen (ny midlertidig kode, ingen spærring).
     const { error } = await admin.auth.admin.updateUserById(String(eksisterende), {
       password,
       email_confirm: true,
+      ban_duration: "none",
     });
     if (error) throw new Fejl(500, `Den eksisterende konto kunne ikke klargøres: ${error.message}`);
     brugerId = String(eksisterende);
   } else {
     const { data, error } = await admin.auth.admin.createUser({
-      email,
+      email: alias,
       password,
-      email_confirm: true, // administratoren står inde for adressen; ingen bekræftelsesmail
+      email_confirm: true, // internt alias: ingen bekræftelsesmail
       app_metadata: { inbase: true },
     });
     if (error || !data.user) {
@@ -88,8 +90,8 @@ Deno.serve(haandter(async (req) => {
     id: brugerId,
     username,
     display_name: displayName,
-    email,
     role,
+    active: true,
     must_change_password: true,
   });
   if (profilFejl) {
@@ -106,5 +108,5 @@ Deno.serve(haandter(async (req) => {
   }
 
   console.log(`IN-BASE: bruger ${username} (${brugerId}, ${role}) oprettet af ${kalder.id}`);
-  return svar(200, { ok: true, user: { id: brugerId, email, username, role } });
+  return svar(200, { ok: true, user: { id: brugerId, username, role } });
 }));

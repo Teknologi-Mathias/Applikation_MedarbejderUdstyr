@@ -7,10 +7,10 @@ from app.domain import skabelon as sk
 from app.domain.onboarding import OnboardingForloeb as OB
 from app.domain.opgave import Opgave
 from app.domain.rykker import Rykker
-from app.repositories.fejl import ValideringsFejl
+from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.services import action_center
 from app.services.rapport_service import Filter
-from tests.hjaelp import TjenesteTest, dato
+from tests.hjaelp import ADMIN, ADMIN_KODE, TjenesteTest, dato
 
 
 class OffboardingServiceTest(TjenesteTest):
@@ -148,15 +148,15 @@ class RapportTest(TjenesteTest):
 
 class AuthTest(TjenesteTest):
     def test_log_ind_og_skift_egen_kode(self):
-        self.assertIsNotNone(self.t.auth.log_ind("admin", "admin"))
+        self.assertIsNotNone(self.t.auth.log_ind("admin", ADMIN_KODE))
         with self.assertRaises(ValideringsFejl):
             self.t.auth.skift_egen_kode("admin", "forkert", "nykode1", "nykode1")
         with self.assertRaises(ValideringsFejl):
-            self.t.auth.skift_egen_kode("admin", "admin", "kort", "kort")
+            self.t.auth.skift_egen_kode("admin", ADMIN_KODE, "kort", "kort")
         with self.assertRaises(ValideringsFejl):
-            self.t.auth.skift_egen_kode("admin", "admin", "nykode1", "nykode2")
-        self.t.auth.skift_egen_kode("admin", "admin", "nykode1", "nykode1")
-        self.assertIsNone(self.t.auth.log_ind("admin", "admin"))
+            self.t.auth.skift_egen_kode("admin", ADMIN_KODE, "nykode1", "nykode2")
+        self.t.auth.skift_egen_kode("admin", ADMIN_KODE, "nykode1", "nykode1")
+        self.assertIsNone(self.t.auth.log_ind("admin", ADMIN_KODE))
         self.assertIsNotNone(self.t.auth.log_ind("admin", "nykode1"))
         tekst = (self.central / "brugere.json").read_text("utf-8")
         self.assertNotIn("nykode1", tekst)
@@ -165,6 +165,45 @@ class AuthTest(TjenesteTest):
         self.t.auth.opret("lise", "Lise", "Bruger", "hemmelig")
         with self.assertRaises(ValideringsFejl):
             self.t.auth.slet("admin", "lise")
+
+    def test_ingen_standardbruger_og_foerste_administrator_kun_een_gang(self):
+        tom = byg_tjenester(self._tmp / "Tom", self._tmp / "TomLokal")
+        self.assertEqual(tom.auth.brugere(), [])
+        self.assertIsNone(tom.auth.log_ind("admin", "admin"))
+        tom.auth.opret_foerste_administrator(" masan ", "Mathias", "hemmelig1")
+        self.assertEqual(tom.auth.log_ind("MASAN", "hemmelig1")["rolle"], "Administrator")
+        with self.assertRaises(ValideringsFejl):
+            tom.auth.opret_foerste_administrator("ANDEN", "Anden", "hemmelig1")
+
+    def test_brugernavne_normaliseres_og_er_unikke(self):
+        self.t.auth.opret("  hafra ", "Hanne", "Bruger", "hemmelig")
+        bruger = self.t.auth.log_ind("Hafra", "hemmelig")
+        self.assertEqual(bruger["brugernavn"], "HAFRA")
+        with self.assertRaises(ValideringsFejl):
+            self.t.auth.opret("HaFrA", "Dublet", "Bruger", "hemmelig")
+        for ugyldigt in ("a", "MED MELLEMRUM", ".start", "A..B", "æøå"):
+            with self.subTest(ugyldigt), self.assertRaises(ValideringsFejl):
+                self.t.auth.opret(ugyldigt, "", "Bruger", "hemmelig")
+
+    def test_deaktiveret_bruger_kan_ikke_logge_paa(self):
+        self.t.auth.opret("sadah", "Sara", "Bruger", "hemmelig")
+        self.t.auth.saet_aktiv("SADAH", False, ADMIN)
+        with self.assertRaises(DataFejl):
+            self.t.auth.log_ind("sadah", "hemmelig")
+        self.assertIsNone(self.t.auth.log_ind("sadah", "forkert"), "afslører intet ved forkert kode")
+        self.t.auth.saet_aktiv("SADAH", True, ADMIN)
+        self.assertIsNotNone(self.t.auth.log_ind("sadah", "hemmelig"))
+
+    def test_rolle_og_aktiv_kan_ikke_aendres_paa_sig_selv_eller_sidste_admin(self):
+        self.t.auth.opret("lise", "Lise", "Bruger", "hemmelig")
+        with self.assertRaises(ValideringsFejl):
+            self.t.auth.saet_aktiv(ADMIN, False, ADMIN)
+        with self.assertRaises(ValideringsFejl):
+            self.t.auth.saet_rolle(ADMIN, "Bruger", ADMIN)
+        with self.assertRaises(ValideringsFejl):   # sidste aktive administrator
+            self.t.auth.saet_rolle(ADMIN, "Bruger", "LISE")
+        self.t.auth.saet_rolle("lise", "Administrator", ADMIN)
+        self.assertEqual(self.t.auth.log_ind("lise", "hemmelig")["rolle"], "Administrator")
 
 
 class SkabelonVersionTest(TjenesteTest):

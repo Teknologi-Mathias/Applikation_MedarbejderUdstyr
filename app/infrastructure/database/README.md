@@ -10,6 +10,8 @@ Supabase er IN-BASE's fælles datakilde. Opsætning og drift:
 | `config.py` | Den ENESTE læsning af konfiguration (`%APPDATA%\IN-BASE\.env`, miljø). Afviser privilegerede nøgler. |
 | `connection.py` | Det ENESTE sted, Supabase-klienten oprettes (én pr. kørsel, session kun i hukommelsen). |
 | `migrations/001`–`004` | Skema, RLS/privilegier, RPC-funktioner, bevidste standarder. Køres manuelt i rækkefølge. |
+| `migrations/005` | Login med brugernavn (internt login-alias), aktive/deaktiverede brugere, første administrator. |
+| `migrations/006` | Ønsker & Udvikling: indmeldinger, kommentarer, historik, RLS og RPC'er. |
 | `reset/nulstil_forretningsdata.sql` | Engangs-tømning af forretningsdata (kræver bekræftelse). |
 | `../../repositories/supabase/` | ALLE kald til tabeller, RPC, Auth og Edge Functions. |
 | `../../repositories/supabase/mapping.py` | Den ENESTE oversættelse domæne ↔ kolonner (feltkort). |
@@ -25,7 +27,10 @@ people ──< employment_records ──< lifecycle_cases ──< case_tasks
 workflow_templates ──< workflow_template_tasks
                   └──< workflow_template_versions
 areas, positions, app_settings, message_templates, notification_rules
-auth.users ──1:1── user_profiles (brugernavn, rolle, tema, must_change_password)
+auth.users ──1:1── user_profiles (brugernavn, rolle, active, tema, must_change_password)
+   (e-mail = internt login-alias)
+user_profiles ──< development_requests ──< development_request_comments
+ (indsender/ansvarlig)                 └──< development_request_events (insert-only)
 ```
 
 ## Skrivning
@@ -39,6 +44,9 @@ auth.users ──1:1── user_profiles (brugernavn, rolle, tema, must_change_p
   mail-/påmindelsesskabeloner, indstillinger og områder direkte (RLS: kun admin).
 * Permanent sletning via `inbase_delete_case` (kun admin) – sletter også
   personen, hvis ingen anden sag bruger den.
+* Ønsker & Udvikling via `inbase_create_request`, `inbase_update_request`
+  (versionstjek, rettigheder, statusovergange, historik pr. felt) og
+  `inbase_add_request_comment`. Sletning direkte (RLS: kun admin).
 
 ## Nyt felt – uden at duplikere databasekode
 

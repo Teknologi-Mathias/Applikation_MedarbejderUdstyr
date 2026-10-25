@@ -48,9 +48,10 @@ ONBOARDING_ARKIV = "onboarding_arkiv.json"
 SKABELONER = "skabeloner.json"
 INDSTILLINGER = "indstillinger.json"
 BRUGERE = "brugere.json"
+OENSKER = "oensker.json"            # Ønsker & Udvikling
 DATAFILER = (
     OFFBOARDING_AKTIVE, OFFBOARDING_ARKIV, ONBOARDING_AKTIVE, ONBOARDING_ARKIV,
-    SKABELONER, INDSTILLINGER, BRUGERE,
+    SKABELONER, INDSTILLINGER, BRUGERE, OENSKER,
 )
 
 # Filer i den lokale mappe.

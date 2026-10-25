@@ -201,10 +201,11 @@ class DataSide(QWidget):
         if self.t.datakilde is None:
             kort, _ = _kort(
                 "Adgang til persondata",
-                "Adgang styres af databasen: kun brugere med en IN-BASE-profil kan "
-                "logge på og se sager (Row Level Security). Kun administratorer kan "
-                "ændre opsætning, oprette brugere og slette sager permanent. "
-                "Tidslinjen kan ikke ændres eller slettes af brugerne.",
+                "Adgang styres af databasen: kun brugere med en aktiv IN-BASE-profil kan "
+                "logge på og se sager (Row Level Security). En deaktiveret bruger mister "
+                "straks adgangen. Kun administratorer kan ændre opsætning, administrere "
+                "brugere og slette sager permanent. Tidslinjen kan ikke ændres eller "
+                "slettes af brugerne.",
             )
             return kort
         kort, layout = _kort(

@@ -1,7 +1,7 @@
-"""Venstremenuen: Dashboard, Onboarding, Offboarding og Indstillinger.
+"""Venstremenuen: Dashboard, Onboarding, Offboarding, Ønsker & Udvikling og Indstillinger.
 
 Onboarding og Offboarding er to separate hovedpunkter med hver deres
-undersider. Et hovedpunkt kan foldes sammen; det, der indeholder den aktive
+undersider; Ønsker & Udvikling er et selvstændigt punkt. Et hovedpunkt kan foldes sammen; det, der indeholder den aktive
 side, foldes altid ud.
 """
 from PySide6.QtCore import Qt, Signal
@@ -111,9 +111,9 @@ class Sidebar(QFrame):
         self.knapper[noegle].setVisible(synlig)
 
     def saet_bruger(self, bruger: dict):
-        self.bruger_label.setText(
-            f"{bruger.get('navn') or bruger.get('brugernavn', '')}\n{bruger.get('rolle', '')}"
-        )
+        """Brugernavnet er identiteten i IN-BASE; visningsnavnet står i tooltip."""
+        self.bruger_label.setText(f"{bruger.get('brugernavn', '')}\n{bruger.get('rolle', '')}")
+        self.bruger_label.setToolTip(bruger.get("navn", ""))
 
     def saet_lagring(self, offline: bool, ventende: int, kilde: str = "central datamappe"):
         if offline:

@@ -93,7 +93,7 @@ class LoginDialog(QDialog):
         beskrivelse.setWordWrap(True)
 
         self.brugernavn_input = QLineEdit()
-        self.brugernavn_input.setPlaceholderText(auth.LOGIN_FELT)
+        self.brugernavn_input.setPlaceholderText(f"{auth.LOGIN_FELT}, fx HAFRA")
         self.kode_input = QLineEdit()
         self.kode_input.setPlaceholderText("Adgangskode")
         self.kode_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -159,8 +159,9 @@ class LoginDialog(QDialog):
     def _log_paa(self):
         try:
             bruger = self.auth.log_ind(self.brugernavn_input.text(), self.kode_input.text())
-        except DataFejl as fejl:     # ingen forbindelse, ingen profil o.l.
+        except DataFejl as fejl:     # ingen forbindelse, deaktiveret, ingen profil o.l.
             self.fejl_label.setText(str(fejl))
+            self.kode_input.clear()
             return
         if bruger is None:
             self.fejl_label.setText(self.auth.LOGIN_FEJL)

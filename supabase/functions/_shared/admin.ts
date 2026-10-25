@@ -4,15 +4,33 @@
 // - Den privilegerede nøgle (service role / secret key) findes KUN i
 //   servermiljøet og sendes aldrig tilbage til klienten.
 // - Kalderens session valideres af Supabase Auth (auth.getUser(token)).
-// - Rollen afgøres af user_profiles i databasen – aldrig af user_metadata
-//   eller af noget, klienten sender.
+// - Rollen og om kontoen er aktiv afgøres af user_profiles i databasen –
+//   aldrig af user_metadata eller af noget, klienten sender.
+// - Adgangskoder logges aldrig.
 import { createClient, type SupabaseClient, type User } from "npm:@supabase/supabase-js@2.49.4";
 
 export const ROLLER = ["Administrator", "Bruger"] as const;
 export const MIN_KODE = 8; // samme som SUPABASE_MIN_KODE_LAENGDE i app/services/auth_service.py
-export const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-export const BRUGERNAVN = /^[A-Za-z0-9._-]{2,40}$/;
+// Samme regel som app/domain/bruger.py og user_profiles_username_check (005).
+export const BRUGERNAVN = /^(?!.*\.\.)[A-Z0-9](?:[A-Z0-9._-]{0,38}[A-Z0-9])$/;
+export const BRUGERNAVN_REGEL = "Brugernavnet skal være 2-40 tegn: bogstaver (A-Z), tal, " +
+  "punktum, - eller _ – og starte og slutte med et bogstav eller tal.";
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Internt, IKKE-leveringsbart login-alias (".invalid", RFC 2606). Samme regel
+// som login_alias() i app/repositories/supabase/mapping.py og
+// inbase_login_alias() i migrering 005. Aliaset sendes aldrig til klienten.
+const ALIAS_DOMAENE = "brugere.in-base.invalid";
+// Spærring i Supabase Auth for deaktiverede konti (~100 år).
+export const SPAERRET = "876000h";
+
+export function normaliserBrugernavn(tekst: unknown): string {
+  return String(tekst ?? "").trim().toUpperCase();
+}
+
+export function loginAlias(brugernavn: string): string {
+  return `${brugernavn.trim().toLowerCase()}@${ALIAS_DOMAENE}`;
+}
 
 export class Fejl extends Error {
   constructor(public status: number, besked: string) {
@@ -54,7 +72,7 @@ export function adminKlient(): SupabaseClient {
   });
 }
 
-/** Kalderen skal være logget på OG have rollen Administrator i user_profiles. */
+/** Kalderen skal være logget på OG være AKTIV Administrator i user_profiles. */
 export async function kraevAdministrator(req: Request, admin: SupabaseClient): Promise<User> {
   const header = req.headers.get("Authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
@@ -62,9 +80,9 @@ export async function kraevAdministrator(req: Request, admin: SupabaseClient): P
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data.user) throw new Fejl(401, "Din session er ugyldig eller udløbet. Log på igen.");
   const { data: profil, error: profilFejl } = await admin
-    .from("user_profiles").select("role").eq("id", data.user.id).maybeSingle();
+    .from("user_profiles").select("role, active").eq("id", data.user.id).maybeSingle();
   if (profilFejl) throw new Fejl(500, "Din rolle kunne ikke kontrolleres.");
-  if (profil?.role !== "Administrator") {
+  if (profil?.role !== "Administrator" || profil?.active !== true) {
     throw new Fejl(403, "Kun administratorer kan administrere brugere.");
   }
   return data.user;

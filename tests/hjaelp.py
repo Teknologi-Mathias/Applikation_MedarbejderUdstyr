@@ -8,13 +8,16 @@ from pathlib import Path
 from app import session
 from app.bootstrap import byg_tjenester, klargoer
 
+# Den første administrator i testenes JSON-datamappe (ingen standardbruger findes).
+ADMIN, ADMIN_KODE = "ADMIN", "admin-kode-1"
+
 
 def dato(dage: int = 0) -> str:
     return (date.today() + timedelta(days=dage)).isoformat()
 
 
 class TjenesteTest(unittest.TestCase):
-    """Giver self.t (Tjenester) bygget på tomme midlertidige mapper."""
+    """Giver self.t (Tjenester) bygget på tomme midlertidige mapper med én administrator."""
 
     def setUp(self):
         self._tmp = Path(tempfile.mkdtemp(prefix="inbase-test-"))
@@ -24,6 +27,7 @@ class TjenesteTest(unittest.TestCase):
         session.log_ind({"brugernavn": "tester", "navn": "Test", "rolle": "Administrator"})
         self.t = byg_tjenester(self.central, self.lokal)
         klargoer(self.t)
+        self.t.auth.opret_foerste_administrator(ADMIN, "Administrator", ADMIN_KODE)
 
     def tearDown(self):
         session.log_ud()

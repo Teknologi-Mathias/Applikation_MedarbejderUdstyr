@@ -18,7 +18,9 @@ pc'erne – Danmark).
 import uuid
 from datetime import datetime
 
+from app.domain import indmelding as im
 from app.domain import skabelon as sk
+from app.domain.indmelding import Aendring, Indmelding, Kommentar
 from app.domain.opgave import laes_iso_dato
 from app.repositories.fejl import ValideringsFejl
 
@@ -378,14 +380,28 @@ def skabelon_fra_raekke(slags: str, raekke: dict) -> dict:
 OMRAADER = "omraader"
 
 
+# Supabase Auth logger på med e-mail. IN-BASE-brugere har derfor en intern,
+# IKKE-leveringsbar adresse afledt af brugernavnet (".invalid" er reserveret
+# og kan aldrig modtage post, RFC 2606). Aliaset vises aldrig og bruges aldrig
+# til post. SAMME regel: inbase_login_alias() (migrering 005) og loginAlias()
+# i supabase/functions/_shared/admin.ts. Ændres domænet, kan eksisterende
+# konti ikke længere logge på.
+LOGIN_ALIAS_DOMAENE = "brugere.in-base.invalid"
+
+
+def login_alias(brugernavn: str) -> str:
+    """Normaliseret brugernavn ("HAFRA") -> "hafra@brugere.in-base.invalid"."""
+    return f"{brugernavn.strip().lower()}@{LOGIN_ALIAS_DOMAENE}"
+
+
 def bruger_fra_profil(profil: dict) -> dict:
     """user_profiles-række -> brugerdict i samme format som JSON-brugerne."""
     return {
         "id": profil.get("id", ""),
         "brugernavn": profil.get("username", ""),
         "navn": profil.get("display_name") or profil.get("username", ""),
-        "email": profil.get("email", ""),
         "rolle": profil.get("role", ""),
+        "aktiv": bool(profil.get("active", True)),
         "oprettet": fra_tidspunkt(profil.get("created_at")),
         "skal_skifte_kode": bool(profil.get("must_change_password")),
     }
@@ -404,3 +420,70 @@ def praeference_til_raekke(praef: dict) -> dict:
 
 def praeference_fra_raekke(raekke: dict) -> dict:
     return _fra_raekke(raekke, PRAEFERENCE_FELTER)
+
+
+# ---------------------------------------------------------------------------
+# Ønsker & Udvikling (development_requests, migrering 006)
+# ---------------------------------------------------------------------------
+
+INDMELDING_FELTER = (
+    ("id", "id", ID),
+    ("nummer", "number", HELTAL),
+    ("titel", "title", TEKST),
+    ("kategori", "category", TEKST),
+    ("beskrivelse", "description", TEKST),
+    ("problem", "current_behavior", TEKST),
+    ("oensket_resultat", "desired_outcome", TEKST),
+    ("effekt", "business_impact", TEKST),
+    ("supplerende", "additional_info", TEKST),
+    ("status", "status", TEKST),
+    ("prioritet", "priority", TEKST),
+    ("indsender", "submitted_by_username", TEKST),
+    ("ansvarlig", "assignee_username", TEKST),
+    ("planlagt_version", "planned_version", TEKST),
+    ("loesning", "resolution", TEKST),
+    ("oprettet", "created_at", TIDSPUNKT),
+    ("opdateret", "updated_at", TIDSPUNKT),
+    ("version", "version", HELTAL),
+)
+
+# Domænefelt -> nøgle i RPC'ernes p_request/p_changes og i historikkens "field".
+# Ansvarlig sendes som brugernavn ("assignee"); databasen slår brugeren op.
+INDMELDING_RPC_NOEGLER = {
+    **{noegle: kolonne for noegle, kolonne, _ in INDMELDING_FELTER
+       if noegle in im.TEKSTFELTER + im.BEHANDLINGSFELTER},
+    "ansvarlig": "assignee",
+}
+_FELT_FRA_RPC = {rpc: noegle for noegle, rpc in INDMELDING_RPC_NOEGLER.items()}
+
+
+def indmelding_fra_raekke(raekke: dict) -> Indmelding:
+    return Indmelding.fra_dict(_fra_raekke(raekke, INDMELDING_FELTER))
+
+
+def indmelding_til_rpc(felter: dict) -> dict:
+    """{"titel": ..., "ansvarlig": "HAFRA"} -> {"title": ..., "assignee": "HAFRA"}."""
+    return {INDMELDING_RPC_NOEGLER[noegle]: str(vaerdi) for noegle, vaerdi in felter.items()}
+
+
+def kommentar_fra_raekke(raekke: dict) -> Kommentar:
+    return Kommentar(
+        indmelding_id=str(raekke.get("request_id") or ""),
+        forfatter=raekke.get("author_username") or "",
+        tekst=raekke.get("body") or "",
+        intern=bool(raekke.get("internal")),
+        oprettet=fra_tidspunkt(raekke.get("created_at")),
+        id=str(raekke.get("id") or ""),
+    )
+
+
+def aendring_fra_raekke(raekke: dict) -> Aendring:
+    felt = raekke.get("field") or ""
+    return Aendring(
+        tidspunkt=fra_tidspunkt(raekke.get("occurred_at")),
+        bruger=raekke.get("actor_username") or "",
+        handling=raekke.get("action") or "",
+        felt=_FELT_FRA_RPC.get(felt, felt),
+        fra=raekke.get("old_value") or "",
+        til=raekke.get("new_value") or "",
+    )

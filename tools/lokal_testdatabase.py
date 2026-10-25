@@ -4,8 +4,9 @@
     python tools/lokal_testdatabase.py --stop   # fjern containerne igen
 
 Opretter PostgreSQL 15 + PostgREST (samme REST-lag som Supabase), kører
-tests/sql/supabase_stub.sql, migreringerne 001-004, tests/sql/test_hjaelpere.sql
-og SQL-testen tests/sql/test_admin_regler.sql.
+tests/sql/supabase_stub.sql, alle migreringer (001, 002, ...) – med en konto i
+det gamle e-mail-format (tests/sql/foer_005_gammel_konto.sql) lige før 005 –
+tests/sql/test_hjaelpere.sql og SQL-testen tests/sql/test_admin_regler.sql.
 Derefter kan integrationstesten køres:
 
     set INBASE_LOKAL_PGRST_URL=http://127.0.0.1:3999
@@ -60,6 +61,8 @@ def start():
     print("Kører SQL:")
     psql_fil(ROD / "tests/sql/supabase_stub.sql")
     for fil in sorted(MIGRERINGER.glob("0*.sql")):
+        if fil.name.startswith("005"):
+            psql_fil(ROD / "tests/sql/foer_005_gammel_konto.sql")   # afprøver konverteringen
         psql_fil(fil)
     psql_fil(ROD / "tests/sql/test_hjaelpere.sql")
     psql_fil(ROD / "tests/sql/test_admin_regler.sql")   # fejler ved brudt regel

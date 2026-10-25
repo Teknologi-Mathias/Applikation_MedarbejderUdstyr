@@ -74,7 +74,8 @@ class ModulController:
         ind = udfoer(self.vindue, self.t.indstillinger.hent)
         afdelinger = [] if ind is FEJL else list(ind["ansvarlige"])
         brugere = udfoer(self.vindue, self.t.auth.brugere)
-        brugernavne = [] if brugere is FEJL else sorted(b["brugernavn"] for b in brugere)
+        brugernavne = [] if brugere is FEJL else sorted(
+            b["brugernavn"] for b in brugere if b.get("aktiv", True))
         return afdelinger + [b for b in brugernavne if b not in afdelinger]
 
     ### ----- fælles handlinger ----------------------------------------------

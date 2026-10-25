@@ -13,9 +13,13 @@ class OfflineFejl(DataFejl):
     """Handlingen kræver forbindelse til den centrale datakilde."""
 
 
+class SessionUdloebetFejl(DataFejl):
+    """Sessionen er udløbet, eller brugerens adgang er lukket – brugeren skal logge på igen."""
+
+
 class ValideringsFejl(ValueError):
     """Input overholder ikke forretningsreglerne (vises direkte for brugeren)."""
 
 
 class ForkertLoginFejl(Exception):
-    """E-mail/brugernavn eller adgangskode er forkert (ikke en datafejl)."""
+    """Brugernavn eller adgangskode er forkert (ikke en datafejl)."""

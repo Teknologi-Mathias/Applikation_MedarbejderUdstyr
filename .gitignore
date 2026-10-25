@@ -19,6 +19,7 @@ vexp-restore.sh
 Lokal/
 .env
 .env.example
+.claude
 
 # Build og migreringsoutput
 build/

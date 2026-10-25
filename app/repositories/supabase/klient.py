@@ -10,7 +10,13 @@ from contextlib import contextmanager
 
 import httpx
 
-from app.repositories.fejl import DataFejl, KonfliktFejl, OfflineFejl, ValideringsFejl
+from app.repositories.fejl import (
+    DataFejl,
+    KonfliktFejl,
+    OfflineFejl,
+    SessionUdloebetFejl,
+    ValideringsFejl,
+)
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +27,14 @@ _INGEN_FORBINDELSE = (
     "Der er ingen forbindelse til databasen (Supabase). Tjek internetforbindelsen "
     "og prøv igen. Intet er gemt lokalt – IN-BASE kræver forbindelse."
 )
+_SESSION_UDLOEBET = "Din session er udløbet. Log på igen for at fortsætte."
+
+
+def _er_sessionsfejl(fejl) -> bool:
+    """Auth-fejl, der betyder, at sessionen ikke (længere) kan bruges."""
+    tekst = f"{type(fejl).__name__} {getattr(fejl, 'message', '')}".lower()
+    return getattr(fejl, "status", None) in (401, 403) or "session" in tekst \
+        or "refresh" in tekst or "jwt" in tekst
 
 
 def oversaet(fejl: Exception, handling: str) -> Exception:
@@ -41,8 +55,8 @@ def oversaet(fejl: Exception, handling: str) -> Exception:
             return DataFejl(besked)
         if kode == "42501":
             return DataFejl(f"Du har ikke rettighed til at {handling}.")
-        if kode in ("PGRST301", "PGRST303") or "JWT" in besked:
-            return DataFejl("Din session er udløbet. Log ud og på igen.")
+        if kode in ("PGRST301", "PGRST302", "PGRST303") or "JWT" in besked:
+            return SessionUdloebetFejl(_SESSION_UDLOEBET)
         if kode == "23505":
             return ValideringsFejl(f"Findes allerede ({besked}).")
         if kode.startswith("23"):
@@ -50,12 +64,16 @@ def oversaet(fejl: Exception, handling: str) -> Exception:
         return DataFejl(f"Databasefejl ved {handling}: {besked}")
     if isinstance(fejl, FunctionsError):
         status = getattr(fejl, "status", None)
-        if status in (400, 409, 422):
+        if status in (400, 404, 409, 422):
             return ValideringsFejl(fejl.message)
-        if status in (401, 403):
+        if status == 401:
+            return SessionUdloebetFejl(_SESSION_UDLOEBET)
+        if status == 403:
             return DataFejl(f"Ingen adgang: {fejl.message}")
         return DataFejl(f"{handling.capitalize()} mislykkedes: {fejl.message}")
     if isinstance(fejl, AuthError):
+        if _er_sessionsfejl(fejl):
+            return SessionUdloebetFejl(_SESSION_UDLOEBET)
         return DataFejl(f"Login-fejl ved {handling}: {fejl.message}")
     return DataFejl(f"Uventet fejl ved {handling}: {fejl}")
 

@@ -12,6 +12,9 @@ Moduler:
   arkiv.
 * **Dashboard / Action Center** – det, der kræver handling, på tværs af
   modulerne, samt nøgletal.
+* **Ønsker & Udvikling** – virksomhedens fælles forbedringskø: fejlmeldinger,
+  nye ønsker, automatisering, data/ERP og arbejdsgange – fra *Indsendt* til
+  *Udgivet*, med prioritet, ansvarlig, kommentarer og historik.
 * **Indstillinger** – tema, notifikationer, adgangskode, offline, påmindelser
   og (for administratorer) organisation, brugere og data & sikkerhed.
 
@@ -41,8 +44,10 @@ udvikling – `.env` i projektmappen:
 | `INBASE_LOKAL` | Lokal mappe til log og notifikationslog (standard: `Lokal/`, færdig app: `%LOCALAPPDATA%\IN-BASE`). |
 
 Uden konfiguration starter IN-BASE ikke (der skiftes aldrig stiltiende til
-lokale data). Log på sker med e-mail og adgangskode (Supabase Auth); den
-første administrator oprettes efter docs/SUPABASE_OPSAETNING.md.
+lokale data). Log på sker med brugernavn (fx `HAFRA`) og adgangskode – Supabase
+Auth kontrollerer koden via et internt login-alias, og der bruges ingen e-mail.
+Der findes ingen standardbruger; den første administrator oprettes efter
+docs/SUPABASE_OPSAETNING.md (afsnit 5).
 
 ## Tests
 
