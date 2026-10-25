@@ -50,7 +50,7 @@ EN_FIL = os.environ.get("INBASE_ONEFILE") == "1"
 # Supabase-klienten består af flere pakker med dynamiske imports; tag dem alle med.
 _skjulte = []
 for pakke in ("supabase", "supabase_auth", "supabase_functions", "postgrest", "storage3",
-              "realtime", "app.repositories.supabase"):
+              "realtime", "app.repositories.supabase", "app.infrastructure.mdm"):
     _skjulte += collect_submodules(pakke)
 
 a = Analysis(
@@ -58,7 +58,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('assets', 'assets')] + collect_data_files('certifi'),   # SSL-rodcertifikater
-    hiddenimports=_skjulte + ['dotenv'],
+    hiddenimports=_skjulte + ['dotenv', 'qrcode'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

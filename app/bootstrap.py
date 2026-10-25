@@ -33,6 +33,7 @@ from app.repositories.json.bruger_repository import JsonBrugerRepository
 from app.repositories.json.datakilde import Datakilde
 from app.repositories.json.indmelding_repository import JsonIndmeldingRepository
 from app.repositories.json.json_fil import tjek_skriveadgang
+from app.repositories.json.mdm_repository import JsonMdmRepository
 from app.repositories.json.opsaetning_repository import (
     JsonIndstillingRepository,
     JsonLokalFil,
@@ -45,6 +46,7 @@ from app.services.backup_service import BackupService
 from app.services.indmelding_service import IndmeldingService
 from app.services.indstillinger_service import IndstillingerService
 from app.services.lagring_service import LagringService, OnlineLagring
+from app.services.mdm_service import MdmService
 from app.services.offboarding_service import OffboardingService
 from app.services.onboarding_service import OnboardingService
 from app.services.paamindelser import PaamindelsesService
@@ -73,6 +75,7 @@ class Tjenester:
     paamindelser: PaamindelsesService
     rapporter: RapportService
     indmeldinger: IndmeldingService       # Ønsker & Udvikling
+    mdm: MdmService                       # Telefoner (MDM)
 
     def modul(self, proces: str):
         return self.onboarding if proces == OnboardingForloeb.PROCES else self.offboarding
@@ -95,6 +98,7 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
     """Services oven på Supabase. klient: supabase-klienten (eller en testklient)."""
     from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRepository
     from app.repositories.supabase.konto_repository import SupabaseKontoRepository
+    from app.repositories.supabase.mdm_repository import SupabaseMdmRepository
     from app.repositories.supabase.opsaetning_repository import (
         SupabaseIndstillingRepository,
         SupabasePraeferenceRepository,
@@ -119,6 +123,8 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
         ),
         rapporter=RapportService(),
         indmeldinger=IndmeldingService(SupabaseIndmeldingRepository(klient), session.bruger),
+        mdm=MdmService(SupabaseMdmRepository(klient),
+                       JsonLokalFil(lokal_mappe / stier.MDM_LOKAL_FIL.name), session.bruger),
     )
 
 
@@ -152,6 +158,8 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
         ),
         rapporter=RapportService(),
         indmeldinger=IndmeldingService(JsonIndmeldingRepository(datakilde), session.bruger),
+        mdm=MdmService(JsonMdmRepository(datakilde),
+                       JsonLokalFil(lokal_mappe / stier.MDM_LOKAL_FIL.name), session.bruger),
     )
 
 

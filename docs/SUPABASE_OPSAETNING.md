@@ -60,9 +60,14 @@ i denne rækkefølge, og tjek at hver giver "Success":
    profilerne. Flytter eksisterende konti over på login-aliasset (se
    "Fra e-mail- til brugernavnslogin" nedenfor).
 6. `006_oensker_udvikling.sql` – tabeller, RLS og funktioner til Ønsker & Udvikling.
+7. `007_mdm_enheder.sql` – tabellen `mdm_devices` og funktionerne til Telefoner
+   (MDM). Kun administratorer har adgang (se docs/MDM_OPSAETNING.md).
+8. `008_mdm_lokal_klargoering.sql` – Telefoner klargøres lokalt fra IN-BASE
+   (statusser og felter uden Google AMAPI).
+9. `009_mdm_nulstillingskode.sql` – nulstillingskode pr. telefon (kun administratorer).
 
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004). Fremtidige ændringer kommer som nye filer `007_...`, `008_...`.
+fra 004). Fremtidige ændringer kommer som nye filer `010_...`, `011_...`.
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 

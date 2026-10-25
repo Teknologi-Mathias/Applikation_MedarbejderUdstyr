@@ -111,6 +111,27 @@ arbejdsgange.
   beskrivelse, filtre for visning/status/kategori/prioritet);
   `IndmeldingDialog` har fanerne Detaljer, Behandling, Kommentarer og Historik.
 
+## Telefoner (MDM)
+
+Selvstændigt menupunkt, kun for administratorer. Driftstelefoner registreres ved
+ERP-enhedsnavn (fx ISM589, unikt) og klargøres med QR-kode direkte fra IN-BASE –
+uden server. Drift: [MDM_OPSAETNING.md](MDM_OPSAETNING.md).
+
+* `android/` er IN-BASE Klargøring, en lille Device Owner-app i Java. Den bygges
+  til `assets/mdm/inbase-klargoering.apk` (`scripts/byg_klargoering_apk.ps1`) og
+  pakkes med i programmet. Den låser telefonen, skjuler apps, sætter baggrund,
+  installerer FL-UPDATE og melder tilbage – alt sammen offline på telefonen.
+* QR-koden (`infrastructure/mdm/qr.py`) indeholder downloadadressen på pc'en,
+  APK'ens SHA-256, Wi-Fi og ekstra-data (enhedsnavn, engangskode, FL-UPDATE-link).
+* `infrastructure/mdm/lokal_server.py` er en midlertidig http-server (port 8765).
+  Den kører kun, mens klargøringsvinduet er åbent. Rapporten fra telefonen kræver
+  engangskoden og flyttes til UI-tråden med et Qt-signal.
+* Supabase: én række pr. telefon (`mdm_devices`, migrering 007 + 008). Der
+  skrives kun ved oprettelse, rettelser og når en telefon melder sig klargjort.
+  Der er ingen fjernstyring og ingen baggrundstrafik.
+* Google Android Management API blev fravalgt, fordi Google siden oktober 2025
+  ikke tillader interne løsninger (kvote 0 uden godkendelse).
+
 ## Data og samtidighed (Supabase)
 
 * Sager gemmes via RPC `inbase_save_case`: sag, person, ansættelse og de

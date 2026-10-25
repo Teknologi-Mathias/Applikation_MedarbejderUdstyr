@@ -15,6 +15,9 @@ Moduler:
 * **Ønsker & Udvikling** – virksomhedens fælles forbedringskø: fejlmeldinger,
   nye ønsker, automatisering, data/ERP og arbejdsgange – fra *Indsendt* til
   *Udgivet*, med prioritet, ansvarlig, kommentarer og historik.
+* **Telefoner (MDM)** – kun administratorer: registrerer driftstelefoner ved
+  ERP-enhedsnavn og klargør dem med QR-kode direkte fra IN-BASE (uden server).
+  Kun basale apps, FL-UPDATE/FL-TMS og låst til drift. Se [docs/MDM_OPSAETNING.md](docs/MDM_OPSAETNING.md).
 * **Indstillinger** – tema, notifikationer, adgangskode, offline, påmindelser
   og (for administratorer) organisation, brugere og data & sikkerhed.
 
@@ -81,7 +84,9 @@ app/
     json/                       lokal JSON-lagring (udvikling/tests)
   infrastructure/               stier.py, logning.py, database/ (konfiguration,
                                 forbindelse, SQL-migreringer, nulstilling)
+    mdm/                        Telefoner (MDM): QR-kode og midlertidig klargøringsserver
 supabase/functions/             Edge Functions: admin-create-user, admin-manage-user
+android/                        IN-BASE Klargøring: Android-styrings-app (bygges til assets/mdm/)
   ui/                           Vinduer, sider, dialoger og controllere
 tests/                          unittest-tests
 docs/ARKITEKTUR.md              Lag, indgangspunkter og begrænsninger

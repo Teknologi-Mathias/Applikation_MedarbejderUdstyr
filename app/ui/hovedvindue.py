@@ -40,6 +40,7 @@ from app.ui.hjaelpere import lav_app_ikon, lav_knap
 from app.ui.indmelding_side import IndmeldingSide
 from app.ui.indstillinger_side import IndstillingerSide
 from app.ui.login_dialog import LoginDialog
+from app.ui.mdm_side import MdmSide
 from app.ui.modul_controller import OffboardingController, OnboardingController
 from app.ui.modul_oversigt import ModulOversigtSide, alarmer_for
 from app.ui.moduler import offboarding_modul, onboarding_modul
@@ -56,6 +57,7 @@ ON, OFF = OnboardingForloeb.PROCES, Medarbejder.PROCES
 
 # Venstremenuen: Onboarding og Offboarding er separate hovedpunkter;
 # Ønsker & Udvikling er et selvstændigt punkt (ikke under medarbejderne).
+# Telefoner (MDM) ses af alle, men er låst for andre end administratorer (anvend_rolle).
 STRUKTUR = [
     (None, [("dashboard", "Dashboard")]),
     ("Onboarding - MERCH", [
@@ -73,6 +75,7 @@ STRUKTUR = [
         ("off_arkiv", "Arkiv"),
     ]),
     (None, [("oensker", "Ønsker & Udvikling")]),
+    (None, [("telefoner", "Telefoner (MDM)")]),
     (None, [("indstillinger", "Indstillinger")]),
 ]
 
@@ -140,6 +143,8 @@ class MainWindow(QMainWindow):
         self._opbyg_offboarding()
         self.oensker = IndmeldingSide(self.t.indmeldinger, self._aktive_brugernavne)
         self._tilfoej("oensker", self.oensker)
+        self.telefoner = MdmSide(self.t.mdm)
+        self._tilfoej("telefoner", self.telefoner)
         self.indstillinger = IndstillingerSide(
             self.t, self._alle_arkiverede, self._alle_aktive, self.notifikationer.vis_besked,
         )
@@ -379,7 +384,8 @@ class MainWindow(QMainWindow):
         side = self.sider[noegle]
         self.stak.setCurrentWidget(side)
         self.sidebar.marker(noegle)
-        if isinstance(side, (SkabelonSide, IndstillingerSide, IndmeldingSide)):
+        # Telefoner hentes kun, når siden åbnes (ikke hvert minut) – sparer Supabase-trafik.
+        if isinstance(side, (SkabelonSide, IndstillingerSide, IndmeldingSide, MdmSide)):
             side.opdater()
 
     def aabn_sag(self, proces, sag_id, opgave_id=""):
@@ -406,6 +412,8 @@ class MainWindow(QMainWindow):
         for knap in (self.on_slet, self.off_slet):
             knap.setVisible(admin)
         self.oensker.anvend_rolle(admin)
+        self.sidebar.knapper["telefoner"].setText("Telefoner (MDM)" if admin else "Telefoner (MDM)  🔒")
+        self.telefoner.anvend_rolle(admin)
         self.indstillinger.anvend_rolle(admin)
 
     def skift_tema(self, tema):
@@ -435,7 +443,7 @@ class MainWindow(QMainWindow):
         self.data = {ON: ([], []), OFF: ([], [])}
         self._signatur = None
         for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
-                + [self.oensker]:
+                + [self.oensker, self.telefoner]:
             side.ryd()
 
     def _session_udloebet(self, fejl):

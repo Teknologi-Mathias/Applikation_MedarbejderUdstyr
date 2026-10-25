@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <!-- Ingen ikon på startskærmen: appen kører kun under klargøringen. -->
+    <application
+        android:label="@string/app_navn"
+        android:icon="@android:drawable/ic_lock_lock"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <receiver
+            android:name=".AdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Opsætningsguiden spørger, hvilken slags klargøring: altid fuldt administreret. -->
+        <activity
+            android:name=".ProvisioningModeActivity"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Kører til sidst i opsætningsguiden: her klargøres telefonen. -->
+        <activity
+            android:name=".KlargoeringActivity"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".InstallReceiver"
+            android:exported="false" />
+
+        <!-- Administrator-menu: tast *#*#46227#*#* (I-N-B-A-S) i Telefon-appen. -->
+        <activity
+            android:name=".AdminActivity"
+            android:exported="false"
+            android:excludeFromRecents="true" />
+        <receiver
+            android:name=".HemmeligKodeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data android:scheme="android_secret_code" android:host="46227" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.telephony.action.SECRET_CODE" />
+                <data android:scheme="android_secret_code" android:host="46227" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

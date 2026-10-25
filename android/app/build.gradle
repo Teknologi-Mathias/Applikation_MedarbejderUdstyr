@@ -1,0 +1,31 @@
+// IN-BASE Klargøring: lille Device Owner-app, der klargør en driftstelefon offline.
+// Byg: scripts/byg_klargoering_apk.ps1 (lægger APK'en i assets/mdm/).
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "dk.instore.inbase.klargoering"
+    compileSdk 37
+
+    defaultConfig {
+        applicationId "dk.instore.inbase.klargoering"
+        minSdk 29          // Android 10+: QR-klargøring med GET_PROVISIONING_MODE
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Appen distribueres kun fra IN-BASE (kontrolsum i QR-koden), aldrig via en butik.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

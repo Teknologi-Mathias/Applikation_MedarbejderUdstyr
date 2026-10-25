@@ -21,6 +21,7 @@ from datetime import datetime
 from app.domain import indmelding as im
 from app.domain import skabelon as sk
 from app.domain.indmelding import Aendring, Indmelding, Kommentar
+from app.domain.mdm_enhed import MdmEnhed
 from app.domain.opgave import laes_iso_dato
 from app.repositories.fejl import ValideringsFejl
 
@@ -487,3 +488,37 @@ def aendring_fra_raekke(raekke: dict) -> Aendring:
         fra=raekke.get("old_value") or "",
         til=raekke.get("new_value") or "",
     )
+
+
+# ---------------------------------------------------------------------------
+# Telefoner (mdm_devices, migrering 007-009)
+# ---------------------------------------------------------------------------
+
+MDM_FELTER = (
+    ("id", "id", ID),
+    ("navn", "name", TEKST),
+    ("telefonnummer", "phone_number", TEKST),
+    ("note", "note", TEKST),
+    ("status", "status", TEKST),
+    ("producent", "manufacturer", TEKST),
+    ("model", "model", TEKST),
+    ("serienummer", "serial_number", TEKST),
+    ("imei", "imei", TEKST),
+    ("android_version", "android_version", TEKST),
+    ("klargjort", "provisioned_at", TIDSPUNKT),
+    ("nulstillingskode", "reset_code", TEKST),
+    ("oprettet_af", "created_by_username", TEKST),
+    ("oprettet", "created_at", TIDSPUNKT),
+    ("opdateret", "updated_at", TIDSPUNKT),
+)
+_MDM_KOLONNE = {noegle: (kolonne, konv) for noegle, kolonne, konv in MDM_FELTER}
+
+
+def mdm_fra_raekke(raekke: dict) -> MdmEnhed:
+    return MdmEnhed.fra_dict(_fra_raekke(raekke, MDM_FELTER))
+
+
+def mdm_til_rpc(felter: dict) -> dict:
+    """{"navn": "ISM589", "klargjort": "2026-..."} -> {"name": "ISM589", "provisioned_at": "...+01:00"}.
+    Tomme tidspunkter sendes som null."""
+    return {_MDM_KOLONNE[k][0]: _MDM_KOLONNE[k][1][0](v) for k, v in felter.items()}

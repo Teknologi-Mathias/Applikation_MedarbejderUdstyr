@@ -83,6 +83,19 @@ class IndmeldingRepository(Protocol):
     def signatur(self) -> tuple: ...
 
 
+class MdmRepository(Protocol):
+    """Telefoner (MDM): én række pr. telefon (migrering 007).
+
+    opdater() tager en liste af {"id": ..., felt: værdi} og gemmer dem i ét
+    kald (sparer trafik ved synkronisering). Returnerer antal ændrede rækker.
+    """
+
+    def hent_alle(self) -> list: ...
+    def opret(self, enhed): ...
+    def opdater(self, aendringer: list[dict]) -> int: ...
+    def slet(self, enhed_id: str) -> None: ...
+
+
 class IndstillingRepository(Protocol):
     """Fælles indstillinger (backup, slettepolitik, områder, regler)."""
 

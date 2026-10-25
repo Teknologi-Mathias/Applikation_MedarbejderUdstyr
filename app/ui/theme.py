@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.domain import indmelding as im
+from app.domain import mdm_enhed as md
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb as OB
 from app.domain.opgave import Opgave
@@ -93,6 +94,10 @@ _STATUS_TONE = {
     im.UNDER_UDVIKLING: "gul",
     im.TIL_TEST: "gul",
     im.UDGIVET: "groen",
+    # Telefoner (MDM)
+    md.AFVENTER: "gul",
+    md.KLARGJORT: "groen",
+    md.UDGAAET: "graa",
 }
 _PRIORITET_TONE = {im.LAV: "graa", im.NORMAL: "intet", im.HOEJ: "gul", im.KRITISK: "roed"}
 _OPGAVE_TONE = {
