@@ -35,8 +35,12 @@ QR_STOERRELSE = 460
 WIFI_TYPER = ("WPA", "WEP", "NONE")
 
 
-def qr_pixmap(tekst: str, stoerrelse: int = QR_STOERRELSE) -> QPixmap:
-    """Tegner QR-koden sort på hvidt (skarpe kanter, uanset tema)."""
+def qr_pixmap(tekst: str, stoerrelse: int = QR_STOERRELSE, dpr: float = 1.0) -> QPixmap:
+    """Tegner QR-koden sort på hvidt (skarpe kanter, uanset tema).
+
+    dpr: skærmens skalering (fx 1.5 ved 150 %). Billedet tegnes i skærmens egne pixels,
+    så hvert modul får et helt antal pixels – ellers strækkes og sløres koden på bærbare
+    med skalering, og telefonens QR-læser kan ikke læse den."""
     matrix = qr_matrix(tekst)
     n = len(matrix)
     billede = QImage(n, n, QImage.Format.Format_RGB32)
@@ -47,9 +51,12 @@ def qr_pixmap(tekst: str, stoerrelse: int = QR_STOERRELSE) -> QPixmap:
             if sort:
                 maler.fillRect(x, y, 1, 1, QColor("black"))
     maler.end()
-    side = max(n, stoerrelse - stoerrelse % n)
-    return QPixmap.fromImage(billede.scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio,
-                                            Qt.TransformationMode.FastTransformation))
+    pixels = int(stoerrelse * dpr)
+    side = max(n, pixels - pixels % n)
+    pixmap = QPixmap.fromImage(billede.scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio,
+                                              Qt.TransformationMode.FastTransformation))
+    pixmap.setDevicePixelRatio(dpr)
+    return pixmap
 
 
 class TelefonDialog(QDialog):
@@ -124,6 +131,7 @@ class TelefonDialog(QDialog):
 class _Bro(QObject):
     """Flytter telefonens rapport fra serverens tråd til brugerfladens tråd."""
     rapport = Signal(dict)
+    hentet = Signal(str)
 
 
 class KlargoeringDialog(QDialog):
@@ -138,6 +146,7 @@ class KlargoeringDialog(QDialog):
         self.klargjort = False
         self._bro = _Bro()
         self._bro.rapport.connect(self._modtag_rapport)
+        self._bro.hentet.connect(self._telefon_hentede)
         self.setWindowTitle(f"Klargør telefon – {enhed.navn}")
 
         husk = service.huskede_indstillinger()
@@ -300,9 +309,10 @@ class KlargoeringDialog(QDialog):
             k = self.klargoering
             self.server = KlargoeringsServer(k.apk, k.token, self._bro.rapport.emit,
                                              baggrund=Path(k.baggrund) if k.baggrund else None,
-                                             fl_update=k.fl_update_fil)
+                                             fl_update=k.fl_update_fil,
+                                             paa_hentning=self._bro.hentet.emit)
             url = self.server.start()
-            self.qr.setPixmap(qr_pixmap(k.qr_tekst(url)))
+            self.qr.setPixmap(qr_pixmap(k.qr_tekst(url), dpr=self.devicePixelRatioF()))
         except OSError as fejl:
             self.fejl_label.setText(f"Klargøringsserveren kunne ikke starte ({fejl}). Er port 8765 "
                                     "optaget af et andet IN-BASE-vindue?")
@@ -315,6 +325,14 @@ class KlargoeringDialog(QDialog):
         self.vis_knap.setText("Lav ny QR-kode")
         self.status.setText(f"Venter på telefonen … (pc: {url})\n\nNulstillingskode: "
                             f"{k.nulstillingskode}  (gemmes i IN-BASE, når telefonen er klargjort)")
+
+    def _telefon_hentede(self, sti: str):
+        """Viser, at telefonen har nået pc'en – sker det aldrig, er det net/firewall."""
+        tekst = {"/inbase-klargoering.apk": "Telefonen har hentet styrings-appen …",
+                 "/baggrund": "Telefonen har hentet baggrundsbilledet …",
+                 "/fl-update.apk": "Telefonen har hentet FL-UPDATE …"}.get(sti)
+        if tekst and not self.klargjort:
+            self.status.setText(self.status.text() + "\n✔ " + tekst)
 
     def _modtag_rapport(self, rapport: dict):
         resultat = udfoer(self, self.service.registrer_klargjort, self.klargoering, rapport)

@@ -40,11 +40,14 @@ def lokal_ip() -> str:
 class KlargoeringsServer:
     def __init__(self, apk: Path, token: str, paa_rapport: Callable[[dict], None],
                  baggrund: Optional[Path] = None, fl_update: Optional[Path] = None,
-                 port: int = 8765, vaert: str = ""):
-        """paa_rapport kaldes fra serverens tråd – brugerfladen skal selv skifte tråd."""
+                 port: int = 8765, vaert: str = "",
+                 paa_hentning: Optional[Callable[[str], None]] = None):
+        """paa_rapport og paa_hentning (stien til en fil, telefonen har hentet) kaldes fra
+        serverens tråd – brugerfladen skal selv skifte tråd."""
         self.apk = apk
         self.token = token
         self.paa_rapport = paa_rapport
+        self.paa_hentning = paa_hentning
         self.baggrund = baggrund
         self.fl_update = fl_update
         self._port = port
@@ -88,6 +91,8 @@ class KlargoeringsServer:
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+                if server.paa_hentning:
+                    server.paa_hentning(self.path)
 
             def do_GET(self):
                 if self.path == APK_STI:
