@@ -67,11 +67,15 @@ class Klargoering:
     kontakt: str = ""                  # låseskærm og spærrede funktioner
     nulstillingskode: str = field(default_factory=lambda: f"{secrets.randbelow(10**8):08d}")
     apk: Path = field(default=APK)
+    # Problemer, der ikke stopper klargøringen (fx manglende FL-UPDATE) – vises ved QR-koden.
+    advarsler: list[str] = field(default_factory=list)
 
     @property
     def fl_update_fil(self) -> Optional[Path]:
         """FL-UPDATE som fil på pc'en (serveres af klargøringsserveren) – ellers None."""
-        return None if self.fl_update.startswith(("https://", "http://")) else Path(self.fl_update)
+        if not self.fl_update or self.fl_update.startswith(("https://", "http://")):
+            return None
+        return Path(self.fl_update)
 
     def qr_tekst(self, server: str) -> str:
         # Standardlisten over tilladte apps (Kontakter, Kamera, Ur …) ligger i styrings-appen
@@ -182,40 +186,53 @@ class MdmService:
 
     def ny_klargoering(self, enhed: MdmEnhed, indstillinger: dict) -> Klargoering:
         """indstillinger: wifi_ssid, wifi_kode, wifi_type, fl_kilde (fil/link), fl_fil, fl_link,
-        baggrund, ekstra_apps, kontakt, mail."""
+        baggrund, ekstra_apps, kontakt, mail.
+
+        Kun manglende adgang/styrings-app stopper klargøringen. Fejl i FL-UPDATE, baggrund og
+        ekstra apps bliver til advarsler – så QR-koden altid kan vises og telefonen testes."""
         self._kraev_admin()
         mangler = self.klargoering_mangler()
         if mangler:
             raise ValideringsFejl(mangler)
         v = {k: str(indstillinger.get(k) or "").strip() for k in INDSTILLINGER}
-        if len(v["kontakt"]) > 120:
-            raise ValideringsFejl("Kontaktteksten må højst være 120 tegn.")
+        v["kontakt"] = v["kontakt"][:120]
         v["fl_kilde"] = FL_LINK if v["fl_kilde"] == FL_LINK else FL_FIL
-        if v["fl_kilde"] == FL_FIL:
-            fl = v["fl_fil"]
-            if not fl:
-                raise ValideringsFejl("Vælg FL-UPDATE.apk på pc'en (eller skift til link).")
-            if not Path(fl).is_file():
-                raise ValideringsFejl(f"FL-UPDATE-filen findes ikke: {fl}")
-            if not er_apk(Path(fl).read_bytes()[:4]):
-                raise ValideringsFejl(f"Filen er ikke en Android-app (APK): {fl}")
-        else:
-            # Linket hentes og kontrolleres her – telefonen får filen fra pc'en.
-            fl = str(self._hent_link(v["fl_link"]))
-        ugyldige = [p for p in v["ekstra_apps"].replace(" ", "").split(",")
-                    if p and not PAKKENAVN.match(p)]
+        advarsler = []
+        try:
+            fl = self._fl_update(v)
+        except ValideringsFejl as fejl:
+            advarsler.append(f"{fejl}\nTelefonen klargøres uden FL-UPDATE.")
+            fl = ""
+        apps = [p for p in v["ekstra_apps"].replace(" ", "").split(",") if p]
+        ugyldige = [p for p in apps if not PAKKENAVN.match(p)]
         if ugyldige:
-            raise ValideringsFejl(
-                f"\"{', '.join(ugyldige)}\" er ikke et pakkenavn. Ekstra apps skal angives som "
-                "pakkenavne, fx com.google.android.apps.photos (Google Fotos).")
-        if v["baggrund"] and not Path(v["baggrund"]).is_file():
-            raise ValideringsFejl(f"Baggrundsbilledet findes ikke: {v['baggrund']}")
+            advarsler.append(
+                f"\"{', '.join(ugyldige)}\" er ikke et pakkenavn og springes over. Ekstra apps "
+                "angives som pakkenavne, fx com.google.android.apps.photos (Google Fotos).")
+        baggrund = v["baggrund"]
+        if baggrund and not Path(baggrund).is_file():
+            advarsler.append(f"Baggrundsbilledet findes ikke og springes over: {baggrund}")
+            baggrund = ""
         if self.lokal:
             self.lokal.gem({k: v[k] for k in HUSKEDE})
         return Klargoering(enhed, secrets.token_urlsafe(24), v["wifi_ssid"],
                            str(indstillinger.get("wifi_kode") or ""), v["wifi_type"] or "WPA",
-                           fl, v["baggrund"], v["ekstra_apps"], bool(indstillinger.get("mail")),
-                           v["kontakt"])
+                           fl, baggrund, ",".join(p for p in apps if p not in ugyldige),
+                           bool(indstillinger.get("mail")), v["kontakt"], advarsler=advarsler)
+
+    def _fl_update(self, v: dict) -> str:
+        """Sti til FL-UPDATE på pc'en (linket hentes først) – ValideringsFejl ved problemer."""
+        if v["fl_kilde"] == FL_LINK:
+            # Linket hentes og kontrolleres her – telefonen får filen fra pc'en.
+            return str(self._hent_link(v["fl_link"]))
+        fl = v["fl_fil"]
+        if not fl:
+            raise ValideringsFejl("Ingen FL-UPDATE.apk valgt.")
+        if not Path(fl).is_file():
+            raise ValideringsFejl(f"FL-UPDATE-filen findes ikke: {fl}")
+        if not er_apk(Path(fl).read_bytes()[:4]):
+            raise ValideringsFejl(f"Filen er ikke en Android-app (APK): {fl}")
+        return fl
 
     def _hent_link(self, link: str) -> Path:
         """Henter FL-UPDATE fra linket til en lokal fil og kontrollerer, at det er en APK."""

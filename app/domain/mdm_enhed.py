@@ -10,6 +10,7 @@ serienr. og IMEI (Klargjort). Udgået sættes manuelt, når telefonen tages ud.
 Statusserne svarer til check-betingelsen i migrering 008 – ændres de her,
 skal de også ændres dér.
 """
+import hashlib
 import re
 from dataclasses import dataclass, fields
 
@@ -60,6 +61,17 @@ class MdmEnhed:
     def fra_dict(cls, data: dict) -> "MdmEnhed":
         navne = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in navne})
+
+
+def supportkode(nulstillingskode: str) -> str:
+    """Kode til brugeren: viser/skjuler Chrome i administrator-menuen (*#*#46227#*#*).
+
+    Udledes af nulstillingskoden – samme beregning som AdminActivity.supportkode på
+    telefonen – så den ikke skal gemmes, og nulstillingskoden ikke kan regnes baglæns."""
+    if not nulstillingskode:
+        return ""
+    h = hashlib.sha256(("chrome:" + nulstillingskode).encode("utf-8")).digest()
+    return f"{int.from_bytes(h[:4], 'big') % 10**6:06d}"
 
 
 def normaliser_navn(navn: str) -> str:

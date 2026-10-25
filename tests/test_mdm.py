@@ -85,22 +85,22 @@ class MdmServiceTest(TjenesteTest):
     @unittest.skipUnless(Path("assets/mdm/inbase-klargoering.apk").is_file(), "APK ikke bygget")
     def test_klargoering_husker_indstillinger_og_registrerer_rapport(self):
         enhed = self.s.opret({"navn": "ISM589"})
-        with self.assertRaises(ValideringsFejl, msg="FL-UPDATE er påkrævet"):
-            self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme"})
+        # Fejl i FL-UPDATE/ekstra apps stopper ikke QR-koden – de bliver til advarsler.
+        uden = self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme", "ekstra_apps": "Foto"})
+        self.assertEqual(len(uden.advarsler), 2)
+        ekstra = json.loads(uden.qr_tekst("http://pc:8765"))[E + "PROVISIONING_ADMIN_EXTRAS_BUNDLE"]
+        self.assertEqual((ekstra["fl_update_url"], ekstra["tilladte"]), ("", ""))
         fil = self.central / "FL-UPDATE.apk"
         fil.write_bytes(APK_DATA)
         k = self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme", "wifi_kode": "hemmelig",
                                           "fl_kilde": "fil", "fl_fil": str(fil), "mail": True})
-        self.assertEqual(k.fl_update_fil, fil)
-        with self.assertRaises(ValideringsFejl, msg="ekstra apps skal være pakkenavne"):
-            self.s.ny_klargoering(enhed, {"fl_kilde": "fil", "fl_fil": str(fil),
-                                          "ekstra_apps": "Foto"})
-        with self.assertRaises(ValideringsFejl):
-            self.s.ny_klargoering(enhed, {"fl_kilde": "link", "fl_fil": str(fil)})
+        self.assertEqual((k.fl_update_fil, k.advarsler), (fil, []))
         # Link: IN-BASE henter selv filen og afviser alt, der ikke er en APK (fx en forside).
         with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"<html>forside")):
-            with self.assertRaises(ValideringsFejl):
-                self.s.ny_klargoering(enhed, {"fl_kilde": "link", "fl_link": "https://mx.fl-it.net"})
+            forside = self.s.ny_klargoering(enhed, {"fl_kilde": "link",
+                                                    "fl_link": "https://mx.fl-it.net"})
+        self.assertIsNone(forside.fl_update_fil)
+        self.assertIn("ikke en APK", forside.advarsler[0])
         with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(APK_DATA)),                 mock.patch("app.infrastructure.stier.LOKAL_MAPPE", self.central):
             link = self.s.ny_klargoering(enhed, {"wifi_ssid": "Hjemme", "fl_kilde": "link",
                                                  "fl_link": "https://mx.fl-it.net/FL-UPDATE.apk"})
@@ -127,6 +127,9 @@ class MdmServiceTest(TjenesteTest):
         self.assertTrue(gemt.klargjort)
         self.assertEqual(gemt.nulstillingskode, k.nulstillingskode)
         self.assertRegex(k.nulstillingskode, r"^\d{8}$")
+        # Skal give samme kode som AdminActivity.supportkode på telefonen.
+        self.assertEqual(md.supportkode("12345678"), "483606")
+        self.assertNotEqual(md.supportkode(k.nulstillingskode), k.nulstillingskode[:6])
         self.assertEqual(ekstra["nulstillingskode"], k.nulstillingskode)
 
 

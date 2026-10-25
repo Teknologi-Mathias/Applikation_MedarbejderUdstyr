@@ -21,8 +21,8 @@ android {
         applicationId "dk.instore.inbase.klargoering"
         minSdk 29          // Android 10+: QR-klargøring med GET_PROVISIONING_MODE
         targetSdk 35
-        versionCode 2
-        versionName "2.0"
+        versionCode 3
+        versionName "3.0"
         resValue "string", "reservekode", reservekode
     }
 

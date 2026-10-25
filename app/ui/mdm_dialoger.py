@@ -310,6 +310,8 @@ class KlargoeringDialog(QDialog):
         except DataFejl as fejl:
             self.fejl_label.setText(str(fejl))
             return
+        if k.advarsler:
+            self.fejl_label.setText("QR-koden virker, men:\n• " + "\n• ".join(k.advarsler))
         self.vis_knap.setText("Lav ny QR-kode")
         self.status.setText(f"Venter på telefonen … (pc: {url})\n\nNulstillingskode: "
                             f"{k.nulstillingskode}  (gemmes i IN-BASE, når telefonen er klargjort)")

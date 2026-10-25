@@ -71,6 +71,7 @@ class MdmSide(SagListeSide):
         menu = QMenu(self)
         for tekst, funktion in (("Ret oplysninger…", self.rediger),
                                 ("Vis nulstillingskode…", self.vis_kode),
+                                ("Vis supportkode (Chrome)…", self.vis_supportkode),
                                 ("Markér som udgået", self.udgaaet), (None, None),
                                 ("Fjern fra listen", self.slet)):
             if tekst is None:
@@ -160,6 +161,22 @@ class MdmSide(SagListeSide):
             "1. Åbn Telefon-appen og tast *#*#46227#*#*\n"
             "2. Indtast koden og vælg \"Fabriksnulstil telefonen\".\n\n"
             "Del ikke koden med brugeren af telefonen.")
+
+    def vis_supportkode(self, enhed) -> None:
+        kode = md.supportkode(enhed.nulstillingskode or self.service.reservekode())
+        if not kode:
+            QMessageBox.information(self, "Supportkode",
+                                    f"{enhed.navn} har ingen nulstillingskode – og dermed ingen "
+                                    "supportkode.")
+            return
+        QMessageBox.information(
+            self, "Supportkode",
+            f"{enhed.navn}: {kode}\n\n"
+            "Koden må gives til brugeren ved fejlfinding. Den kan kun vise og skjule Chrome "
+            "(uden Google-konto) – ikke nulstille telefonen.\n\n"
+            "1. Åbn Telefon-appen og tast *#*#46227#*#*\n"
+            "2. Indtast supportkoden og vælg \"Vis Chrome\".\n"
+            "3. Når fejlen er løst: samme sted, vælg \"Skjul Chrome\".")
 
     def udgaaet(self, enhed) -> None:
         if self._bekraeft("Markér som udgået", f"Markér {enhed.navn} som udgået?"):
