@@ -4,7 +4,8 @@ organisation, brugere samt data & sikkerhed.
 Alle ændringer går gennem services:
 - Tema og Windows-notifikationer: IndstillingerService (pr. bruger, lokalt).
 - Adgangskode: AuthService (verificerer den nuværende kode, hasher den nye).
-- Arbejd offline: LagringService (reel driftstilstand med synkronisering).
+- Arbejd offline: LagringService (kun JSON-tilstanden; i Supabase-tilstand
+  forklarer kortet, at forbindelse er påkrævet).
 """
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -82,8 +83,9 @@ class GenereltPanel(QWidget):
         kort, lag = _kort(
             "Skift adgangskode",
             "BETA: Adgangskoder gemmes som saltede hashes i en fil, der ikke er "
-            "beskyttet. Brug ikke en privat kode. Ved Supabase-integration skifter "
-            "denne funktion til Supabase Auth.",
+            "beskyttet. Brug ikke en privat kode." if tjenester.auth.BETA else
+            f"Adgangskoden håndteres af Supabase Auth og skal være mindst "
+            f"{tjenester.auth.MIN_KODE} tegn.",
         )
         form = QFormLayout()
         self.nuvaerende = QLineEdit()
@@ -105,28 +107,40 @@ class GenereltPanel(QWidget):
         lag.addLayout(raekke)
         layout.addWidget(kort)
 
-        # --- offline ---
-        kort, lag = _kort(
-            "Arbejd offline",
-            "Arbejd videre på en lokal kopi, hvis den centrale datamappe er ustabil "
-            "eller utilgængelig. Ændringer i sager gemmes lokalt og synkroniseres, når "
-            "du går online. Er en sag ændret centralt imens, overskrives intet – du "
-            "afgør konflikten nedenfor. Brugere, skabeloner og fælles indstillinger kan "
-            "ikke ændres offline. (I dag er den centrale datakilde datamappen; en "
-            "Supabase-database er endnu ikke tilsluttet.)",
-        )
+        # --- forbindelse / offline ---
+        if tjenester.lagring.understoetter_offline:
+            kort, lag = _kort(
+                "Arbejd offline",
+                "Arbejd videre på en lokal kopi, hvis den centrale datamappe er ustabil "
+                "eller utilgængelig. Ændringer i sager gemmes lokalt og synkroniseres, når "
+                "du går online. Er en sag ændret centralt imens, overskrives intet – du "
+                "afgør konflikten nedenfor. Brugere, skabeloner og fælles indstillinger kan "
+                "ikke ændres offline. (Kun i den lokale JSON-tilstand.)",
+            )
+        else:
+            kort, lag = _kort(
+                "Forbindelse",
+                "IN-BASE arbejder direkte i den fælles database. Alle ændringer gemmes "
+                "med det samme og ses af kolleger på andre pc'er. Uden forbindelse kan "
+                "der ikke arbejdes – intet gemmes lokalt, så ingen arbejder på forældede "
+                "data.",
+            )
         self.lagring_status = QLabel("")
         self.lagring_status.setWordWrap(True)
         self.offline_knap = lav_knap("Arbejd offline")
         self.offline_knap.clicked.connect(self._skift_lagring)
+        self.offline_knap.setVisible(tjenester.lagring.understoetter_offline)
         raekke = QHBoxLayout()
         raekke.addWidget(self.lagring_status, 1)
         raekke.addWidget(self.offline_knap)
         lag.addLayout(raekke)
         self.ventende = QListWidget()
         self.ventende.setFixedHeight(110)
-        lag.addWidget(QLabel("Ændringer, der endnu ikke er synkroniseret:"))
+        ventende_label = QLabel("Ændringer, der endnu ikke er synkroniseret:")
+        lag.addWidget(ventende_label)
         lag.addWidget(self.ventende)
+        for widget in (ventende_label, self.ventende):
+            widget.setVisible(tjenester.lagring.understoetter_offline)
         self.konflikt_label = QLabel("Konflikter fra seneste synkronisering:")
         self.konflikter = QListWidget()
         self.konflikter.setFixedHeight(110)
@@ -166,7 +180,7 @@ class GenereltPanel(QWidget):
             self.offline_knap.setText("Gå online og synkronisér")
         else:
             self.lagring_status.setObjectName("lagringOnline")
-            self.lagring_status.setText(f"ONLINE – central datamappe: {self.t.datakilde.central_mappe}")
+            self.lagring_status.setText(f"ONLINE – {lagring.kilde}")
             self.offline_knap.setText("Arbejd offline")
         self.lagring_status.style().unpolish(self.lagring_status)
         self.lagring_status.style().polish(self.lagring_status)
@@ -333,7 +347,7 @@ class IndstillingerSide(QWidget):
     def anvend_rolle(self, admin: bool):
         for index, (_, _, _, kun_admin) in enumerate(self._paneler):
             self.faner.setTabVisible(index, admin or not kun_admin)
-        self.paamindelser.saet_redigerbar(admin and not self.t.datakilde.offline)
+        self.paamindelser.saet_redigerbar(admin and not self.t.lagring.offline)
         if not admin and self._paneler[self.faner.currentIndex()][3]:
             self.faner.setCurrentIndex(0)
 

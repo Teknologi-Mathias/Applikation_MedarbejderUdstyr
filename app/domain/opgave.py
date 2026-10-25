@@ -56,7 +56,7 @@ class Opgave:
         afsluttet="",
     ):
         # Fast id, så Action Center kan pege direkte på opgaven.
-        self.id = str(id) if id else uuid.uuid4().hex[:12]
+        self.id = str(id) if id else str(uuid.uuid4())
         self.navn = str(navn).strip()
         self.ansvarlig = str(ansvarlig or "").strip()
         self.frist = str(frist or "")

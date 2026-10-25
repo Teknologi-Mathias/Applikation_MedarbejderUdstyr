@@ -15,7 +15,7 @@ class Rykker:
 
     def __init__(self, skabelon_navn, kategori, emne, frist, oprettet=None,
                  oprettet_af=None, sendt="", sendt_af="", id=None):
-        self.id = str(id) if id else uuid.uuid4().hex[:12]
+        self.id = str(id) if id else str(uuid.uuid4())
         self.skabelon_navn = skabelon_navn
         self.kategori = kategori
         self.emne = emne

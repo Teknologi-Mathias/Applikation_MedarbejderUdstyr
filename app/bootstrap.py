@@ -4,19 +4,30 @@ Her – og kun her – vælges konkrete implementeringer: hvilke repositories
 services skal bruge. Brugerfladen får et færdigt Tjenester-objekt og kender
 aldrig til JSON-filer eller databaser.
 
-Når Supabase/PostgreSQL implementeres, er det denne fil, der skal vælge de
-nye repositories (se app/infrastructure/database/README.md).
+- byg_fra_konfiguration(): det programmet bruger. Supabase er standard; JSON
+  kun ved INBASE_BACKEND=json. Mangler Supabase-konfigurationen, kastes en
+  KonfigurationsFejl – der skiftes ALDRIG stiltiende til (gamle) JSON-data.
+- byg_supabase_tjenester(): services oven på app/repositories/supabase/.
+- byg_tjenester(): services oven på app/repositories/json/ (tests og udvikling).
 """
 import logging
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from app import session
 from app.domain import historik
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
 from app.infrastructure import stier
+from app.infrastructure.database.config import (
+    BACKEND_JSON,
+    BACKEND_SUPABASE,
+    DatabaseKonfiguration,
+    KonfigurationsFejl,
+    hent_konfiguration,
+    mangler_tekst,
+)
 from app.repositories.fejl import DataFejl
 from app.repositories.json.bruger_repository import JsonBrugerRepository
 from app.repositories.json.datakilde import Datakilde
@@ -28,10 +39,10 @@ from app.repositories.json.opsaetning_repository import (
     JsonSkabelonRepository,
 )
 from app.repositories.json.sag_repository import JsonSagRepository
-from app.services.auth_service import AuthService
+from app.services.auth_service import AuthService, SupabaseAuthService
 from app.services.backup_service import BackupService
 from app.services.indstillinger_service import IndstillingerService
-from app.services.lagring_service import LagringService
+from app.services.lagring_service import LagringService, OnlineLagring
 from app.services.offboarding_service import OffboardingService
 from app.services.onboarding_service import OnboardingService
 from app.services.paamindelser import PaamindelsesService
@@ -48,14 +59,15 @@ SAGSTYPER = {
 
 @dataclass
 class Tjenester:
-    datakilde: Datakilde
-    lagring: LagringService
-    auth: AuthService
+    backend: str                          # "supabase" eller "json"
+    datakilde: Optional[Datakilde]        # kun JSON
+    lagring: "LagringService | OnlineLagring"
+    auth: "AuthService | SupabaseAuthService"
     indstillinger: IndstillingerService
     skabeloner: SkabelonService
     offboarding: OffboardingService
     onboarding: OnboardingService
-    backup: BackupService
+    backup: Optional[BackupService]       # kun JSON (Supabase tager selv backup)
     paamindelser: PaamindelsesService
     rapporter: RapportService
 
@@ -63,9 +75,51 @@ class Tjenester:
         return self.onboarding if proces == OnboardingForloeb.PROCES else self.offboarding
 
 
+def byg_fra_konfiguration(konfig: DatabaseKonfiguration | None = None) -> Tjenester:
+    """Vælger backend ud fra konfigurationen (app/infrastructure/database/config.py)."""
+    konfig = konfig or hent_konfiguration()
+    if konfig.backend == BACKEND_JSON:
+        log.warning("JSON-tilstand valgt (INBASE_BACKEND=json) – lokal datamappe, ikke Supabase")
+        return byg_tjenester()
+    if not konfig.er_konfigureret:
+        raise KonfigurationsFejl(mangler_tekst(konfig))
+    from app.infrastructure.database.connection import opret_klient
+    return byg_supabase_tjenester(opret_klient(konfig), stier.LOKAL_MAPPE,
+                                  f"Supabase ({konfig.url.removeprefix('https://')})")
+
+
+def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -> Tjenester:
+    """Services oven på Supabase. klient: supabase-klienten (eller en testklient)."""
+    from app.repositories.supabase.konto_repository import SupabaseKontoRepository
+    from app.repositories.supabase.opsaetning_repository import (
+        SupabaseIndstillingRepository,
+        SupabasePraeferenceRepository,
+        SupabaseSkabelonRepository,
+    )
+    from app.repositories.supabase.sag_repository import SupabaseSagRepository
+
+    historik.saet_brugerkilde(session.brugernavn)
+    return Tjenester(
+        backend=BACKEND_SUPABASE,
+        datakilde=None,
+        lagring=OnlineLagring(kilde),
+        auth=SupabaseAuthService(SupabaseKontoRepository(klient)),
+        indstillinger=IndstillingerService(SupabaseIndstillingRepository(klient),
+                                           SupabasePraeferenceRepository(klient)),
+        skabeloner=SkabelonService(SupabaseSkabelonRepository(klient)),
+        offboarding=OffboardingService(SupabaseSagRepository(klient, Medarbejder)),
+        onboarding=OnboardingService(SupabaseSagRepository(klient, OnboardingForloeb)),
+        backup=None,
+        paamindelser=PaamindelsesService(
+            JsonLokalFil(lokal_mappe / stier.NOTIFIKATIONSLOG_FIL.name)
+        ),
+        rapporter=RapportService(),
+    )
+
+
 def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
                   lokal_mappe: Path = stier.LOKAL_MAPPE) -> Tjenester:
-    """Bygger alle services. Mapperne kan angives (bruges af tests)."""
+    """JSON-tilstanden. Mapperne kan angives (bruges af tests)."""
     historik.saet_brugerkilde(session.brugernavn)
     konfig = JsonLokalFil(lokal_mappe / stier.LAGRING_FIL.name)
     datakilde = Datakilde(central_mappe, lokal_mappe / stier.OFFLINE_MAPPE.name,
@@ -79,6 +133,7 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
         JsonPraeferenceRepository(lokal_mappe / stier.PRAEFERENCE_FIL.name),
     )
     return Tjenester(
+        backend=BACKEND_JSON,
         datakilde=datakilde,
         lagring=LagringService(datakilde, konfig, SAGSTYPER),
         auth=AuthService(JsonBrugerRepository(datakilde)),
@@ -97,9 +152,12 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
 def klargoer(tjenester: Tjenester) -> None:
     """Kaldes én gang ved opstart (før log på). Kaster DataFejl ved problemer.
 
-    Online: tjekker skriveadgang, kopierer evt. data fra %APPDATA% (≤ V0.5.1)
-    og migrerer ældre dataformater – efter en backup.
+    Supabase: intet – skemaet ændres aldrig af programmet, og intet importeres.
+    JSON: tjekker skriveadgang og opdaterer ældre JSON-format i datamappen
+    (efter en backup). Der importeres aldrig data fra andre steder.
     """
+    if tjenester.backend == BACKEND_SUPABASE:
+        return
     datakilde = tjenester.datakilde
     if datakilde.offline:
         if not tjenester.lagring.offline_kopi_findes():
@@ -108,7 +166,6 @@ def klargoer(tjenester: Tjenester) -> None:
         return
     try:
         tjek_skriveadgang(datakilde.central_mappe)
-        _kopier_gamle_data(datakilde)
     except OSError as fejl:
         raise DataFejl(
             f"Programmet kan ikke skrive i datamappen:\n{datakilde.central_mappe}\n\n"
@@ -119,17 +176,6 @@ def klargoer(tjenester: Tjenester) -> None:
         ) from fejl
     _migrer(tjenester)
     tjenester.auth.klargoer()
-
-
-def _kopier_gamle_data(datakilde: Datakilde) -> None:
-    """Kopierer data fra %APPDATA% første gang (kun den færdige .exe)."""
-    if not stier.ER_FROSSET or stier.GAMMEL_DATA_MAPPE == datakilde.central_mappe:
-        return
-    for filnavn in (stier.OFFBOARDING_AKTIVE, stier.OFFBOARDING_ARKIV):
-        gammel = stier.GAMMEL_DATA_MAPPE / filnavn
-        ny = datakilde.central_mappe / filnavn
-        if gammel.exists() and not ny.exists():
-            shutil.copy2(gammel, ny)
 
 
 def _migrer(tjenester: Tjenester) -> None:

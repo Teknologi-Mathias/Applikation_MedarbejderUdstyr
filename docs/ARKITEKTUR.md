@@ -11,15 +11,21 @@ main.py ─► app/bootstrap.py (vælger implementeringer, bygger Tjenester)
              │  bruger ▼                         ▲ bruger
  Domain      app/domain/        sager, opgaver, tidslinje, skabelonregler
              │
- Repositories app/repositories/ base.py (grænseflader) + json/ (i dag)
-             │
- Infrastructure app/infrastructure/ stier, logning, database/ (forberedt)
+ Repositories app/repositories/ base.py (grænseflader) + supabase/ (standard)
+             │                                          + json/ (udvikling/tests)
+ Infrastructure app/infrastructure/ stier, logning, database/ (konfiguration,
+                                     forbindelse, SQL-migreringer)
+ Server       supabase/functions/  Edge Functions til brugeradministration
 ```
 
 Regler:
 * UI indeholder ingen forretningsregler, ingen filadgang og ingen SQL.
   Handlinger går via controllere (`app/ui/modul_controller.py`) til services.
-* Services får deres repositories via konstruktøren (se `bootstrap.py`).
+* Services får deres repositories via konstruktøren (se `bootstrap.py`) og
+  kender kun grænsefladerne i `repositories/base.py` – aldrig Supabase.
+* Alle Supabase-kald ligger i `app/repositories/supabase/`; oversættelsen
+  domæne ↔ kolonner kun i `mapping.py`. Forbindelse og konfiguration kun i
+  `app/infrastructure/database/`.
 * Domænet kender hverken UI, filer eller databaser.
 * Fejl fra datalaget er typede (`app/repositories/fejl.py`) og vises ens via
   `app/ui/fejl.py`; uventede fejl logges i `Lokal/Logs/in-base.log`.
@@ -36,11 +42,13 @@ Regler:
 | Action Center | `app/services/action_center.py` |
 | Påmindelser (Windows) | `app/services/paamindelser.py` |
 | Nøgletal | `app/services/rapport_service.py` |
-| Login og adgangskoder | `app/services/auth_service.py` |
-| Offline og synkronisering | `app/services/lagring_service.py` |
-| Backup og slettepolitik | `app/services/backup_service.py` |
+| Login og adgangskoder | `app/services/auth_service.py` (`SupabaseAuthService`) |
+| Brugeroprettelse (server) | `supabase/functions/admin-create-user`, `admin-manage-user` |
+| Online-krav / offline (kun JSON) | `app/services/lagring_service.py` |
+| Slettepolitik (backup kun JSON) | `app/services/backup_service.py` |
 | Tema | `app/ui/theme.py` |
-| Database (forberedt) | `app/infrastructure/database/` |
+| Database | `app/infrastructure/database/`, `app/repositories/supabase/` |
+| Opsætning og drift | `docs/SUPABASE_OPSAETNING.md` |
 
 ## Fælles arbejdsgangsmotor
 
@@ -57,20 +65,32 @@ Onboarding og offboarding er to moduler oven på samme motor:
   `OpgaveOversigtSide`, `SagDialog` og `SkabelonSide` konfigureres pr. modul i
   `app/ui/moduler.py`.
 
-## Data og samtidighed (JSON)
+## Data og samtidighed (Supabase)
+
+* Sager gemmes via RPC `inbase_save_case`: sag, person, ansættelse og de
+  ændrede opgaver/rykkere + nye tidslinjehændelser i én transaktion.
+  Versionen tjekkes i databasen; afviger den → `KonfliktFejl`.
+* Repositoryet husker rækkerne fra sidste hentning og sender kun forskellen.
+  Skrivninger gentages aldrig automatisk (ingen dubletter ved netværksfejl).
+* Hovedvinduet tjekker hvert minut en let signatur (antal + seneste
+  `updated_at` pr. proces) og genindlæser kun ved ændringer.
+* RLS: alle medlemmer (brugere med profil) deler sager; opsætning, brugere
+  og permanent sletning kun for administratorer; tidslinjen er insert-only.
+
+## Data og samtidighed (JSON – kun udvikling/tests)
 
 * Sager identificeres med UUID (`id`, `person_id`) – aldrig lønnr.
 * Hver skrivning læser filen forfra og ændrer kun én sag; versionsnummeret
   afviser samtidige ændringer (`KonfliktFejl`).
 * Arkivering skriver målfilen først; findes en sag i begge filer, vises den
   som arkiveret.
-* Ældre data migreres ved opstart – efter en automatisk backup.
+* Ældre JSON-format opdateres ved opstart – efter en backup (kun JSON-tilstand).
+  Der importeres aldrig data fra JSON til Supabase.
 
 ## Kendte begrænsninger
 
-* JSON-filer på et delt drev er ikke en rigtig flerbrugerdatabase; låsning
-  sker pr. sag ved skrivning (optimistisk), ikke på filniveau.
-* Login/roller er BETA: brugerfilen ligger i datamappen og kan redigeres af
-  alle med adgang. Reel adgangskontrol kræver Supabase Auth + RLS.
-* Tidspunkter gemmes som lokal tid uden tidszone (konverteres ved migrering).
-* Supabase er ikke tilsluttet – se `app/infrastructure/database/README.md`.
+* Ingen offline i Supabase-tilstand: uden forbindelse vises en fejl.
+* Domænet bruger lokal tid uden tidszone; den konverteres til/fra timestamptz
+  i `mapping.py` (forudsætter samme tidszone på pc'erne).
+* JSON-tilstandens login er BETA (brugerfil uden beskyttelse) – kun til
+  udvikling og tests.

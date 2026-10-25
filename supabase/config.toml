@@ -1,0 +1,12 @@
+# Supabase CLI-konfiguration for IN-BASE's Edge Functions.
+# Deploy:  supabase functions deploy admin-create-user admin-manage-user --project-ref <projekt-ref>
+#
+# verify_jwt = false: funktionerne validerer SELV kalderens session med
+# auth.getUser(token) og tjekker administratorrollen i user_profiles. Det
+# virker både med de klassiske JWT-nøgler og med Supabases nye signeringsnøgler.
+
+[functions.admin-create-user]
+verify_jwt = false
+
+[functions.admin-manage-user]
+verify_jwt = false

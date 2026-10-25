@@ -1,8 +1,9 @@
 """Online/offline-drift og synkronisering af ændringer foretaget offline.
 
-"Central" er i dag den fælles datamappe (Data/ – evt. på et netværksdrev).
-Når Supabase tilsluttes, bliver den central database i stedet; samme
-strategi (ændringslog + versionskontrol) kan genbruges.
+LagringService gælder kun JSON-tilstanden (INBASE_BACKEND=json), hvor
+"central" er den fælles datamappe. I Supabase-tilstand bruges OnlineLagring
+nederst i filen: ingen offline-drift, da en lokal kopi ikke kan holdes i
+trit med databasens versionskontrol.
 
 Arbejd offline:
   1. De centrale datafiler kopieres til Lokal/Offline.
@@ -39,11 +40,16 @@ class SyncResultat:
 
 
 class LagringService:
+    """JSON-tilstanden: central datamappe med mulighed for offline-kopi."""
+
+    understoetter_offline = True
+
     def __init__(self, datakilde: Datakilde, konfig: JsonLokalFil, sagstyper: dict):
         """sagstyper: {proces: (sagstype, aktiv_filnavn, arkiv_filnavn)}."""
         self.datakilde = datakilde
         self.konfig = konfig
         self.sagstyper = sagstyper
+        self.kilde = f"central datamappe ({datakilde.central_mappe})"
 
     ### ----- status ---------------------------------------------------------
 
@@ -182,3 +188,46 @@ class LagringService:
             repo.gem(sag)
             log.warning("Konflikt løst med offline-version for sag %s", post["sag_id"])
         gem_json(konflikter, self.datakilde.offline_mappe / KONFLIKTER)
+
+
+class OnlineLagring:
+    """Supabase-tilstand: databasen er den eneste datakilde – der er ingen offline.
+
+    At arbejde på en lokal kopi uden versionskontrol mod databasen ville give
+    forældede data og tabte ændringer. Mister programmet forbindelsen, får
+    brugeren en tydelig fejl (OfflineFejl) og kan prøve igen.
+    Samme metoder som LagringService, så UI'en ikke skal kende forskel.
+    """
+
+    understoetter_offline = False
+    offline = False
+
+    def __init__(self, kilde: str):
+        self.kilde = kilde          # vises i UI'en, fx "Supabase (abc.supabase.co)"
+
+    def central_tilgaengelig(self) -> bool:
+        return True
+
+    def offline_kopi_findes(self) -> bool:
+        return False
+
+    def ventende_aendringer(self) -> list[dict]:
+        return []
+
+    def konflikter(self) -> list[dict]:
+        return []
+
+    def offline_info(self) -> dict:
+        return {}
+
+    def gaa_offline(self) -> str:
+        raise OfflineFejl(
+            "IN-BASE arbejder direkte i den fælles database og kan ikke arbejde offline. "
+            "Mister du forbindelsen, så vent og prøv igen – intet gemmes lokalt."
+        )
+
+    def gaa_online(self) -> SyncResultat:
+        return SyncResultat()
+
+    def loes_konflikt(self, index: int, brug_min: bool) -> None:
+        raise OfflineFejl("Der er ingen offline-konflikter i databasetilstand.")

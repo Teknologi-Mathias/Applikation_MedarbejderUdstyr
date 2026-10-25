@@ -15,8 +15,10 @@ Moduler:
 * **Indstillinger** – tema, notifikationer, adgangskode, offline, påmindelser
   og (for administratorer) organisation, brugere og data & sikkerhed.
 
-Arkitekturen er beskrevet i [docs/ARKITEKTUR.md](docs/ARKITEKTUR.md), og
-databaseforberedelsen i
+Data ligger i en fælles **Supabase**-database, så flere brugere på forskellige
+pc'er arbejder i de samme sager. Arkitekturen er beskrevet i
+[docs/ARKITEKTUR.md](docs/ARKITEKTUR.md), opsætning og drift af Supabase i
+[docs/SUPABASE_OPSAETNING.md](docs/SUPABASE_OPSAETNING.md) og databaselaget i
 [app/infrastructure/database/README.md](app/infrastructure/database/README.md).
 
 ## Kom i gang (udvikling)
@@ -28,16 +30,19 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Første gang findes kun brugeren **admin / admin** – skift koden under
-*Indstillinger → Generelt*.
-
-Valgfrie miljøvariabler (se `.env.example`):
+Konfiguration (se `.env.example`) i `%APPDATA%\IN-BASE\.env` eller – under
+udvikling – `.env` i projektmappen:
 
 | Variabel | Betydning |
 |---|---|
-| `INBASE_DATA` | Central datamappe (standard: `Data/` ved programmet). Kan være et netværksdrev. |
-| `INBASE_LOKAL` | Lokal mappe til offline-kopi, log og præferencer (standard: `Lokal/`). |
-| `INBASE_SUPABASE_*` | Forberedt – Supabase er ikke tilsluttet endnu. |
+| `INBASE_SUPABASE_URL` | Projektets URL, `https://<ref>.supabase.co`. |
+| `INBASE_SUPABASE_ANON_KEY` | Den OFFENTLIGE publishable/anon-nøgle (aldrig secret/service_role). |
+| `INBASE_BACKEND=json` | Kun udvikling/tests: den gamle lokale JSON-lagring (`INBASE_DATA`). |
+| `INBASE_LOKAL` | Lokal mappe til log og notifikationslog (standard: `Lokal/`, færdig app: `%LOCALAPPDATA%\IN-BASE`). |
+
+Uden konfiguration starter IN-BASE ikke (der skiftes aldrig stiltiende til
+lokale data). Log på sker med e-mail og adgangskode (Supabase Auth); den
+første administrator oprettes efter docs/SUPABASE_OPSAETNING.md.
 
 ## Tests
 
@@ -46,7 +51,8 @@ python -m unittest discover -s tests -t .
 ```
 
 Testene kører i midlertidige mapper og rører aldrig rigtige data. UI-testene
-kører offscreen.
+kører offscreen. Integrationstests mod en lokal database i Docker og mod en
+lokal Supabase er beskrevet i docs/SUPABASE_OPSAETNING.md, afsnit 12.
 
 ## Struktur
 
@@ -64,9 +70,13 @@ app/
     sag_service.py              Fælles sagshandlinger + onboarding_/offboarding_service.py
     action_center.py, paamindelser.py, rapport_service.py
     skabelon_service.py, auth_service.py, indstillinger_service.py
-    backup_service.py, lagring_service.py (online/offline + synkronisering)
-  repositories/                 base.py (grænseflader), fejl.py, json/ (nuværende lagring)
-  infrastructure/               stier.py, logning.py, database/ (Supabase – forberedt)
+    backup_service.py (kun JSON), lagring_service.py (online; offline kun JSON)
+  repositories/                 base.py (grænseflader), fejl.py,
+    supabase/                   ALLE Supabase-kald + mapping.py (domæne ↔ kolonner)
+    json/                       lokal JSON-lagring (udvikling/tests)
+  infrastructure/               stier.py, logning.py, database/ (konfiguration,
+                                forbindelse, SQL-migreringer, nulstilling)
+supabase/functions/             Edge Functions: admin-create-user, admin-manage-user
   ui/                           Vinduer, sider, dialoger og controllere
 tests/                          unittest-tests
 docs/ARKITEKTUR.md              Lag, indgangspunkter og begrænsninger
@@ -89,27 +99,33 @@ og *Indstillinger → Påmindelser* (kun administratorer, kun online).
 Arbejdsgangsskabeloner versionsstyres: ændringer gemmes som ny version og
 påvirker kun nye forløb.
 
-## Data, offline og sikkerhed
+## Data, adgang og sikkerhed
 
-* **Central datamappe** (`Data/`): sager, skabeloner, brugere, indstillinger.
-  Ældre data migreres automatisk ved opstart – efter en backup.
-* **Arbejd offline** (*Indstillinger → Generelt*): lokal kopi + ændringslog;
-  synkroniseres med versionskontrol, når du går online. Konflikter
-  overskrives aldrig – du vælger selv. Der skiftes aldrig automatisk.
-* **Backup:** dagligt og testet; gendannelse tager først en backup.
-* **Login er BETA:** adgangskoder gemmes som saltede hashes, men brugerfilen
-  er ikke beskyttet. Reel adgangskontrol kommer med Supabase Auth + RLS.
+* **Supabase** er den eneste fælles datakilde. Hver ændring gemmer kun den
+  berørte sag (atomisk, med versionskontrol – samtidige ændringer giver
+  "ændret af …", aldrig overskrivning).
+* **Adgang** håndhæves i databasen (Row Level Security): kun brugere med en
+  IN-BASE-profil ser data; kun administratorer ændrer opsætning, opretter
+  brugere og sletter permanent. Tidslinjen kan ikke ændres.
+* **Brugere** oprettes af en administrator i programmet (Edge Function med
+  servernøgle – aldrig i klienten) og vælger egen kode ved første log på.
+* **Ingen offline:** uden forbindelse vises en fejl, og intet gemmes lokalt.
+* **Backup** tages af Supabase. Gamle JSON-data overføres ikke – se
+  `tools/afvikl_gamle_data.py`.
 
-Læg programmet i en mappe brugerne kan skrive i, **ikke** i `C:\Program Files`.
+## Byg Windows-program og installer
 
-## Byg Windows-program
+Ret versionen i `app/__init__.py` (`__version__`) og kør:
 
+```powershell
+.\scripts\build_windows.ps1
 ```
-pyinstaller MedarbejderUdstyr.spec
-```
 
-Resultatet er `dist/IN-BASE.exe`. `Data/` og `Lokal/` oprettes ved siden af.
-Versionen (vist i Jobliste og Egenskaber) læses fra `VERSION` i `app/__init__.py`.
+Resultatet er `release\IN-BASE-Setup-v<version>.exe` + SHA-256-kontrolsum.
+Opsætning, afprøvning og fejlfinding: [docs/RELEASE.md](docs/RELEASE.md).
+Installeren lægger forbindelsen til Supabase (URL + offentlig nøgle fra
+projektets `.env`) i `%APPDATA%\IN-BASE\.env`, hvis filen mangler – den ligger
+ikke i selve .exe-filen og overskrives aldrig ved opgradering.
 
 ## Logo og ikon
 

@@ -1,0 +1,3 @@
+# Til at bygge Windows-appen og installeren (se docs/RELEASE.md).
+-r requirements.txt
+pyinstaller>=6.10
