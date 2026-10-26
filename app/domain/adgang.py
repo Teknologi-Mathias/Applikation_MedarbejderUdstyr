@@ -10,8 +10,14 @@ Telefoner er også låst i databasen (migrering 010), fordi tabellen kun var
 åben for administratorer.
 
 Modulnavnene svarer til check-betingelsen i migrering 010.
+
+Afdelinger (roller): en bruger kan være medlem af flere afdelinger (HR,
+Administration, Merch – migrering 014). De styrer arbejdsbakkerne ("Min
+afdeling"), ikke adgangen: alle medlemmer må behandle alle sager.
 """
 from typing import Optional
+
+from app.domain.arbejdsspor import AFDELINGER
 
 ONBOARDING = "onboarding"
 OFFBOARDING = "offboarding"
@@ -56,3 +62,17 @@ def har_adgang(bruger: Optional[dict], modul: Optional[str]) -> bool:
 def normaliser(moduler) -> list[str]:
     """Kendte moduler i fast rækkefølge (ukendte ignoreres)."""
     return [m for m in MODULER if m in set(moduler or ())]
+
+
+def afdelinger_for(bruger: Optional[dict]) -> tuple:
+    """Brugerens afdelinger i fast rækkefølge."""
+    valgte = set((bruger or {}).get("roller") or ())
+    return tuple(a for a in AFDELINGER if a in valgte)
+
+
+def normaliser_afdelinger(afdelinger) -> list[str]:
+    """Kendte afdelinger i fast rækkefølge, uden dubletter (ukendte afvises)."""
+    ukendte = set(afdelinger or ()) - set(AFDELINGER)
+    if ukendte:
+        raise ValueError("Ukendt afdeling: " + ", ".join(sorted(ukendte)))
+    return [a for a in AFDELINGER if a in set(afdelinger or ())]

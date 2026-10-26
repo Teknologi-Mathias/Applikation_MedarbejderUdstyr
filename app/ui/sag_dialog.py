@@ -1,4 +1,8 @@
-"""En sag (onboarding eller offboarding): opgaver, milepæle, fremdrift og tidslinje.
+"""En sag (onboarding eller offboarding): opgaver, arbejdsspor, fremdrift og tidslinje.
+
+Opgaver med arbejdsspor grupperes pr. spor (HR, kontrakt, tøj …) med sporets
+status; ellers efter milepæl. Onboarding viser øverst klarhed til opstart og
+HR's behov.
 
 Dialogen arbejder på en kopi af sagen (self.sag). Controlleren gemmer kopien
 via servicen, når brugeren trykker "Gem sag".
@@ -24,10 +28,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.domain import arbejdsspor as sp
 from app.domain.opgave import Opgave
+from app.services import workflow
 from app.ui.hjaelpere import lav_knap, pille_css, vis_dato
 from app.ui.opgave_dialog import OpgaveDialog
-from app.ui.theme import OPGAVE_STIL, TONER, status_stil
+from app.ui.theme import OPGAVE_STIL, TONER, spor_stil, status_stil
 
 
 class OpgaveRaekke(QFrame):
@@ -37,7 +43,7 @@ class OpgaveRaekke(QFrame):
         super().__init__()
         self.dialog = dialog
         self.opgave = opgave
-        self.laast = dialog.sag.er_laast(opgave)
+        self.laast = dialog.sag.er_blokeret(opgave)
         self.setObjectName("opgaveRaekke")
         self.setProperty("fokus", fokus)
 
@@ -87,7 +93,13 @@ class OpgaveRaekke(QFrame):
         )
 
         self.navn_label.setText(o.navn + ("" if o.obligatorisk else "  (valgfri)"))
-        meta = f"{o.ansvarlig or 'Ingen ansvarlig'} · Frist: {vis_dato(o.frist) or 'ingen'}"
+        if o.afdeling:
+            meta = f"{o.afdeling} · {o.ansvarlig}" if o.ansvarlig else sp.ejer(o)
+        else:
+            meta = o.ansvarlig or "Ingen ansvarlig"
+        meta += f" · Frist: {vis_dato(o.frist) or 'ingen'}"
+        if o.planlagt:
+            meta += f" · Planlagt: {vis_dato(o.planlagt[:10])} {o.planlagt[11:16]}"
         if o.udstyr:
             meta += f" · Udstyr: {o.udstyr}"
         self.meta_label.setText(meta)
@@ -105,8 +117,7 @@ class OpgaveRaekke(QFrame):
 
         noter = []
         if self.laast:
-            aktiv = self.dialog.sag.milepael_navn(self.dialog.sag.aktiv_milepael())
-            noter.append(f"Låst – bliver tilgængelig, når '{aktiv}' er færdig")
+            noter.append(self.dialog.sag.blokeringsaarsag(o))
         if o.beskrivelse:
             noter.append(o.beskrivelse)
         if o.begrundelse:
@@ -122,10 +133,13 @@ class OpgaveRaekke(QFrame):
             if not self.dialog.rediger_opgave(self.opgave, ny_status=status):
                 self.opdater()   # annulleret: sæt vælgeren tilbage
             return
-        milepael_foer = self.dialog.sag.aktiv_milepael()
+        sag = self.dialog.sag
+        blokerede_foer = {o.id for o in sag.opgaver if sag.er_blokeret(o)}
         self.opgave.saet_status(status)
-        if self.dialog.sag.aktiv_milepael() != milepael_foer:
-            # En milepæl er blevet færdig (eller genåbnet): lås op/lås rækkerne.
+        if ({o.id for o in sag.opgaver if sag.er_blokeret(o)} != blokerede_foer
+                or any(o.spor for o in sag.opgaver)):
+            # En forudsætning er opfyldt (eller genåbnet), eller sporets status i
+            # overskriften er ændret: opdatér rækkerne.
             QTimer.singleShot(0, self.dialog.byg_raekker)
         else:
             self.opdater()
@@ -181,6 +195,17 @@ class SagDialog(QDialog):
         layout = QVBoxLayout(fane)
         layout.setContentsMargins(0, 12, 0, 0)
         layout.setSpacing(12)
+        self.klarhed_label = QLabel()
+        self.klarhed_label.setWordWrap(True)
+        self.behov_label = QLabel()
+        self.behov_label.setObjectName("hjaelpTekst")
+        self.behov_label.setWordWrap(True)
+        self.uoverens_label = QLabel()
+        self.uoverens_label.setObjectName("advarsel")
+        self.uoverens_label.setWordWrap(True)
+        for label in (self.klarhed_label, self.behov_label, self.uoverens_label):
+            label.setVisible(False)
+            layout.addWidget(label)
         layout.addLayout(self._opbyg_fremdrift())
 
         self.raekke_layout = QVBoxLayout()
@@ -322,8 +347,14 @@ class SagDialog(QDialog):
         return bund
 
     def _grupper(self):
-        """[(overskrift eller None, [opgaver])] – opgaver grupperet efter milepæl."""
+        """[(overskrift eller None, [opgaver])] – grupperet efter spor eller milepæl."""
         sag = self.sag
+        if any(o.spor for o in sag.opgaver):
+            grupper = []
+            for status in sp.alle_spor(sag, date.today()):
+                opgaver = [o for o in sag.opgaver if sp.spor_for(o) == status.spor]
+                grupper.append((f"{status.navn.upper()} · {status.status}", opgaver))
+            return grupper
         if not sag.MILEPAELE:
             return [(None, sag.opgaver)]
         grupper = []
@@ -385,9 +416,25 @@ class SagDialog(QDialog):
         self.status_badge.setText(m.status + (" (manuel)" if m.status_manuel else ""))
         self.status_badge.setStyleSheet(pille_css(status_stil(m.status)))
 
+        behov = getattr(m, "behov", None)
+        if behov is not None:
+            klar = sp.klarhed(m, date.today())
+            tekst = f"Opstart: {klar.niveau}"
+            if klar.aarsager:
+                tekst += " – " + "; ".join(klar.aarsager)
+            self.klarhed_label.setText(tekst)
+            self.klarhed_label.setStyleSheet(pille_css(spor_stil(klar.niveau)))
+            self.behov_label.setText("HR's behov: " + " · ".join(behov.linjer()))
+            uoverens = workflow.uoverensstemmelser(m, behov)
+            self.uoverens_label.setText("\n".join(uoverens))
+            for label, synlig in ((self.klarhed_label, True), (self.behov_label, True),
+                                  (self.uoverens_label, bool(uoverens))):
+                label.setVisible(synlig)
+
     def rediger_opgave(self, opgave, ny_status=None):
         """Åbner opgaven. Returnerer True hvis noget blev gemt eller slettet."""
-        dialog = OpgaveDialog(self, opgave, self.ansvarlige, milepaele=self.sag.MILEPAELE)
+        dialog = OpgaveDialog(self, opgave, self.ansvarlige, milepaele=self.sag.MILEPAELE,
+                              blokeret_aarsag=self.sag.blokeringsaarsag(opgave))
         if ny_status:
             dialog.status_input.setCurrentText(ny_status)
             dialog.fokuser_begrundelse()

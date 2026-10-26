@@ -96,6 +96,11 @@ class Bruger:
         return self
 
 
+def s_skabelon(bruger):
+    return next(s for s in bruger.skabeloner.sagsskabeloner("onboarding", "DM")
+                if "arbejdsspor" in s["navn"])
+
+
 @unittest.skipUnless(URL, "Lokal testdatabase kører ikke (se tools/lokal_testdatabase.py)")
 class SupabaseLokalTest(unittest.TestCase):
     @classmethod
@@ -161,21 +166,33 @@ class SupabaseLokalTest(unittest.TestCase):
         hentet = self.bo.onboarding.hent(sag.id)
         self.assertEqual((hentet.stilling, hentet.omraade, hentet.loennr), ("FM", "Område Nord", ""))
         self.assertEqual(hentet.status, OnboardingForloeb.STATUS_KANDIDAT)
-        self.assertEqual(hentet.skabelon["navn"], "Onboarding – FM/DM")
+        self.assertEqual(hentet.skabelon["navn"], "Onboarding – arbejdsspor FM/DM")
 
-    def test_samtidig_aendring_giver_konflikt(self):
+    def test_samtidige_uafhaengige_aendringer_flettes(self):
         sag = self.ny_offboarding(self.anne)
         anne_udgave = self.anne.offboarding.hent(sag.id)
         bo_udgave = self.bo.offboarding.hent(sag.id)
         self.anne.aktiv()
         self.anne.offboarding.tilfoej_notat(anne_udgave, "Annes ændring")
         self.bo.aktiv()
-        with self.assertRaises(KonfliktFejl):
-            self.bo.offboarding.tilfoej_notat(bo_udgave, "Bos ændring")
-        # Annes ændring er bevaret, Bos er ikke gemt.
-        noter = [h["kommentar"] for h in self.bo.offboarding.hent(sag.id).historik.haendelser()]
+        self.bo.offboarding.marker_opgave_udfoert(bo_udgave, bo_udgave.opgaver[0].id)
+        hentet = self.anne.offboarding.hent(sag.id)
+        noter = [h["kommentar"] for h in hentet.historik.haendelser()]
         self.assertIn("Annes ændring", noter)
-        self.assertNotIn("Bos ændring", noter)
+        self.assertEqual(hentet.opgaver[0].status, "Udført")
+        self.assertTrue(hentet.historik.er_intakt())
+
+    def test_samtidig_aendring_af_samme_felt_giver_konflikt(self):
+        sag = self.ny_offboarding(self.anne)
+        anne_udgave = self.anne.offboarding.hent(sag.id)
+        bo_udgave = self.bo.offboarding.hent(sag.id)
+        self.anne.aktiv()
+        self.anne.offboarding.aendr_frist(anne_udgave, sag.opgaver[1].id, dato(5))
+        self.bo.aktiv()
+        with self.assertRaises(KonfliktFejl):
+            self.bo.offboarding.aendr_frist(bo_udgave, sag.opgaver[1].id, dato(9))
+        # Annes ændring er bevaret, Bos er ikke gemt.
+        self.assertEqual(self.bo.offboarding.hent(sag.id).opgaver[1].frist, dato(5))
 
     def test_kun_aendrede_opgaver_sendes_og_andre_sager_er_uroerte(self):
         sag1 = self.ny_offboarding(self.anne)
@@ -216,6 +233,33 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertEqual(self.anne.indstillinger.praeference(self.anne.brugernavn)["tema"], "lys")
         profil = self.anne.konto.profil(self.anne.id)
         self.assertEqual(profil["rolle"], "Bruger")
+
+    def test_kun_administrator_saetter_afdelinger_og_de_vises_i_navnelisten(self):
+        with self.assertRaises(DataFejl):
+            self.anne.konto.saet_afdelinger(self.anne.id, ["HR"])
+        with self.assertRaises(Exception):
+            self.anne.klient.table("user_profiles").update({"roles": ["HR"]})                 .eq("id", self.anne.id).execute()
+        self.admin.konto.saet_afdelinger(self.anne.id, ["Merch", "HR", "HR"])
+        self.assertEqual(self.anne.konto.profil(self.anne.id)["roller"], ["HR", "Merch"])
+        katalog = {b["brugernavn"]: b for b in self.bo.konto.katalog()}
+        self.assertEqual(katalog[self.anne.brugernavn]["roller"], ["HR", "Merch"])
+        self.admin.konto.saet_afdelinger(self.anne.id, [])
+
+    def test_behov_og_arbejdsspor_gemmes(self):
+        self.anne.aktiv()
+        s = self.anne.onboarding
+        sag = s.ny_sag({"navn": "Kandidat Behov", "stilling": "DM", "omraade": "Område Nord",
+                        "ansaettelsesdato": dato(10),
+                        "behov": {"polo": {"valgt": True, "stoerrelse": "M", "antal": 2},
+                                  "mobil": True, "abonnement": "Tale og data"}})
+        sag = s.opret(sag, s_skabelon(self.anne), {"oplaering_planlagt": "2026-12-01T08:00:00"})
+        hentet = self.bo.onboarding.hent(sag.id)
+        self.assertEqual(hentet.behov.til_dict(), sag.behov.til_dict())
+        efter = {o.noegle: o for o in hentet.opgaver}
+        self.assertEqual(efter["oplaering_booket"].planlagt, "2026-12-01T08:00:00")
+        self.assertEqual((efter["telefon"].afhaenger_af, efter["telefon"].afdeling),
+                         (["kontrakt"], "Administration"))
+        self.assertEqual(efter["firmabil"].status, "Undtaget")
 
     def test_bruger_ser_kun_egen_profil_men_navneliste(self):
         profiler = self.anne.konto.alle_profiler()

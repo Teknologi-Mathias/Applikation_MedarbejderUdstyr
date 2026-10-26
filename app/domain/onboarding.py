@@ -14,6 +14,7 @@ kun sættes manuelt med begrundelse (og lukker forløbet).
     jobs                        Afventer jobs
     (alle færdige)              Aktiv
 """
+from app.domain.behov import Behov
 from app.domain.opgave import laes_iso_dato
 from app.domain.sag import Sag
 
@@ -58,6 +59,7 @@ class OnboardingForloeb(Sag):
         ansaettelsesdato="",
         foerste_arbejdsdag="",
         email="",
+        behov=None,
         **basis,
     ):
         super().__init__(navn=navn, **basis)
@@ -67,6 +69,8 @@ class OnboardingForloeb(Sag):
         # Kun relevant, hvis den afviger fra ansættelsesdatoen.
         self.foerste_arbejdsdag = foerste_arbejdsdag or ""
         self.email = str(email or "").strip()
+        # HR's behovsregistrering (tøj, mobil, mail, bil) – se app/domain/behov.py.
+        self.behov = behov if isinstance(behov, Behov) else Behov.fra_dict(behov)
 
     ### ----- status ---------------------------------------------------------
 
@@ -75,7 +79,12 @@ class OnboardingForloeb(Sag):
         return self._STATUS_FOR_MILEPAEL[aktiv] if aktiv else self.STATUS_AKTIV
 
     def er_afsluttet(self) -> bool:
-        return self.status in (self.STATUS_AKTIV, self.STATUS_ANNULLERET)
+        """Annulleret, eller Aktiv og alle obligatoriske opgaver lukket (også dem
+        uden milepæl, fx opfølgningssamtalen efter start)."""
+        if self.status == self.STATUS_ANNULLERET:
+            return True
+        return self.status == self.STATUS_AKTIV and all(
+            o.afsluttet for o in self.opgaver if o.obligatorisk)
 
     def kraever_overstyring(self, ny_status: str) -> bool:
         """True, hvis ny_status springer over krav, der endnu ikke er opfyldt.
@@ -105,6 +114,9 @@ class OnboardingForloeb(Sag):
     def foerste_dag(self) -> str:
         return self.foerste_arbejdsdag or self.ansaettelsesdato
 
+    def maaldato(self) -> str:
+        return self.foerste_dag()
+
     def beskrivelse(self) -> str:
         dato = laes_iso_dato(self.foerste_dag())
         vis = dato.strftime("%d-%m-%Y") if dato else "ikke fastlagt"
@@ -126,6 +138,7 @@ class OnboardingForloeb(Sag):
             "ansaettelsesdato": self.ansaettelsesdato,
             "foerste_arbejdsdag": self.foerste_arbejdsdag,
             "email": self.email,
+            "behov": self.behov.til_dict(),
         }
 
     @classmethod
@@ -139,5 +152,6 @@ class OnboardingForloeb(Sag):
             ansaettelsesdato=data.get("ansaettelsesdato", ""),
             foerste_arbejdsdag=data.get("foerste_arbejdsdag", ""),
             email=data.get("email", ""),
+            behov=data.get("behov"),
             **basis,
         )

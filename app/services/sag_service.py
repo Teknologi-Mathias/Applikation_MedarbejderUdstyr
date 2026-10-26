@@ -9,10 +9,11 @@ import logging
 from datetime import date
 from typing import Optional
 
+from app.domain import afhaengighed
 from app.domain.opgave import Opgave, laes_iso_dato
 from app.domain.sag import Sag
 from app.repositories.base import SagRepository
-from app.repositories.fejl import ValideringsFejl
+from app.repositories.fejl import KonfliktFejl, ValideringsFejl
 from app.services import workflow
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,9 @@ class SagService:
                 raise ValideringsFejl(f"'{opgave.navn}' er undtaget uden begrundelse.")
             if opgave.frist and laes_iso_dato(opgave.frist) is None:
                 raise ValideringsFejl(f"'{opgave.navn}' har en ugyldig frist.")
+        fejl = afhaengighed.find_fejl(sag.opgaver)
+        if fejl:
+            raise ValideringsFejl(" ".join(fejl))
 
     def loennr_optaget(self, loennr: str, undtagen_id: str | None = None) -> bool:
         loennr = (loennr or "").strip()
@@ -62,10 +66,15 @@ class SagService:
 
     ### ----- oprettelse og ændring ------------------------------------------
 
-    def opret(self, sag: Sag, skabelon: dict | None) -> Sag:
+    def forbered_opgaver(self, sag: Sag, data: dict | None = None) -> None:
+        """Kaldes, når opgaverne er oprettet – før validering og gem. Underklasser
+        bruger den til fx betingede opgaver. data = formularens øvrige felter."""
+
+    def opret(self, sag: Sag, skabelon: dict | None, data: dict | None = None) -> Sag:
         if skabelon:
             sag.opgaver = workflow.opret_opgaver(skabelon, sag.startdato())
             sag.skabelon = workflow.skabelon_reference(skabelon)
+        self.forbered_opgaver(sag, data)
         self.valider(sag)
         if self.loennr_optaget(sag.loennr, sag.id):
             raise ValideringsFejl("Der findes allerede en sag med dette lønnr.")
@@ -85,7 +94,18 @@ class SagService:
             workflow.registrer_aendringer(gammel, ny)
         else:
             workflow.registrer_statusskift(gammel.status, ny)
-        return self.repo.gem(ny)
+        try:
+            return self.repo.gem(ny)
+        except KonfliktFejl:
+            # En kollega har gemt sagen imens. Flet mine ændringer ind i den
+            # aktuelle udgave; kun ændringer af det samme giver en reel konflikt.
+            aktuel = self.repo.hent(ny.id)
+            if aktuel is None:
+                raise
+            flettet = workflow.flet(gammel, ny, aktuel)
+            self.valider(flettet)
+            log.info("Samtidig ændring af %s-sag %s flettet", self.proces, ny.id)
+            return self.repo.gem(flettet)
 
     def saet_manuel_status(self, sag: Sag, status: str | None, begrundelse: str) -> Sag:
         ny = sag.kopi()
@@ -133,14 +153,17 @@ class SagService:
         return opgave
 
     def marker_opgave_udfoert(self, sag: Sag, opgave_id: str) -> Sag:
+        return self.saet_opgave_status(sag, opgave_id, Opgave.UDFOERT)
+
+    def saet_opgave_status(self, sag: Sag, opgave_id: str, status: str) -> Sag:
+        """Statusskift fra arbejdsbakken (ikke Undtaget – det kræver en begrundelse)."""
         ny = sag.kopi()
         opgave = self._opgave(ny, opgave_id)
-        if ny.er_laast(opgave):
+        if status != Opgave.IKKE_STARTET and ny.er_blokeret(opgave):
             raise ValideringsFejl(
-                f"'{opgave.navn}' er låst, til milepælen "
-                f"'{ny.milepael_navn(ny.aktiv_milepael())}' er færdig."
+                f"'{opgave.navn}' kan ikke udføres endnu. {ny.blokeringsaarsag(opgave)}."
             )
-        opgave.saet_status(Opgave.UDFOERT)
+        opgave.saet_status(status)
         return self.gem_aendret(sag, ny)
 
     def aendr_frist(self, sag: Sag, opgave_id: str, ny_frist: str) -> Sag:

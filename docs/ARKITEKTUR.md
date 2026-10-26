@@ -39,6 +39,10 @@ Regler:
 | Sagsregler (fælles) | `app/services/sag_service.py`, `app/services/workflow.py` |
 | Onboarding / offboarding | `app/services/onboarding_service.py`, `offboarding_service.py` |
 | Statusberegning og milepæle | `app/domain/onboarding.py`, `offboarding.py`, `sag.py` |
+| Arbejdsspor, afhængigheder, klarhed | `app/domain/arbejdsspor.py`, `afhaengighed.py` |
+| HR's behov (tøj, mobil, mail, bil) | `app/domain/behov.py`, `app/ui/onboarding_dialog.py` |
+| Arbejdsbakker, teamfiltre, nøgletal | `app/services/arbejdsbakke.py`, `app/ui/arbejdsbakke_side.py`, `teamoverblik_side.py` |
+| Samtidige ændringer (fletning) | `app/services/workflow.py` (`flet`), `sag_service.gem_aendret` |
 | Action Center | `app/services/action_center.py` |
 | Påmindelser (Windows) | `app/services/paamindelser.py` |
 | Nøgletal | `app/services/rapport_service.py` |
@@ -57,8 +61,8 @@ Regler:
 
 Onboarding og offboarding er to moduler oven på samme motor:
 
-* `Sag` (domæne): opgaver, milepæle (opgaver låses, til forrige milepæl er
-  færdig), tidslinje, version, manuel status med begrundelse.
+* `Sag` (domæne): opgaver, milepæle (kontrolpunkter, som sagsstatus beregnes
+  ud fra), tidslinje, version, manuel status med begrundelse.
 * Skabeloner (`skabeloner.json`, slags "sager") har `proces`, `stillinger`,
   milepæl pr. opgave og versionering. Opgaver kopieres ind i sagen ved
   oprettelse, så ændrede skabeloner ikke rammer igangværende forløb.
@@ -67,6 +71,58 @@ Onboarding og offboarding er to moduler oven på samme motor:
 * UI'en er også fælles: `SagListeSide`, `ModulOversigtSide`,
   `OpgaveOversigtSide`, `SagDialog` og `SkabelonSide` konfigureres pr. modul i
   `app/ui/moduler.py`.
+
+## Parallelle arbejdsspor (onboarding)
+
+Én medarbejdersag, flere spor, der skrider frem uafhængigt af hinanden.
+
+* En opgave har `noegle`, `spor` (hr, kontrakt, toej, telefon, email, firmabil,
+  oplaering, opstart, opfoelgning), `afdeling` (HR, Administration, Merch),
+  `ansvarlig` (den konkrete bruger), `afhaenger_af` (nøgler), `betingelse`
+  (behov) og `planlagt` (tidspunkt, afslutter aldrig noget).
+* **Blokering**: en opgave er blokeret, så længe en af dens forudsætninger ikke er
+  afsluttet (`Sag.er_blokeret`, `blokeringsaarsag`). Undtaget tæller som afsluttet.
+  Dublerede nøgler, ukendte forudsætninger og cirkler afvises ved gem af skabelon
+  og sag (`afhaengighed.find_fejl`).
+* **Visningsstatus** (Klar, I gang, Afventer, Blokeret, Forsinket, Færdig, Ikke
+  relevant) beregnes – de gemte statusser er uændrede. Samme beregning bruges af
+  Teamoverblik, arbejdsbakker, sagsvinduet, Action Center og rapporter.
+* **Standardskabelonen**: kontrakten (Administration: Afventer = sendt, Udført =
+  retur) låser tøj, telefon, mail, firmabil og lønnr. op; oplæringsvagten (HR)
+  kan aftales når som helst; Merch har opfølgningssamtalen 1 uge efter start.
+* **HR's behov** (`behov.py`): polo/fleece (XS–3XL, antal 1–5), mobil
+  (abonnement), e-mail og firmabil. Mobil med tale og data, mail og firmabil kun
+  for FM, DM og Afløser. Betingede opgaver undtages automatisk ("Ikke relevant –
+  behovet er ikke valgt af HR") og genåbnes, hvis behovet vælges igen. Påbegyndte
+  eller udførte opgaver ændres aldrig lydløst; sagsvinduet viser en advarsel.
+* **Oplæring**: tidspunktet er `planlagt` på opgaven "Oplæringsvagt booket";
+  bookingen er opgavens status (Ikke startet / Afventer bekræftelse / Udført).
+* **Klarhed til opstart** (`klarhed`): Klar til opstart, På plan, Opstart i
+  risiko, Opstart blokeret, Afsluttet. Kun advarsler – processen stoppes aldrig.
+  Grænsen er "Nærmer sig (dage)" under Indstillinger. Opgaver med frist efter
+  første arbejdsdag (fx opfølgningen) tæller ikke med.
+* En onboarding er først afsluttet, når status er Aktiv OG alle obligatoriske
+  opgaver er lukket.
+
+## Afdelinger (roller)
+
+* `user_profiles.roles` (migrering 014): en bruger kan være i flere afdelinger.
+  Kun administratorer sætter dem (`inbase_set_roles`, Indstillinger → Brugere →
+  Afdelinger). De styrer "Min afdeling" i arbejdsbakken og Teamoverblikket.
+* Bevidst forretningsregel: alle medlemmer må behandle alle sager (lille
+  virksomhed). Afdelinger er derfor ikke en adgangslås. Administrator (kolonnen
+  `role`) beskytter fortsat brugeradministration, data & sikkerhed og sletning.
+
+## Samtidige ændringer
+
+* Databasen afviser stadig en forældet version (`IB409`). `SagService.gem_aendret`
+  henter så den aktuelle sag og fletter mine ændringer ind felt for felt og
+  opgave for opgave (`workflow.flet`). Mine nye tidslinjehændelser lægges oven på
+  den aktuelle tidslinje (hash-kæden bevares).
+* Kun når begge har ændret samme felt forskelligt, gives en `KonfliktFejl` med
+  felterne – intet overskrives lydløst.
+* Menuen viser forbindelsen: Online (med seneste opdatering), Forbinder,
+  Forbindelse mistet. Der er ingen offline-tilstand mod Supabase.
 
 ## Login, session og adgang
 
@@ -175,6 +231,11 @@ uden server. Drift: [MDM_OPSAETNING.md](MDM_OPSAETNING.md).
 
 ## Kendte begrænsninger
 
+* Ved en reel konflikt (samme felt ændret af to) er sagsvinduet allerede lukket;
+  brugeren skal gentage sine ændringer i den genindlæste sag.
+* Ved en ny, tom database kan almindelige brugere ikke gemme Organisation, før en
+  administrator har gemt indstillingerne én gang (repositoriet sender også
+  standardværdier for backup-nøgler, som kun administratorer må skrive).
 * Ingen offline i Supabase-tilstand: uden forbindelse vises en fejl.
 * Domænet bruger lokal tid uden tidszone; den konverteres til/fra timestamptz
   i `mapping.py` (forudsætter samme tidszone på pc'erne).

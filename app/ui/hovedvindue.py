@@ -37,6 +37,7 @@ from app.repositories.fejl import DataFejl, SessionUdloebetFejl
 from app.services import action_center
 from app.ui import fejl as ui_fejl
 from app.ui.action_liste import ANSVARLIG
+from app.ui.arbejdsbakke_side import ArbejdsbakkeSide
 from app.ui.dashboard_side import DashboardSide
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_app_ikon, lav_knap, lav_sidehoved
@@ -50,8 +51,9 @@ from app.ui.moduler import offboarding_modul, onboarding_modul
 from app.ui.notifikationer import Notifikationer
 from app.ui.opgave_oversigt_side import OpgaveOversigtSide
 from app.ui.sag_liste_side import SagListeSide
-from app.ui.sidebar import Sidebar
+from app.ui.sidebar import FORBINDER, MISTET, ONLINE, Sidebar
 from app.ui.skabelon_side import SkabelonSide
+from app.ui.teamoverblik_side import TeamoverblikSide
 from app.ui.theme import anvend_tema
 
 log = logging.getLogger(__name__)
@@ -64,8 +66,9 @@ LAAS = "  🔒"
 # Ønsker & Udvikling er et selvstændigt punkt (ikke under medarbejderne).
 # Alle menupunkter ses af alle; moduler uden adgang vises med 🔒 (app/domain/adgang.py).
 STRUKTUR = [
-    (None, [("dashboard", "Dashboard")]),
+    (None, [("dashboard", "Dashboard"), ("arbejdsbakke", "Arbejdsbakke")]),
     ("Onboarding - MERCH", [
+        ("on_team", "Teamoverblik"),
         ("on_oversigt", "Oversigt"),
         ("on_aktive", "Aktive forløb"),
         ("on_opgaver", "Opgaver og milepæle"),
@@ -168,6 +171,12 @@ class MainWindow(QMainWindow):
         self.dashboard = DashboardSide(self.t.rapporter)
         self._forbind_action(self.dashboard.action, self.dashboard.dag)
         self._tilfoej("dashboard", self.dashboard)
+        self.arbejdsbakke = ArbejdsbakkeSide()
+        self._forbind_action(self.arbejdsbakke)
+        self._tilfoej("arbejdsbakke", self.arbejdsbakke)
+        self.teamoverblik = TeamoverblikSide()
+        self.teamoverblik.aabn_sag.connect(self.aabn_sag)
+        self._tilfoej("on_team", self.teamoverblik)
         self._opbyg_onboarding()
         self._opbyg_offboarding()
         self.oensker = IndmeldingSide(self.t.indmeldinger, self._aktive_brugernavne)
@@ -317,7 +326,9 @@ class MainWindow(QMainWindow):
         return (self.t.onboarding.signatur(), self.t.offboarding.signatur(),
                 self.t.lagring.offline)
 
-    def _laes_data(self) -> bool:
+    def _laes_data(self, stille=False) -> bool:
+        """Henter sagerne. stille=True (minut-tjekket): ingen fejlboks ved mistet
+        forbindelse – kun indikatoren i menuen."""
         try:
             for proces, service in ((ON, self.t.onboarding), (OFF, self.t.offboarding)):
                 # Moduler uden adgang hentes ikke (vises heller ikke på dashboardet).
@@ -330,12 +341,40 @@ class MainWindow(QMainWindow):
             return False
         except DataFejl as fejl:
             log.exception("Data kunne ikke indlæses")
-            QMessageBox.critical(self, "Datafejl", str(fejl))
+            self._saet_forbindelse(MISTET)
+            if not stille:
+                QMessageBox.critical(self, "Datafejl", str(fejl))
             return False
+
+    def _saet_forbindelse(self, tilstand):
+        """Kun relevant uden for JSON-offline-tilstanden (som har sin egen visning)."""
+        if self.t.lagring.offline:
+            return
+        if tilstand == ONLINE:
+            self._sidst_ok = QTime.currentTime().toString("HH:mm")
+        self.sidebar.saet_forbindelse(tilstand, getattr(self, "_sidst_ok", ""))
+
+    def _signatur_sikker(self):
+        """Signaturen, eller None hvis forbindelsen er væk (vises i menuen)."""
+        try:
+            return self._signatur_nu()
+        except SessionUdloebetFejl:
+            raise
+        except DataFejl:
+            log.warning("Ingen forbindelse ved minut-tjekket", exc_info=True)
+            return None
 
     def opdater_alle(self, tving=True):
         """Genindlæser data (altid, eller kun hvis filerne er ændret) og opdaterer siderne."""
-        if (tving or self._signatur_nu() != self._signatur) and not self._laes_data():
+        genindlaes = tving
+        if not tving:
+            signatur = self._signatur_sikker()
+            if signatur is None:
+                self._saet_forbindelse(MISTET)
+                return
+            genindlaes = signatur != self._signatur
+        # Siderne opdateres også uden nye data (frister og alarmer følger datoen).
+        if genindlaes and not self._laes_data(stille=not tving):
             return
         indstillinger = udfoer(self, self.t.indstillinger.hent)
         regler = action_center.Regler.fra_indstillinger(
@@ -347,6 +386,8 @@ class MainWindow(QMainWindow):
 
         self.dashboard.opdater({ON: self.data[ON][0] + self.data[ON][1],
                                 OFF: self.data[OFF][0] + self.data[OFF][1]}, alarmer, dagens)
+        self.arbejdsbakke.opdater(aktive)
+        self.teamoverblik.opdater(self.data[ON][0], regler.naermer_sig_dage)
         for proces, prefix in ((ON, "on"), (OFF, "off")):
             aktive_sager, arkiv = self.data[proces]
             self.sider[f"{prefix}_oversigt"].opdater(
@@ -362,6 +403,7 @@ class MainWindow(QMainWindow):
         self.sidebar.saet_lagring(self.t.lagring.offline,
                                   len(self.t.lagring.ventende_aendringer()),
                                   self.t.lagring.kilde)
+        self._saet_forbindelse(ONLINE)
         self.sidebar.opdateret_label.setText(
             f"Sidst opdateret {QTime.currentTime().toString('HH:mm')}")
 
@@ -442,6 +484,7 @@ class MainWindow(QMainWindow):
         self.sidebar.saet_bruger(bruger)
         self.anvend_rolle()
         self.vis_side("dashboard")
+        self._saet_forbindelse(FORBINDER)
         self.opdater_alle()
         self._vis_paamindelser()
 
@@ -492,6 +535,8 @@ class MainWindow(QMainWindow):
         for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
                 + [self.oensker, self.telefoner, self.telefoner_arkiv]:
             side.ryd()
+        self.arbejdsbakke.opdater([])
+        self.teamoverblik.opdater([])
 
     def _session_udloebet(self, fejl):
         """Sessionen er udløbet, eller adgangen er lukket: log ud på en kontrolleret måde.

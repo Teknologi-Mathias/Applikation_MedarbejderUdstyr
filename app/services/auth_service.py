@@ -66,6 +66,13 @@ def valider_brugernavn(tekst) -> str:
     return brugernavn
 
 
+def _afdelinger(afdelinger) -> list[str]:
+    try:
+        return adgang.normaliser_afdelinger(afdelinger)
+    except ValueError as fejl:
+        raise ValideringsFejl(str(fejl)) from fejl
+
+
 def _samme(a, b) -> bool:
     return normaliser_brugernavn(a) == normaliser_brugernavn(b)
 
@@ -232,6 +239,11 @@ class AuthService:
         self._hent(brugere, brugernavn)["moduler"] = adgang.normaliser(moduler)
         self.repo.gem_alle(brugere)
 
+    def saet_afdelinger(self, brugernavn: str, afdelinger) -> None:
+        brugere = self._alle()
+        self._hent(brugere, brugernavn)["roller"] = _afdelinger(afdelinger)
+        self.repo.gem_alle(brugere)
+
 
 ### ===== Supabase Auth ======================================================
 
@@ -392,6 +404,14 @@ class SupabaseAuthService:
         self.repo.saet_moduler(profil["id"], adgang.normaliser(moduler))
         log.info("Bruger %s har nu adgang til: %s", profil["brugernavn"],
                  ", ".join(adgang.normaliser(moduler)) or "ingen moduler")
+
+    def saet_afdelinger(self, brugernavn: str, afdelinger) -> None:
+        """Afdelinger (roller) via RPC'en fra migrering 014 (kun administratorer)."""
+        profil = self._profil_for(brugernavn)
+        valgte = _afdelinger(afdelinger)
+        self.repo.saet_afdelinger(profil["id"], valgte)
+        log.info("Bruger %s er nu i afdelingerne: %s", profil["brugernavn"],
+                 ", ".join(valgte) or "ingen")
 
     def slet(self, brugernavn: str, aktuel_brugernavn: str) -> None:
         profil = self._profil_for(brugernavn)

@@ -89,7 +89,7 @@ class OpgaveOversigtSide(QWidget):
         raekker = []
         for sag in self._sager:
             for o in sag.opgaver:
-                laast = sag.er_laast(o)
+                laast = sag.er_blokeret(o)
                 if o.afsluttet or (laast and not self.vis_laaste.isChecked()):
                     continue
                 if self.kun_mine.isChecked() and o.ansvarlig.lower() != mig:

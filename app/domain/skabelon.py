@@ -17,9 +17,13 @@ Format (Data/skabeloner.json):
     }
 
 En opgave i en arbejdsgangsskabelon: {"navn", "beskrivelse", "ansvarlig",
-"udstyr", "milepael", "frist_dage", "obligatorisk"}. frist_dage regnes fra
-sagens startdato (offboarding: sidste arbejdsdag, onboarding: ansættelsesdato).
-Milepælen styrer, hvornår opgaven aktiveres (efter de tidligere milepæle).
+"udstyr", "milepael", "frist_dage", "obligatorisk", "noegle", "spor",
+"afdeling", "afhaenger_af", "betingelse"}. frist_dage regnes fra sagens
+startdato (offboarding: sidste arbejdsdag, onboarding: ansættelsesdato).
+Opgaverne er parallelle: en opgave kan udføres, når opgaverne i
+"afhaenger_af" (nøgler) er afsluttet. "betingelse" er et behov (fx
+"firmabil"), som skal være valgt, for at opgaven er relevant. Milepælen er et
+kontrolpunkt, som sagsstatus beregnes ud fra.
 
 Tekster kan indeholde variabler som {navn} og {frist}. De flettes med flet(),
 som afviser beskeden, hvis en variabel er ukendt eller mangler en værdi.
@@ -78,23 +82,49 @@ REGLER = {
     "sag_stillestaaende": ("En sag har ikke bevæget sig i X dage", True),
 }
 
+def _ob(noegle, navn, spor, afdeling, frist_dage, afhaenger_af=(), milepael="",
+        betingelse="", beskrivelse="", udstyr="", obligatorisk=True):
+    return {"noegle": noegle, "navn": navn, "spor": spor, "afdeling": afdeling,
+            "frist_dage": frist_dage, "afhaenger_af": list(afhaenger_af),
+            "milepael": milepael, "betingelse": betingelse, "beskrivelse": beskrivelse,
+            "udstyr": udstyr, "obligatorisk": obligatorisk}
+
+
+# Parallelle spor: kontrakten låser udstyr, mail og bil op; oplæringsvagten kan
+# aftales når som helst (også ved ansættelsen, før kontrakten). Betingede opgaver er kun relevante, når HR
+# har valgt behovet (ellers markeres de automatisk som ikke relevante).
 _ONBOARDING_BASIS = [
-    {"navn": "Kandidat godkendt", "ansvarlig": "HR", "milepael": "kandidat",
-     "frist_dage": -14, "obligatorisk": True},
-    {"navn": "Kontrakt sendt", "ansvarlig": "HR", "milepael": "kontrakt",
-     "frist_dage": -10, "obligatorisk": True},
-    {"navn": "Kontrakt underskrevet og bekræftet", "ansvarlig": "HR",
-     "milepael": "kontrakt", "frist_dage": -3, "obligatorisk": True},
-    {"navn": "Lønnr. tildelt", "ansvarlig": "Løn", "milepael": "kontrakt",
-     "frist_dage": -1, "obligatorisk": True},
-    {"navn": "Første oplæring planlagt", "ansvarlig": "Butik", "milepael": "oplaering",
-     "frist_dage": 0, "obligatorisk": True},
-    {"navn": "Første oplæring gennemført", "ansvarlig": "Butik", "milepael": "oplaering",
-     "frist_dage": 7, "obligatorisk": True},
-    {"navn": "Oprettet i medarbejderappen", "ansvarlig": "Butik", "milepael": "jobs",
-     "frist_dage": 7, "obligatorisk": True},
-    {"navn": "Første job tildelt", "ansvarlig": "Butik", "milepael": "jobs",
-     "frist_dage": 14, "obligatorisk": True},
+    _ob("kandidat_godkendt", "Kandidat godkendt", "hr", "HR", -14, milepael="kandidat"),
+    _ob("behov_registreret", "Behov registreret (tøj, mobil, mail, bil)", "hr", "HR", -14,
+        milepael="kandidat",
+        beskrivelse="HR tager stilling til udstyr og behov i forløbets behovsregistrering."),
+    _ob("kontrakt", "Kontrakt sendt og modtaget retur", "kontrakt", "Administration", -7,
+        ("kandidat_godkendt",), milepael="kontrakt",
+        beskrivelse="Afventer = sendt til medarbejderen. Udført = modtaget retur underskrevet."),
+    _ob("loennr", "Lønnr. tildelt", "kontrakt", "Administration", -3, ("kontrakt",),
+        milepael="kontrakt"),
+    _ob("polo", "Polo sendt", "toej", "Administration", -3, ("kontrakt",),
+        milepael="jobs", betingelse="polo", udstyr="Polo"),
+    _ob("fleece", "Fleece sendt", "toej", "Administration", -3, ("kontrakt",),
+        milepael="jobs", betingelse="fleece", udstyr="Fleece"),
+    _ob("telefon", "Telefon og SIM-kort klargjort og sendt", "telefon", "Administration", -3,
+        ("kontrakt",), milepael="jobs", betingelse="mobil", udstyr="Telefon og SIM-kort"),
+    _ob("email", "E-mailkonto oprettet", "email", "Administration", -2, ("kontrakt",),
+        milepael="jobs", betingelse="email"),
+    _ob("firmabil", "Firmabil klar", "firmabil", "Administration", 0, ("kontrakt",),
+        milepael="jobs", betingelse="firmabil", udstyr="Firmabil"),
+    _ob("oplaering_booket", "Oplæringsvagt booket", "oplaering", "HR", -2,
+        milepael="oplaering",
+        beskrivelse="Tidspunktet registreres som planlagt tidspunkt. Afventer = afventer "
+                    "bekræftelse fra oplæringsansvarlig. Udført = booket og bekræftet."),
+    _ob("oplaering_gennemfoert", "Første oplæring gennemført", "oplaering", "HR", 7,
+        ("oplaering_booket", "kontrakt"), milepael="oplaering"),
+    _ob("medarbejderapp", "Oprettet i medarbejderappen", "opstart", "Administration", 0,
+        ("kontrakt",), milepael="jobs"),
+    _ob("foerste_job", "Første job tildelt", "opstart", "", 14,
+        ("oplaering_gennemfoert",), milepael="jobs"),
+    _ob("opfoelgning", "Opfølgningssamtale (1 uge efter start)", "opfoelgning", "Merch", 7,
+        ("kontrakt",)),
 ]
 
 _STANDARD = {
@@ -117,20 +147,20 @@ _STANDARD = {
         },
         {"navn": "Tom sag (tilføj opgaver selv)", "proces": "offboarding", "opgaver": []},
         {
-            "navn": "Onboarding – standard",
+            "navn": "Onboarding – arbejdsspor",
             "proces": "onboarding",
             "beskrivelse": "Ad Hoc og Afløsere",
             "stillinger": ["Ad Hoc", "Afløser"],
             "opgaver": _ONBOARDING_BASIS,
         },
         {
-            "navn": "Onboarding – FM/DM",
+            "navn": "Onboarding – arbejdsspor FM/DM",
             "proces": "onboarding",
             "beskrivelse": "Ledere: ekstra introduktion",
             "stillinger": ["FM", "DM"],
             "opgaver": _ONBOARDING_BASIS + [
-                {"navn": "Introduktion til ledelsesopgaver", "ansvarlig": "Områdeleder",
-                 "milepael": "oplaering", "frist_dage": 14, "obligatorisk": True},
+                _ob("ledelsesintro", "Introduktion til ledelsesopgaver", "oplaering", "HR", 14,
+                    ("kontrakt",), milepael="oplaering"),
             ],
         },
     ],
@@ -219,6 +249,10 @@ def klargoer(skabelon, slags):
                 post.setdefault("milepael", "")
                 post.setdefault("frist_dage", 0)
                 post.setdefault("obligatorisk", True)
+                for felt in ("noegle", "spor", "afdeling", "betingelse"):
+                    post[felt] = str(post.get(felt) or "").strip()
+                post["afhaenger_af"] = [str(n).strip() for n in post.get("afhaenger_af") or ()
+                                        if str(n).strip()]
                 opgaver.append(post)
         s["opgaver"] = opgaver
     elif slags == MAIL:

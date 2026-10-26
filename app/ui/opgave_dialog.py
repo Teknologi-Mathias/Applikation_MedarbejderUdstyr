@@ -1,9 +1,10 @@
 """Dialog til at oprette eller redigere én opgave i en sag."""
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QDateTime, Qt, QTime
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDateEdit,
+    QDateTimeEdit,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.domain import arbejdsspor as sp
 from app.domain.opgave import Opgave
 from app.ui.hjaelpere import laes_dato, lav_knap
 
@@ -20,8 +22,10 @@ from app.ui.hjaelpere import laes_dato, lav_knap
 class OpgaveDialog(QDialog):
     """Ændrer opgaven direkte ved Gem. Efter exec(): tjek self.slettet."""
 
-    def __init__(self, parent, opgave=None, ansvarlige=(), standard_frist="", milepaele=()):
-        """milepaele: sagens ((nøgle, navn), ...) – tom for offboarding."""
+    def __init__(self, parent, opgave=None, ansvarlige=(), standard_frist="", milepaele=(),
+                 blokeret_aarsag=""):
+        """milepaele: sagens ((nøgle, navn), ...) – tom for offboarding.
+        blokeret_aarsag: opgaven venter på en forudsætning og kan kun undtages."""
         super().__init__(parent)
         self.ny = opgave is None
         self.opgave = opgave or Opgave("", frist=standard_frist)
@@ -55,9 +59,39 @@ class OpgaveDialog(QDialog):
         frist = laes_dato(self.opgave.frist)
         self.frist_input.setDate(frist if frist.isValid() else QDate.currentDate())
 
+        self.afdeling_input = QComboBox()
+        self.afdeling_input.addItem("Ingen afdeling", "")
+        for afdeling in sp.AFDELINGER:
+            self.afdeling_input.addItem(afdeling, afdeling)
+        self.afdeling_input.setCurrentIndex(
+            max(self.afdeling_input.findData(self.opgave.afdeling), 0))
+        self.spor_input = QComboBox()
+        for noegle, navn in sp.SPOR:
+            self.spor_input.addItem(navn, noegle)
+        self.spor_input.setCurrentIndex(max(self.spor_input.findData(sp.spor_for(self.opgave)), 0))
+
+        self.planlagt_valgt = QCheckBox("Planlagt tidspunkt")
+        self.planlagt_input = QDateTimeEdit()
+        self.planlagt_input.setCalendarPopup(True)
+        self.planlagt_input.setDisplayFormat("dd-MM-yyyy HH:mm")
+        planlagt = QDateTime.fromString(self.opgave.planlagt[:16], "yyyy-MM-ddTHH:mm")
+        self.planlagt_valgt.setChecked(planlagt.isValid())
+        self.planlagt_input.setDateTime(planlagt if planlagt.isValid() else
+                                        QDateTime(QDate.currentDate(), QTime(8, 0)))
+        self.planlagt_input.setEnabled(planlagt.isValid())
+        self.planlagt_valgt.toggled.connect(self.planlagt_input.setEnabled)
+
         self.status_input = QComboBox()
-        self.status_input.addItems(Opgave.STATUSER)
+        # En blokeret opgave kan ikke påbegyndes – kun undtages (med begrundelse).
+        self.status_input.addItems([s for s in Opgave.STATUSER
+                                    if not blokeret_aarsag
+                                    or s in (Opgave.IKKE_STARTET, Opgave.UNDTAGET)
+                                    or s == self.opgave.status])
         self.status_input.setCurrentText(self.opgave.status)
+        self.blokeret_label = QLabel(blokeret_aarsag)
+        self.blokeret_label.setObjectName("advarsel")
+        self.blokeret_label.setWordWrap(True)
+        self.blokeret_label.setVisible(bool(blokeret_aarsag))
 
         self.obligatorisk_input = QCheckBox("Skal være afsluttet, før sagen er afviklet")
         self.obligatorisk_input.setChecked(self.opgave.obligatorisk)
@@ -78,8 +112,11 @@ class OpgaveDialog(QDialog):
             form.addRow("Milepæl", self.milepael_input)
         else:
             form.addRow("Udstyr", self.udstyr_input)
+        form.addRow("Spor", self.spor_input)
+        form.addRow("Afdeling", self.afdeling_input)
         form.addRow("Ansvarlig", self.ansvarlig_input)
         form.addRow("Frist", self.frist_input)
+        form.addRow(self.planlagt_valgt, self.planlagt_input)
         form.addRow("Status", self.status_input)
         form.addRow("", self.obligatorisk_input)
         form.addRow("Begrundelse", self.begrundelse_input)
@@ -111,6 +148,7 @@ class OpgaveDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(14)
+        layout.addWidget(self.blokeret_label)
         layout.addLayout(form)
         layout.addWidget(self.fejl_label)
         layout.addLayout(bund)
@@ -141,6 +179,11 @@ class OpgaveDialog(QDialog):
         else:
             self.opgave.udstyr = self.udstyr_input.text().strip()
         self.opgave.ansvarlig = self.ansvarlig_input.currentText().strip()
+        self.opgave.afdeling = self.afdeling_input.currentData() or ""
+        spor = self.spor_input.currentData()
+        self.opgave.spor = "" if spor == sp.OEVRIGT else spor
+        self.opgave.planlagt = (self.planlagt_input.dateTime().toString("yyyy-MM-ddTHH:mm:00")
+                                if self.planlagt_valgt.isChecked() else "")
         self.opgave.frist = self.frist_input.date().toString("yyyy-MM-dd")
         self.opgave.saet_status(status)
         self.opgave.obligatorisk = self.obligatorisk_input.isChecked()

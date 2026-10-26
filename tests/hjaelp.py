@@ -41,9 +41,9 @@ class TjenesteTest(unittest.TestCase):
                     if x["navn"] == skabelon)
         return s.opret(sag, skab)
 
-    def ny_onboarding(self, navn="Ole Hansen", stilling="FM", dage=7):
+    def ny_onboarding(self, navn="Ole Hansen", stilling="FM", dage=7, behov=None, **data):
         s = self.t.onboarding
         sag = s.ny_sag({"navn": navn, "stilling": stilling, "omraade": "Område Nord",
-                        "ansaettelsesdato": dato(dage), "ansvarlig": "tester"})
+                        "ansaettelsesdato": dato(dage), "ansvarlig": "tester", "behov": behov})
         skab = self.t.skabeloner.sagsskabeloner("onboarding", stilling)[0]
-        return s.opret(sag, skab)
+        return s.opret(sag, skab, data)

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from app import session
 from app.domain import skabelon as sk
+from app.domain.opgave import Opgave
 from app.ui import action_liste as al
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import laes_dato, vis_dato
@@ -135,6 +136,9 @@ class ModulController:
             return
         if handling == al.UDFOERT:
             self._udfoer(self.service.marker_opgave_udfoert, sag, opgave_id)
+        elif handling in (al.I_GANG, al.AFVENTER):
+            status = Opgave.I_GANG if handling == al.I_GANG else Opgave.AFVENTER
+            self._udfoer(self.service.saet_opgave_status, sag, opgave_id, status)
         elif handling == al.FRIST:
             opgave = sag.find_opgave(opgave_id)
             ny = _vaelg_dato(self.vindue, f"Ny frist: {opgave.navn if opgave else ''}",
@@ -230,7 +234,7 @@ class OnboardingController(ModulController):
         if not dialog.exec():
             return
         data = dialog.hent_data()
-        sag = self._udfoer(self.service.opret, self.service.ny_sag(data), data["skabelon"])
+        sag = self._udfoer(self.service.opret, self.service.ny_sag(data), data["skabelon"], data)
         if sag is not FEJL:
             self.aabn_sag(sag.id)
 

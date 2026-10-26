@@ -8,6 +8,7 @@ egne kopier af opgaverne – så ændringer rammer kun nye forløb.
 import copy
 import logging
 
+from app.domain import afhaengighed
 from app.domain import skabelon as sk
 from app.domain.historik import nu, nuvaerende_bruger
 from app.repositories.base import SkabelonRepository
@@ -40,6 +41,10 @@ class SkabelonService:
     def gem(self, slags: str, skabelon: dict) -> dict:
         if not (skabelon.get("navn") or "").strip():
             raise ValideringsFejl("Skabelonen skal have et navn.")
+        if slags == sk.SAG:
+            fejl = afhaengighed.find_fejl(skabelon.get("opgaver") or [])
+            if fejl:
+                raise ValideringsFejl(" ".join(fejl))
         alle = self.hent_alle()
         liste = alle[slags]
         ny = copy.deepcopy(skabelon)

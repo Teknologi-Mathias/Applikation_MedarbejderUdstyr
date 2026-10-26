@@ -23,7 +23,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.domain import afhaengighed
+from app.domain import arbejdsspor as sp
 from app.domain import skabelon as sk
+from app.domain.behov import BETINGELSER
 from app.domain.onboarding import OnboardingForloeb
 from app.ui.hjaelpere import lav_knap, lav_kort
 
@@ -375,11 +378,32 @@ class PaamindelseDialog(QDialog):
 
 ### ----- sager (udstyr ved oprettelse) --------------------------------------
 
+# Kolonner i skabelonens opgavetabel: (felt, overskrift, slags, bredde).
+# Onboarding har arbejdsspor (nøgle, spor, afdeling, forudsætninger, betingelse);
+# offboarding har udstyr. Felter uden kolonne bevares uændret ved gem.
+_ONBOARDING_KOLONNER = (
+    ("navn", "Opgave", "tekst", 210), ("noegle", "Nøgle", "tekst", 120),
+    ("spor", "Spor", "spor", 110), ("afdeling", "Afdeling", "afdeling", 120),
+    ("afhaenger_af", "Afhænger af (nøgler)", "liste", 170),
+    ("betingelse", "Betingelse", "betingelse", 140), ("milepael", "Milepæl", "milepael", 140),
+    ("frist_dage", "Frist (dage)", "tekst", 80), ("beskrivelse", "Beskrivelse", "tekst", 200),
+    ("obligatorisk", "Obligatorisk", "flueben", 0),
+)
+_OFFBOARDING_KOLONNER = (
+    ("navn", "Opgave", "tekst", 230), ("beskrivelse", "Beskrivelse", "tekst", 220),
+    ("udstyr", "Udstyr (tom = intern)", "tekst", 170), ("ansvarlig", "Ansvarlig", "tekst", 130),
+    ("frist_dage", "Frist (dage)", "tekst", 90), ("obligatorisk", "Obligatorisk", "flueben", 0),
+)
+POST_ROLE = Qt.ItemDataRole.UserRole + 10
+
+
 class SagSkabelonDialog(QDialog):
     """Arbejdsgangsskabelon (onboarding eller offboarding).
 
-    Offboarding: kolonnen Udstyr. Onboarding: kolonnen Milepæl og valg af
-    stillinger. Gemmes som en ny version (se SkabelonService).
+    Offboarding: kolonnen Udstyr. Onboarding: arbejdsspor – nøgle, spor,
+    afdeling, forudsætninger (andre opgavers nøgler), betingelse (HR's behov) og
+    milepæl – samt valg af stillinger. Gemmes som en ny version (se SkabelonService),
+    som afviser cirkulære og ukendte forudsætninger.
     """
 
     def __init__(self, parent, skabelon):
@@ -387,13 +411,10 @@ class SagSkabelonDialog(QDialog):
         self.skabelon = dict(skabelon)
         self.onboarding = self.skabelon.get("proces") == OnboardingForloeb.PROCES
         self.milepaele = OnboardingForloeb.MILEPAELE if self.onboarding else ()
-        self.kolonner = (
-            "Opgave", "Beskrivelse", "Milepæl" if self.onboarding else "Udstyr (tom = intern)",
-            "Ansvarlig", "Frist (dage)", "Obligatorisk",
-        )
+        self.felter = _ONBOARDING_KOLONNER if self.onboarding else _OFFBOARDING_KOLONNER
         proces_navn = "onboarding" if self.onboarding else "offboarding"
         self.setWindowTitle(f"Skabelon – {proces_navn}")
-        self.setMinimumSize(1000, 600)
+        self.setMinimumSize(1100 if self.onboarding else 1000, 600)
 
         self.navn_input = QLineEdit(self.skabelon["navn"])
         self.beskrivelse_input = QLineEdit(self.skabelon.get("beskrivelse", ""))
@@ -419,8 +440,11 @@ class SagSkabelonDialog(QDialog):
         forklaring = QLabel(
             f"Version {version}. Ændringer gemmes som version {version + 1} og påvirker kun "
             "nye forløb – igangværende sager beholder deres egne opgaver. "
-            + ("Frist (dage) regnes fra ansættelsesdatoen. Milepælen styrer, hvornår "
-               "opgaven bliver aktiv. Ingen stillinger valgt = alle stillinger."
+            + ("Frist (dage) regnes fra ansættelsesdatoen. Opgaverne kører parallelt: en "
+               "opgave kan udføres, når opgaverne under 'Afhænger af' (nøgler, adskilt med "
+               "komma) er afsluttet. En betingelse gør opgaven relevant, når HR har valgt "
+               "behovet. Milepælen er et kontrolpunkt for sagens status. Ingen stillinger "
+               "valgt = alle stillinger."
                if self.onboarding else
                "Frist (dage) regnes fra sidste arbejdsdag – 0 = samme dag, negativ = før. "
                "Udfyld Udstyr for ting, medarbejderen skal returnere; de nævnes i rykkere.")
@@ -428,13 +452,14 @@ class SagSkabelonDialog(QDialog):
         forklaring.setObjectName("hjaelpTekst")
         forklaring.setWordWrap(True)
 
-        self.tabel = QTableWidget(0, len(self.kolonner))
-        self.tabel.setHorizontalHeaderLabels(self.kolonner)
+        self.tabel = QTableWidget(0, len(self.felter))
+        self.tabel.setHorizontalHeaderLabels([titel for _, titel, _, _ in self.felter])
         self.tabel.verticalHeader().setVisible(False)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.horizontalHeader().setStretchLastSection(True)
-        for kolonne, bredde in enumerate((230, 220, 170, 130, 90)):
-            self.tabel.setColumnWidth(kolonne, bredde)
+        for kolonne, (_, _, _, bredde) in enumerate(self.felter):
+            if bredde:
+                self.tabel.setColumnWidth(kolonne, bredde)
         for post in self.skabelon["opgaver"]:
             self._tilfoej_raekke(post)
 
@@ -463,52 +488,59 @@ class SagSkabelonDialog(QDialog):
         layout.addWidget(self.fejl_label)
         layout.addWidget(_gem_annuller(self))
 
-    def _milepael_felt(self, valgt):
-        felt = QComboBox()
-        felt.addItem("Ingen", "")
-        for noegle, navn in self.milepaele:
-            felt.addItem(navn, noegle)
-        felt.setCurrentIndex(max(felt.findData(valgt), 0))
-        return felt
+    def _valg(self, slags):
+        """[(værdi, tekst)] til en valgliste."""
+        if slags == "spor":
+            return [("", "Øvrigt")] + [(n, t) for n, t in sp.SPOR if n != sp.OEVRIGT]
+        if slags == "afdeling":
+            return [("", "Ingen")] + [(a, a) for a in sp.AFDELINGER]
+        if slags == "betingelse":
+            return [("", "Altid")] + list(BETINGELSER.items())
+        return [("", "Ingen")] + list(self.milepaele)
 
     def _tilfoej_raekke(self, post, fokus=False, raekke=None):
         raekke = self.tabel.rowCount() if raekke is None else raekke
         self.tabel.insertRow(raekke)
-        tredje = "" if self.onboarding else post.get("udstyr", "")
-        vaerdier = (post.get("navn", ""), post.get("beskrivelse", ""), tredje,
-                    post.get("ansvarlig", ""), post.get("frist_dage", 0))
-        for kolonne, vaerdi in enumerate(vaerdier):
-            self.tabel.setItem(raekke, kolonne, QTableWidgetItem(str(vaerdi)))
-        if self.onboarding:
-            self.tabel.setCellWidget(raekke, 2, self._milepael_felt(post.get("milepael", "")))
-        obligatorisk = QTableWidgetItem()
-        obligatorisk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled
+        for kolonne, (felt, _, slags, _) in enumerate(self.felter):
+            vaerdi = post.get(felt, 0 if felt == "frist_dage" else "")
+            if slags == "flueben":
+                item = QTableWidgetItem()
+                item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled
                               | Qt.ItemFlag.ItemIsSelectable)
-        obligatorisk.setCheckState(
-            Qt.CheckState.Checked if post.get("obligatorisk", True) else Qt.CheckState.Unchecked
-        )
-        self.tabel.setItem(raekke, 5, obligatorisk)
+                item.setCheckState(Qt.CheckState.Checked if post.get("obligatorisk", True)
+                                   else Qt.CheckState.Unchecked)
+                self.tabel.setItem(raekke, kolonne, item)
+            elif slags in ("spor", "afdeling", "betingelse", "milepael"):
+                valg = QComboBox()
+                for data, tekst in self._valg(slags):
+                    valg.addItem(tekst, data)
+                valg.setCurrentIndex(max(valg.findData(vaerdi or ""), 0))
+                self.tabel.setCellWidget(raekke, kolonne, valg)
+            else:
+                tekst = ", ".join(vaerdi) if slags == "liste" else str(vaerdi)
+                self.tabel.setItem(raekke, kolonne, QTableWidgetItem(tekst))
+        # Hele den oprindelige post gemmes, så felter uden kolonne ikke går tabt.
+        self.tabel.item(raekke, 0).setData(POST_ROLE, dict(post))
         if fokus:
             self.tabel.setCurrentCell(raekke, 0)
             self.tabel.editItem(self.tabel.item(raekke, 0))
 
     def _raekke_data(self, raekke):
-        def tekst(k):
-            item = self.tabel.item(raekke, k)
-            return item.text().strip() if item else ""
-
-        post = {
-            "navn": tekst(0),
-            "beskrivelse": tekst(1),
-            "ansvarlig": tekst(3),
-            "frist_dage": tekst(4),
-            "obligatorisk": self.tabel.item(raekke, 5).checkState() == Qt.CheckState.Checked,
-        }
+        post = dict(self.tabel.item(raekke, 0).data(POST_ROLE) or {})
+        for kolonne, (felt, _, slags, _) in enumerate(self.felter):
+            item = self.tabel.item(raekke, kolonne)
+            if slags == "flueben":
+                post[felt] = item.checkState() == Qt.CheckState.Checked
+            elif slags in ("spor", "afdeling", "betingelse", "milepael"):
+                post[felt] = self.tabel.cellWidget(raekke, kolonne).currentData() or ""
+            elif slags == "liste":
+                tekst = item.text() if item else ""
+                post[felt] = [n.strip() for n in tekst.split(",") if n.strip()]
+            else:
+                post[felt] = item.text().strip() if item else ""
         if self.onboarding:
-            post["milepael"] = self.tabel.cellWidget(raekke, 2).currentData() or ""
-            post["udstyr"] = ""
+            post["udstyr"] = post.get("udstyr", "")
         else:
-            post["udstyr"] = tekst(2)
             post["milepael"] = ""
         return post
 
@@ -543,6 +575,7 @@ class SagSkabelonDialog(QDialog):
                 fejl.append(f"'{post['navn']}': Frist (dage) skal være et helt tal.")
                 continue
             opgaver.append(post)
+        fejl += afhaengighed.find_fejl(opgaver)
         _vis_fejl(self.fejl_label, fejl, "Skabelonen kan ikke gemmes:")
         if fejl:
             return

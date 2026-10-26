@@ -36,7 +36,7 @@ def _opgaver_tooltip(sag) -> str:
     for o in sag.opgaver:
         if o.afsluttet:
             tegn = "✓"
-        elif sag.er_laast(o):
+        elif sag.er_blokeret(o):
             tegn = "🔒"
         else:
             tegn = "!" if o.er_forsinket(i_dag) else "○"

@@ -9,6 +9,7 @@ from tests.hjaelp import TjenesteTest
 
 MIGRERING_010 = (Path(__file__).resolve().parents[1]
                  / "app/infrastructure/database/migrations/010_moduladgang.sql")
+MIGRERING_014 = MIGRERING_010.with_name("014_arbejdsspor.sql")
 
 
 class ReglerTest(unittest.TestCase):
@@ -31,7 +32,31 @@ class ReglerTest(unittest.TestCase):
             self.assertIn(f"'{modul}'", sql)
 
 
+class AfdelingTest(unittest.TestCase):
+    def test_flere_afdelinger_fast_orden_uden_dubletter(self):
+        self.assertEqual(adgang.normaliser_afdelinger(["Merch", "HR", "HR"]), ["HR", "Merch"])
+        with self.assertRaises(ValueError):
+            adgang.normaliser_afdelinger(["Ledelse"])
+        self.assertEqual(adgang.afdelinger_for({"roller": ["Administration", "HR"]}),
+                         ("HR", "Administration"))
+        self.assertEqual(adgang.afdelinger_for(None), ())
+
+    def test_afdelingsnavne_stemmer_med_migrering_014(self):
+        sql = MIGRERING_014.read_text(encoding="utf-8")
+        from app.domain.arbejdsspor import AFDELINGER
+        self.assertIn("array[" + ", ".join(f"'{a}'" for a in AFDELINGER) + "]", sql)
+
+
 class LagringTest(TjenesteTest):
+    def test_afdelinger_gemmes_og_foelger_login(self):
+        from app.repositories.fejl import ValideringsFejl
+        self.t.auth.opret("HAFRA", "Hanne", "Bruger", "kode-12345")
+        self.t.auth.saet_afdelinger("HAFRA", ["Administration", "HR"])
+        with self.assertRaises(ValideringsFejl):
+            self.t.auth.saet_afdelinger("HAFRA", ["Ukendt"])
+        session.log_ind(self.t.auth.log_ind("HAFRA", "kode-12345"))
+        self.assertEqual(session.afdelinger(), ("HR", "Administration"))
+
     def test_administrator_saetter_moduler_og_de_foelger_login(self):
         self.t.auth.opret("HAFRA", "Hanne", "Bruger", "kode-12345")
         self.t.auth.saet_moduler("HAFRA", ["telefoner", "ukendt", "oensker"])

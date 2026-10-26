@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from app import session
 from app.domain import adgang
+from app.domain.arbejdsspor import AFDELINGER
 from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.services.auth_service import ROLLE_ADMIN, ROLLE_BRUGER, ROLLER
 from app.ui.fejl import FEJL, udfoer
@@ -147,26 +148,24 @@ class KodeDialog(QDialog):
         super().accept()
 
 
-class ModulDialog(QDialog):
-    """Flueben pr. modul for én bruger. Efter exec(): self.moduler."""
+class FluebenDialog(QDialog):
+    """Flueben for én bruger (moduler eller afdelinger). Efter exec(): self.valgte."""
 
-    def __init__(self, parent, bruger: dict):
+    def __init__(self, parent, titel: str, intro: str, valg: dict, valgte):
         super().__init__(parent)
-        self.setWindowTitle(f"Moduladgang – {bruger['brugernavn']}")
-        self.moduler = None
-        valgte = adgang.moduler_for(bruger)
+        self.setWindowTitle(titel)
+        self.valgte = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
-        intro = QLabel("Vælg de moduler, brugeren må se. Moduler uden adgang vises med 🔒 i "
-                       "menuen. Dashboard og Indstillinger kan alle altid se.")
-        intro.setObjectName("hjaelpTekst")
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
+        intro_label = QLabel(intro)
+        intro_label.setObjectName("hjaelpTekst")
+        intro_label.setWordWrap(True)
+        layout.addWidget(intro_label)
         self.felter = {}
-        for modul, navn in adgang.MODULER.items():
+        for noegle, navn in valg.items():
             felt = QCheckBox(navn)
-            felt.setChecked(modul in valgte)
-            self.felter[modul] = felt
+            felt.setChecked(noegle in valgte)
+            self.felter[noegle] = felt
             layout.addWidget(felt)
         knapper = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -177,7 +176,7 @@ class ModulDialog(QDialog):
         layout.addWidget(knapper)
 
     def accept(self):
-        self.moduler = [m for m, felt in self.felter.items() if felt.isChecked()]
+        self.valgte = [n for n, felt in self.felter.items() if felt.isChecked()]
         super().accept()
 
 
@@ -210,6 +209,8 @@ class BrugerSide(QWidget):
         kode = lav_knap("Nulstil adgangskode")
         rolle = lav_knap("Skift rolle")
         moduler = lav_knap("Moduladgang…", tooltip="Hvilke moduler brugeren må se")
+        afdelinger = lav_knap("Afdelinger…", tooltip="Hvilke afdelinger brugeren er medlem af "
+                                                     "(styrer arbejdsbakken)")
         self.aktiv_knap = lav_knap("Deaktivér / aktivér",
                                    tooltip="En deaktiveret bruger kan ikke logge på og har "
                                            "ingen adgang til data")
@@ -218,19 +219,20 @@ class BrugerSide(QWidget):
         kode.clicked.connect(self.skift_kode)
         rolle.clicked.connect(self.skift_rolle)
         moduler.clicked.connect(self.skift_moduler)
+        afdelinger.clicked.connect(self.skift_afdelinger)
         self.aktiv_knap.clicked.connect(self.skift_aktiv)
         slet.clicked.connect(self.slet)
         knapper.addStretch()
-        for knap in (opret, kode, rolle, moduler, self.aktiv_knap, slet):
+        for knap in (opret, kode, rolle, moduler, afdelinger, self.aktiv_knap, slet):
             knapper.addWidget(knap)
         layout.addLayout(knapper)
 
         kort = lav_kort(skygge=False)
         kort_layout = QVBoxLayout(kort)
         kort_layout.setContentsMargins(8, 8, 8, 8)
-        self.tabel = QTableWidget(0, 6)
+        self.tabel = QTableWidget(0, 7)
         self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "Rolle", "Status", "Oprettet",
-                                              "Moduler"])
+                                              "Afdelinger", "Moduler"])
         self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -239,7 +241,7 @@ class BrugerSide(QWidget):
         self.tabel.verticalHeader().setVisible(False)
         self.tabel.verticalHeader().setDefaultSectionSize(42)
         self.tabel.horizontalHeader().setStretchLastSection(True)
-        for kolonne, bredde in enumerate((170, 240, 140, 130, 120)):
+        for kolonne, bredde in enumerate((150, 200, 120, 110, 100, 200)):
             self.tabel.setColumnWidth(kolonne, bredde)
         kort_layout.addWidget(self.tabel)
         layout.addWidget(kort, 1)
@@ -258,6 +260,7 @@ class BrugerSide(QWidget):
                 b.get("rolle", ""),
                 "Aktiv" if b.get("aktiv", True) else "Deaktiveret",
                 vis_dato(b.get("oprettet", "")[:10]),
+                ", ".join(adgang.afdelinger_for(b)) or "–",
                 _moduler_tekst(b),
             )
             for kolonne, tekst in enumerate(celler):
@@ -306,9 +309,27 @@ class BrugerSide(QWidget):
             QMessageBox.information(self, "Moduladgang",
                                     "Administratorer har altid adgang til alle moduler.")
             return
-        dialog = ModulDialog(self, bruger)
+        dialog = FluebenDialog(
+            self, f"Moduladgang – {brugernavn}",
+            "Vælg de moduler, brugeren må se. Moduler uden adgang vises med 🔒 i "
+            "menuen. Dashboard og Indstillinger kan alle altid se.",
+            adgang.MODULER, adgang.moduler_for(bruger))
         if dialog.exec() and udfoer(self, self.auth.saet_moduler, brugernavn,
-                                    dialog.moduler) is not FEJL:
+                                    dialog.valgte) is not FEJL:
+            self.opdater()
+
+    def skift_afdelinger(self):
+        brugernavn = self._valgt()
+        if brugernavn is None:
+            return
+        dialog = FluebenDialog(
+            self, f"Afdelinger – {brugernavn}",
+            "Vælg de afdelinger, brugeren er medlem af. En bruger kan være i flere. "
+            "Afdelingen afgør, hvad der vises under \"Min afdeling\" i arbejdsbakken – "
+            "alle brugere kan stadig behandle alle sager.",
+            {a: a for a in AFDELINGER}, adgang.afdelinger_for(self._brugere.get(brugernavn)))
+        if dialog.exec() and udfoer(self, self.auth.saet_afdelinger, brugernavn,
+                                    dialog.valgte) is not FEJL:
             self.opdater()
 
     def skift_aktiv(self):

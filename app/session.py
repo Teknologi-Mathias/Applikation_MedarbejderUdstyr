@@ -30,5 +30,10 @@ def har_adgang(modul: Optional[str]) -> bool:
     return adgang.har_adgang(_aktiv, modul)
 
 
+def afdelinger() -> tuple:
+    """Den aktuelle brugers afdelinger (til "Min afdeling" i arbejdsbakkerne)."""
+    return adgang.afdelinger_for(_aktiv)
+
+
 def brugernavn() -> Optional[str]:
     return _aktiv["brugernavn"] if _aktiv else None

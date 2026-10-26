@@ -85,10 +85,10 @@ class OnboardingMilepaelTest(unittest.TestCase):
             Opgave("Job", milepael="jobs"),
         ])
 
-    def test_status_foelger_milepaele_og_laaser_senere_opgaver(self):
+    def test_status_foelger_milepaele_uden_at_laase_parallelle_opgaver(self):
         self.assertEqual(self.f.status, OB.STATUS_KANDIDAT)
-        self.assertTrue(self.f.er_laast(self.f.opgaver[2]))
-        self.assertEqual([o.navn for o in self.f.aabne_opgaver()], ["Godkendt"])
+        # Milepæle er kontrolpunkter: uden forudsætninger er alle opgaver åbne.
+        self.assertEqual(len(self.f.aabne_opgaver()), 4)
         for opgave, forventet in zip(self.f.opgaver, OB.FREMDRIFT[1:]):
             opgave.saet_status(Opgave.UDFOERT)
             self.assertEqual(self.f.status, forventet)

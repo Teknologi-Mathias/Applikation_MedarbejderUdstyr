@@ -1,4 +1,7 @@
-"""Genererer migrations/004_seed_standarder.sql ud fra programmets standarder.
+"""Genererer migrations/015_seed_standarder.sql ud fra programmets standarder.
+
+(004 er den oprindelige udgave og ændres ikke længere – 015 køres efter 014,
+så skabelonopgaverne kan have arbejdsspor.)
 
 Standardskabelonerne (app/domain/skabelon.py) og standardområderne
 (app/services/indstillinger_service.py) er de BEVIDSTE standarder, en ny
@@ -21,7 +24,10 @@ from app.services.indstillinger_service import STANDARD  # noqa: E402
 
 NAVNERUM = uuid.UUID("6f1d3c52-6a0e-4d1b-9a7e-2c5b8f0e1a11")
 MAAL = (Path(__file__).resolve().parents[1]
-        / "app/infrastructure/database/migrations/004_seed_standarder.sql")
+        / "app/infrastructure/database/migrations/015_seed_standarder.sql")
+# Standarder fra før arbejdssporene (004): deaktiveres – slettes ikke.
+UDGAAEDE = (("sager", "onboarding", "Onboarding – standard"),
+            ("sager", "onboarding", "Onboarding – FM/DM"))
 
 
 def _sql_json(data) -> str:
@@ -38,7 +44,7 @@ def _indsaet(tabel: str, raekker: list[dict]) -> str:
 
 def generer() -> str:
     dele = [
-        "-- IN-BASE 004: bevidste standarder for en NY database (ingen forretningsdata).\n"
+        "-- IN-BASE 015: bevidste standarder (ingen forretningsdata). Køres EFTER 014.\n"
         "-- GENERERET af tools/generer_standard_seed.py – ret standarderne i Python og\n"
         "-- generér filen igen. Kan køres flere gange (on conflict do nothing).\n",
     ]
@@ -65,6 +71,9 @@ def generer() -> str:
         dele.append(f"-- {slags}\n" + _indsaet(tabel, skabeloner))
         if opgaver:
             dele.append(_indsaet("workflow_template_tasks", opgaver))
+    udgaaede = ", ".join(f"'{uuid.uuid5(NAVNERUM, '/'.join(n))}'" for n in UDGAAEDE)
+    dele.append("-- Onboarding-skabeloner fra før arbejdssporene: deaktiveres (slettes ikke)\n"
+                f"update public.workflow_templates set active = false where id in ({udgaaede});\n")
     return "\n".join(dele)
 
 

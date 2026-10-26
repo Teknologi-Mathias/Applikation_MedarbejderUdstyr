@@ -25,8 +25,14 @@ class SagRepositoryTest(TjenesteTest):
         sag = self.ny_offboarding()
         kollega = self.t.offboarding.hent(sag.id)
         self.t.offboarding.tilfoej_notat(kollega, "Kollegaens ændring")
+        # Repositoriet afviser altid en forældet version …
         with self.assertRaises(KonfliktFejl):
-            self.t.offboarding.tilfoej_notat(sag, "Min ændring på gammel version")
+            self.t.offboarding.repo.gem(sag.kopi())
+        # … servicen fletter uafhængige ændringer (to notater) i stedet for at tabe én.
+        gemt = self.t.offboarding.tilfoej_notat(sag, "Min ændring på gammel version")
+        noter = [h["kommentar"] for h in gemt.historik.haendelser()]
+        self.assertIn("Kollegaens ændring", noter)
+        self.assertIn("Min ændring på gammel version", noter)
 
     def test_aendring_i_en_sag_overskriver_ikke_andre(self):
         a = self.ny_offboarding(loennr="1", navn="A")

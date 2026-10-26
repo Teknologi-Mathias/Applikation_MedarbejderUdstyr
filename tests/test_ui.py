@@ -210,7 +210,38 @@ class UiTest(TjenesteTest):
         dialog.stilling_input.setCurrentText("FM")
         self.assertIn("FM/DM", dialog.skabelon_input.itemText(0))
         dialog.stilling_input.setCurrentText("Ad Hoc")
-        self.assertIn("standard", dialog.skabelon_input.itemText(0))
+        self.assertIn("arbejdsspor", dialog.skabelon_input.itemText(0))
+
+    def test_skabelon_editor_bevarer_arbejdsspor_og_afviser_cirkler(self):
+        from app.ui.skabelon_dialoger import SagSkabelonDialog
+        skabelon = self.t.skabeloner.sagsskabeloner(OB.PROCES)[0]
+        dialog = SagSkabelonDialog(self.vindue, skabelon)
+        dialog.accept()
+        self.assertEqual(dialog.skabelon["opgaver"], skabelon["opgaver"])
+        dialog = SagSkabelonDialog(self.vindue, skabelon)
+        dialog.tabel.item(0, 4).setText("opfoelgning")       # Afhænger af
+        dialog.accept()
+        self.assertIn("Cirkulær", dialog.fejl_label.text())
+
+    def test_hr_formular_laaser_udstyr_efter_stilling_og_valg(self):
+        dialog = OnboardingDialog(self.vindue, None, [], ["Nord"], ["tester"])
+        dialog.stilling_input.setCurrentText("FM")
+        dialog.bil_input.setChecked(True)
+        dialog.mobil_input.setChecked(True)
+        self.assertTrue(dialog.abonnement_input.isEnabled())
+        self.assertEqual(dialog.abonnement_input.count(), 3)
+        dialog.stilling_input.setCurrentText("Ad Hoc")
+        self.assertFalse(dialog.bil_input.isEnabled() or dialog.bil_input.isChecked())
+        self.assertEqual(dialog.abonnement_input.currentData(), "Kun data")
+        polo, stoerrelse, _ = dialog.toej["polo"]
+        polo.setChecked(True)
+        self.assertEqual(dialog.hent_behov().valider("Ad Hoc"), ["Vælg en størrelse til polo."])
+        stoerrelse.setCurrentText("M")
+        dialog.navn_input.setText("Ny Medarbejder")
+        dialog.accept()
+        data = dialog.hent_data()
+        self.assertEqual(data["behov"]["polo"], {"valgt": True, "stoerrelse": "M", "antal": 1})
+        self.assertEqual(data["oplaering_planlagt"], "")
 
 
 if __name__ == "__main__":

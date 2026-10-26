@@ -16,6 +16,8 @@ UDFOERT = "udfoert"
 FRIST = "frist"
 ANSVARLIG = "ansvarlig"
 HISTORIK = "historik"
+I_GANG = "i_gang"
+AFVENTER = "afventer"
 
 
 class ActionListe(QObject):

@@ -12,6 +12,8 @@ Supabase er IN-BASE's fælles datakilde. Opsætning og drift:
 | `migrations/001`–`004` | Skema, RLS/privilegier, RPC-funktioner, bevidste standarder. Køres manuelt i rækkefølge. |
 | `migrations/005` | Login med brugernavn (internt login-alias), aktive/deaktiverede brugere, første administrator. |
 | `migrations/006` | Ønsker & Udvikling: indmeldinger, kommentarer, historik, RLS og RPC'er. |
+| `migrations/014` | Arbejdsspor på opgaver, HR's behov på sager, afdelinger (roller) på brugere. |
+| `migrations/015` | Standarder (genereres af `tools/generer_standard_seed.py`; 004 ændres ikke længere). |
 | `reset/nulstil_forretningsdata.sql` | Engangs-tømning af forretningsdata (kræver bekræftelse). |
 | `../../repositories/supabase/` | ALLE kald til tabeller, RPC, Auth og Edge Functions. |
 | `../../repositories/supabase/mapping.py` | Den ENESTE oversættelse domæne ↔ kolonner (feltkort). |
@@ -27,7 +29,10 @@ people ──< employment_records ──< lifecycle_cases ──< case_tasks
 workflow_templates ──< workflow_template_tasks
                   └──< workflow_template_versions
 areas, positions, app_settings, message_templates, notification_rules
-auth.users ──1:1── user_profiles (brugernavn, rolle, active, tema, must_change_password)
+auth.users ──1:1── user_profiles (brugernavn, rolle, roles = afdelinger, active, tema,
+                                   must_change_password)
+case_tasks: task_key, track, department, depends_on[] (andre opgavers task_key),
+            condition (behov), planned_at – lifecycle_cases.needs: HR's behov (JSON)
    (e-mail = internt login-alias)
 user_profiles ──< development_requests ──< development_request_comments
  (indsender/ansvarlig)                 └──< development_request_events (insert-only)

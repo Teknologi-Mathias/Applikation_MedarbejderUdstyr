@@ -54,6 +54,12 @@ class Opgave:
         beskrivelse="",
         milepael="",
         afsluttet="",
+        noegle="",
+        spor="",
+        afdeling="",
+        afhaenger_af=(),
+        betingelse="",
+        planlagt="",
     ):
         # Fast id, så Action Center kan pege direkte på opgaven.
         self.id = str(id) if id else str(uuid.uuid4())
@@ -72,6 +78,18 @@ class Opgave:
         self.milepael = str(milepael or "").strip()
         # Tidspunkt hvor opgaven blev udført/undtaget – bruges til rapporter.
         self.afsluttet_tid = str(afsluttet or "")
+        # Arbejdsspor (se app/domain/arbejdsspor.py): fast nøgle fra skabelonen
+        # (fx "kontrakt"), sporet opgaven hører til, ansvarlig afdeling og de
+        # opgavenøgler, der skal være afsluttet, før opgaven kan udføres.
+        # ansvarlig er den konkrete bruger; tom = ikke tildelt.
+        self.noegle = str(noegle or "").strip()
+        self.spor = str(spor or "").strip()
+        self.afdeling = str(afdeling or "").strip()
+        self.afhaenger_af = [str(n).strip() for n in afhaenger_af or () if str(n).strip()]
+        # Behov der skal være valgt, for at opgaven er relevant (fx "firmabil").
+        self.betingelse = str(betingelse or "").strip()
+        # Planlagt tidspunkt (fx oplæringsvagt). Afslutter aldrig opgaven.
+        self.planlagt = str(planlagt or "")
 
     @classmethod
     def normaliser_status(cls, status):
@@ -124,6 +142,12 @@ class Opgave:
             "beskrivelse": self.beskrivelse,
             "milepael": self.milepael,
             "afsluttet": self.afsluttet_tid,
+            "noegle": self.noegle,
+            "spor": self.spor,
+            "afdeling": self.afdeling,
+            "afhaenger_af": list(self.afhaenger_af),
+            "betingelse": self.betingelse,
+            "planlagt": self.planlagt,
         }
 
     @classmethod
@@ -141,4 +165,10 @@ class Opgave:
             data.get("beskrivelse", ""),
             data.get("milepael", ""),
             data.get("afsluttet", ""),
+            data.get("noegle", ""),
+            data.get("spor", ""),
+            data.get("afdeling", ""),
+            data.get("afhaenger_af") or (),
+            data.get("betingelse", ""),
+            data.get("planlagt", ""),
         )

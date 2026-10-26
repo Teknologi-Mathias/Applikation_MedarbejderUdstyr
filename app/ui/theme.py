@@ -8,12 +8,13 @@ statusser kun skal have en tone – ikke en farve pr. tema.
 Nyt tema: tilføj en palette i TEMAER med de samme nøgler. Widgets må ikke
 hardcode farver; brug FARVER, tonerne eller objectName + stylesheet.
 
-FARVER, STATUS_STIL, OPGAVE_STIL og ALARM_STIL ændres på stedet ved
+FARVER, STATUS_STIL, OPGAVE_STIL, SPOR_STIL og ALARM_STIL ændres på stedet ved
 temaskift, så diagrammer og tabeller følger med uden genstart.
 """
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
+from app.domain import arbejdsspor as sp
 from app.domain import indmelding as im
 from app.domain import mdm_enhed as md
 from app.domain.offboarding import Medarbejder
@@ -104,6 +105,13 @@ _OPGAVE_TONE = {
     Opgave.IKKE_STARTET: "intet", Opgave.I_GANG: "blaa", Opgave.AFVENTER: "gul",
     Opgave.UDFOERT: "groen", Opgave.UNDTAGET: "graa",
 }
+# Arbejdsspor og klarhed: farven understøtter teksten (status står altid som tekst).
+_SPOR_TONE = {
+    sp.KLAR: "blaa", sp.I_GANG: "blaa", sp.AFVENTER: "gul", sp.BLOKERET: "graa",
+    sp.FORSINKET: "roed", sp.FAERDIG: "groen", sp.IKKE_RELEVANT: "intet",
+    sp.KLAR_TIL_OPSTART: "groen", sp.PAA_PLAN: "blaa", sp.RISIKO: "gul",
+    sp.OPSTART_BLOKERET: "roed", sp.AFSLUTTET: "graa",
+}
 _ALARM_TONE = {
     action_center.KRITISK: "roed", action_center.ADVARSEL: "gul",
     action_center.PLANLAGT: "blaa",
@@ -114,6 +122,7 @@ FARVER: dict = {}
 TONER: dict = {}
 STATUS_STIL: dict = {}
 OPGAVE_STIL: dict = {}
+SPOR_STIL: dict = {}
 ALARM_STIL: dict = {}
 PRIORITET_STIL: dict = {}
 INTET_STIL: dict = {}
@@ -131,7 +140,8 @@ def _saet_palette(navn: str) -> None:
     TONER.clear()
     TONER.update(tema["toner"])
     for maal, kilde in ((STATUS_STIL, _STATUS_TONE), (OPGAVE_STIL, _OPGAVE_TONE),
-                        (ALARM_STIL, _ALARM_TONE), (PRIORITET_STIL, _PRIORITET_TONE)):
+                        (ALARM_STIL, _ALARM_TONE), (PRIORITET_STIL, _PRIORITET_TONE),
+                        (SPOR_STIL, _SPOR_TONE)):
         maal.clear()
         maal.update({noegle: TONER[tone] for noegle, tone in kilde.items()})
     INTET_STIL.clear()
@@ -143,6 +153,11 @@ _saet_palette(STANDARD_TEMA)
 
 def status_stil(status: str) -> dict:
     return STATUS_STIL.get(status, INTET_STIL)
+
+
+def spor_stil(status: str) -> dict:
+    """Farve til arbejdssporenes og klarhedens statusser (app/domain/arbejdsspor.py)."""
+    return SPOR_STIL.get(status, INTET_STIL)
 
 
 def prioritet_stil(prioritet: str) -> dict:
@@ -279,24 +294,25 @@ QMenu::item:disabled { color: @DIM; }
 QMenu::separator { height: 1px; background: @BORDER; margin: 4px 8px; }
 
 /* ---------- Felter ---------- */
-QLineEdit, QDateEdit, QComboBox, QPlainTextEdit, QTextEdit, QSpinBox {
+QLineEdit, QDateEdit, QDateTimeEdit, QComboBox, QPlainTextEdit, QTextEdit, QSpinBox {
     background: @SURFACE_2; border: 1px solid @BORDER; border-radius: 9px;
     padding: 8px 10px; selection-background-color: @PRIMARY;
     selection-color: white; color: @TEXT;
 }
 QPlainTextEdit, QTextEdit { padding: 6px 8px; }
-QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled {
+QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QDateTimeEdit:disabled,
+QSpinBox:disabled {
     background: @SURFACE; color: @DIM;
 }
 QLineEdit:read-only, QPlainTextEdit:read-only, QTextEdit:read-only { background: @SURFACE; }
-QLineEdit:focus, QDateEdit:focus, QComboBox:focus, QPlainTextEdit:focus,
+QLineEdit:focus, QDateEdit:focus, QDateTimeEdit:focus, QComboBox:focus, QPlainTextEdit:focus,
 QTextEdit:focus, QSpinBox:focus {
     border: 1px solid @PRIMARY_HOVER;
 }
-QComboBox::drop-down, QDateEdit::drop-down {
+QComboBox::drop-down, QDateEdit::drop-down, QDateTimeEdit::drop-down {
     border: none; background: transparent; width: 28px;
 }
-QComboBox::down-arrow, QDateEdit::down-arrow {
+QComboBox::down-arrow, QDateEdit::down-arrow, QDateTimeEdit::down-arrow {
     image: url(@CHEVRON); width: 12px; height: 8px;
 }
 QSpinBox { padding-right: 22px; }
@@ -382,6 +398,10 @@ QPushButton[navUnder="true"]:checked { background: @PRIMARY; color: white; font-
 }
 #lagringOffline {
     background: @DANGER_BG; color: @DANGER_TEKST; border-radius: 8px;
+    padding: 4px 8px; font-size: 11px; font-weight: 700;
+}
+#lagringForbinder {
+    background: @PRIMARY_SOFT; color: @PRIMARY_TEKST; border-radius: 8px;
     padding: 4px 8px; font-size: 11px; font-weight: 700;
 }
 #tomTekst { color: @MUTED; padding: 44px 0; }

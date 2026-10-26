@@ -75,9 +75,16 @@ i denne rækkefølge, og tjek at hver giver "Success":
     (se docs/MDM_OPSAETNING.md).
 13. `013_mdm_arkiv.sql` – Telefoner: "Fjern fra listen" arkiverer i stedet for at slette
     (Telefoner → Arkiv), så nulstillingskoden bevares, og telefonen kan gendannes.
+14. `014_arbejdsspor.sql` – parallelle arbejdsspor: opgaver får nøgle, spor, afdeling,
+    forudsætninger, betingelse og planlagt tidspunkt; sager får HR's behov (`needs`);
+    brugere får afdelinger (`roles`, sættes af administratorer via `inbase_set_roles`).
+    Kun tilføjelser – ingen data ændres eller slettes.
+15. `015_seed_standarder.sql` – standarderne igen (genereret), nu med onboarding-
+    skabelonerne "Onboarding – arbejdsspor" (+ FM/DM). De gamle onboarding-
+    standarder fra 004 deaktiveres (slettes ikke). Kan køres igen uden dubletter.
 
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004). Fremtidige ændringer kommer som nye filer `014_...`, `015_...`.
+fra 004 og 015). Fremtidige ændringer kommer som nye filer `016_...`, `017_...`.
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 
@@ -283,7 +290,7 @@ ingen standardbruger; den første administrator oprettes med
 indstillinger, områder, indmeldinger i Ønsker & Udvikling med kommentarer og
 historik) og `integration_probe`, men IKKE skemaet, de faste stillinger,
 brugerprofiler eller `auth`. Den kører kun, hvis bekræftelseslinjen øverst i
-filen aktiveres i samme kørsel. Kør bagefter `004_seed_standarder.sql` for at
+filen aktiveres i samme kørsel. Kør bagefter `015_seed_standarder.sql` for at
 få standarderne tilbage. Programmet kan ikke kalde nulstillingen. **Tjek i
 Dashboardet, at du er i det rigtige projekt, før du kører den.**
 

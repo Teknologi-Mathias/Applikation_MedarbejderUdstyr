@@ -94,6 +94,7 @@ TIDSPUNKT = (til_tidspunkt, fra_tidspunkt)
 ID = (til_uuid, lambda v: str(v) if v else "")
 JSON = (lambda v: v or None, lambda v: v)
 LISTE = (lambda v: list(v or []), lambda v: list(v or []))
+OBJEKT = (lambda v: dict(v or {}), lambda v: dict(v or {}))
 
 
 def _til_raekke(data: dict, feltkort) -> dict:
@@ -119,6 +120,7 @@ SAG_FELTER = (
     ("tracking_link", "tracking_link", TEKST),
     ("oprettet", "created_at", TIDSPUNKT),
     ("arkiveret", "archived_on", DATO),
+    ("behov", "needs", OBJEKT),
 )
 PERSON_FELTER = (
     ("person_id", "id", ID),
@@ -146,6 +148,12 @@ OPGAVE_FELTER = (
     ("udstyr", "equipment", TEKST),
     ("milepael", "milestone", TEKST),
     ("afsluttet", "completed_at", TIDSPUNKT),
+    ("noegle", "task_key", TEKST),
+    ("spor", "track", TEKST),
+    ("afdeling", "department", TEKST),
+    ("afhaenger_af", "depends_on", LISTE),
+    ("betingelse", "condition", TEKST),
+    ("planlagt", "planned_at", TIDSPUNKT),
 )
 RYKKER_FELTER = (
     ("id", "id", ID),
@@ -303,6 +311,11 @@ ARBEJDSGANG_OPGAVE_FELTER = (
     ("milepael", "milestone", TEKST),
     ("frist_dage", "due_offset_days", HELTAL),
     ("obligatorisk", "mandatory", BOOL),
+    ("noegle", "task_key", TEKST),
+    ("spor", "track", TEKST),
+    ("afdeling", "department", TEKST),
+    ("afhaenger_af", "depends_on", LISTE),
+    ("betingelse", "condition", TEKST),
 )
 MAIL_FELTER = (
     ("id", "id", ID),
@@ -408,6 +421,8 @@ def bruger_fra_profil(profil: dict) -> dict:
         # None = standardmodulerne (migrering 010); ellers en liste af moduler.
         "moduler": (list(profil["module_access"])
                     if profil.get("module_access") is not None else None),
+        # Afdelinger brugeren er medlem af (migrering 014).
+        "roller": list(profil.get("roles") or []),
     }
 
 

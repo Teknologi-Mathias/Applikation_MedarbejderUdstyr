@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Iterable, Optional
 
+from app.domain import arbejdsspor as sp
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
 from app.domain.opgave import Opgave, laes_iso_dato
@@ -160,9 +161,13 @@ def _onboarding_alarmer(f: OnboardingForloeb, i_dag: date, regler: Regler) -> li
     if foerste is not None and not f.er_afsluttet():
         dage_til = (foerste - i_dag).days
         if 0 <= dage_til <= regler.naermer_sig_dage:
+            # Samme vurdering som Teamoverblikket (app/domain/arbejdsspor.py).
+            klar = sp.klarhed(f, i_dag, regler.naermer_sig_dage)
+            niveau = {sp.OPSTART_BLOKERET: KRITISK, sp.RISIKO: ADVARSEL}.get(klar.niveau, PLANLAGT)
+            aarsager = "; ".join(klar.aarsager) or "alle obligatoriske opgaver er udført"
             alarmer.append(Alarm(
-                PLANLAGT, "Første arbejdsdag nærmer sig",
-                f"{f.navn} · status: {f.status} · {len(f.aabne_opgaver())} åbne opgaver",
+                niveau, f"{klar.niveau}: første arbejdsdag nærmer sig",
+                f"{f.navn} · {aarsager}",
                 {0: "I dag", 1: "I morgen"}.get(dage_til, f"{dage_til} dage"),
                 f.PROCES, f.id, sortering=-dage_til,
             ))

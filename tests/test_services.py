@@ -57,7 +57,7 @@ class OnboardingServiceTest(TjenesteTest):
 
     def test_laast_opgave_kan_ikke_markeres_udfoert(self):
         f = self.ny_onboarding()
-        laast = next(o for o in f.opgaver if o.milepael == "jobs")
+        laast = next(o for o in f.opgaver if o.noegle == "medarbejderapp")
         with self.assertRaises(ValideringsFejl):
             self.t.onboarding.marker_opgave_udfoert(f, laast.id)
 
@@ -142,8 +142,23 @@ class RapportTest(TjenesteTest):
         rapport = self.t.rapporter.beregn([f], Filter(stilling="DM"), date.today())
         maal = {m.navn: m for m in rapport.maalinger}
         self.assertEqual(maal["Kandidat → kontrakt bekræftet"].n, 1)
-        self.assertEqual(self.t.rapporter.beregn([f], Filter(stilling="FM"), date.today())
-                         .maalinger[-3].vaerdi, "0")
+        fm = {m.navn: m for m in self.t.rapporter.beregn([f], Filter(stilling="FM"),
+                                                          date.today()).maalinger}
+        self.assertEqual(fm["Åbne forløb"].vaerdi, "0")
+
+    def test_maalinger_pr_arbejdsspor_bygger_paa_opgavernes_tidspunkter(self):
+        f = self.ny_onboarding(stilling="DM", behov={"mobil": True, "abonnement": "Kun data"})
+        maal = {m.navn: m for m in self.t.rapporter.beregn([f], Filter(), date.today()).maalinger}
+        self.assertIsNone(maal["HR-godkendelse → kontrakt retur"].vaerdi, "ingen data endnu")
+        for noegle in ("kandidat_godkendt", "kontrakt", "telefon"):
+            f = self.t.onboarding.marker_opgave_udfoert(
+                f, next(o.id for o in f.opgaver if o.noegle == noegle))
+        rapport = self.t.rapporter.beregn([f], Filter(), date.today())
+        maal = {m.navn: m for m in rapport.maalinger}
+        self.assertEqual(maal["HR-godkendelse → kontrakt retur"].n, 1)
+        self.assertEqual(maal["Kontrakt retur → telefon klar"].n, 1)
+        self.assertEqual(maal["Kontrakt retur → tøj sendt"].n, 0, "intet tøj valgt")
+        self.assertIn("Afdeling: Administration", [r[0] for r in rapport.arbejdsfordeling])
 
 
 class AuthTest(TjenesteTest):

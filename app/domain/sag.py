@@ -5,6 +5,10 @@ have flere sager), opgaver, milepæle, en tidslinje og et versionsnummer til
 optimistisk låsning. Status beregnes af underklassen ud fra opgaverne, men kan
 låses manuelt med en begrundelse.
 
+Opgaverne er parallelle: en opgave er kun blokeret af sine egne
+forudsætninger (afhaenger_af), ikke af en fælles rækkefølge. Milepæle er
+kontrolpunkter, som sagsstatus beregnes ud fra.
+
 Lønnr. er bevidst IKKE identiteten: en kandidat kan oprettes uden lønnr.
 """
 import uuid
@@ -106,20 +110,31 @@ class Sag:
                 return noegle
         return None
 
-    def er_laast(self, opgave: Opgave) -> bool:
-        """En opgave er låst, til de tidligere milepæle er færdige."""
-        noegler = [n for n, _ in self.MILEPAELE]
-        aktiv = self.aktiv_milepael()
-        if opgave.milepael not in noegler or aktiv is None:
-            return False
-        return noegler.index(opgave.milepael) > noegler.index(aktiv)
+    def forudsaetninger(self, opgave: Opgave) -> list:
+        """De forudsætninger (opgaver), der endnu ikke er afsluttet."""
+        if not opgave.afhaenger_af:
+            return []
+        efter_noegle = {o.noegle: o for o in self.opgaver if o.noegle}
+        return [efter_noegle[n] for n in opgave.afhaenger_af
+                if n in efter_noegle and not efter_noegle[n].afsluttet]
+
+    def er_blokeret(self, opgave: Opgave) -> bool:
+        return not opgave.afsluttet and bool(self.forudsaetninger(opgave))
+
+    def blokeringsaarsag(self, opgave: Opgave) -> str:
+        """Fx "Venter på: Kontrakt (Administration)" – tom, hvis opgaven ikke er blokeret."""
+        if opgave.afsluttet:
+            return ""
+        mangler = [f"{o.navn} ({o.afdeling})" if o.afdeling else o.navn
+                   for o in self.forudsaetninger(opgave)]
+        return "Venter på: " + ", ".join(mangler) if mangler else ""
 
     def milepael_navn(self, noegle: str) -> str:
         return dict(self.MILEPAELE).get(noegle, noegle)
 
     def aabne_opgaver(self):
-        """Ikke-afsluttede opgaver, der er aktive (ikke låst af en milepæl)."""
-        return [o for o in self.opgaver if not o.afsluttet and not self.er_laast(o)]
+        """Ikke-afsluttede opgaver, der kan udføres nu (ikke blokerede)."""
+        return [o for o in self.opgaver if not o.afsluttet and not self.er_blokeret(o)]
 
     def forsinkede_opgaver(self, i_dag: date):
         return [o for o in self.aabne_opgaver() if o.er_forsinket(i_dag)]
@@ -134,6 +149,10 @@ class Sag:
     def startdato(self) -> str:
         """Dato som skabelonfrister regnes fra."""
         raise NotImplementedError
+
+    def maaldato(self) -> str:
+        """Dato forløbet skal være klar til (første arbejdsdag / sidste arbejdsdag)."""
+        return self.startdato()
 
     def beskrivelse(self) -> str:
         """Kort undertitel til sagsvinduet."""

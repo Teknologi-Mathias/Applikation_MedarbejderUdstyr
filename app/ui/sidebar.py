@@ -11,6 +11,12 @@ from app import APP_BESKRIVELSE, APP_NAVN, APP_SLOGAN, VERSION
 from app.ui.hjaelpere import lav_knap, lav_logo
 
 
+# Forbindelsens tilstand (vises nederst i menuen).
+ONLINE = "online"
+FORBINDER = "forbinder"
+MISTET = "mistet"
+
+
 class Sidebar(QFrame):
     side_valgt = Signal(str)
     log_ud = Signal()
@@ -124,5 +130,27 @@ class Sidebar(QFrame):
             self.lagring_label.setObjectName("lagringOnline")
             self.lagring_label.setText(f"● ONLINE · {kilde.split(' (')[0]}")
             self.lagring_label.setToolTip(f"Data gemmes direkte i {kilde}.")
+        self._polish()
+
+    def saet_forbindelse(self, tilstand: str, sidst_opdateret: str = "") -> None:
+        """Online / Forbinder / Forbindelse mistet + seneste vellykkede opdatering.
+
+        IN-BASE kan ikke arbejde offline mod Supabase: uden forbindelse kan
+        intet gemmes, og det står i værktøjstippet."""
+        sidst = f" · {sidst_opdateret}" if sidst_opdateret else ""
+        tekst, navn, tip = {
+            ONLINE: (f"● Online{sidst}", "lagringOnline",
+                     "Forbundet til den fælles database. Data opdateres hvert minut."),
+            FORBINDER: ("● Forbinder…", "lagringForbinder", "Opretter forbindelse til databasen."),
+            MISTET: (f"● Forbindelse mistet{sidst}", "lagringOffline",
+                     "Ingen forbindelse til databasen – ændringer kan ikke gemmes. "
+                     "Der prøves igen hvert minut. Tidspunktet er seneste vellykkede opdatering."),
+        }[tilstand]
+        self.lagring_label.setObjectName(navn)
+        self.lagring_label.setText(tekst)
+        self.lagring_label.setToolTip(tip)
+        self._polish()
+
+    def _polish(self):
         self.lagring_label.style().unpolish(self.lagring_label)
         self.lagring_label.style().polish(self.lagring_label)

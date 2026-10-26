@@ -76,7 +76,8 @@ class SupabaseKontoRepository:
         """Brugernavn og navn på alle aktive brugere (til "Ansvarlig"-listen)."""
         with kald("hente brugerlisten"):
             svar = self.klient.rpc("inbase_user_directory", {}).execute()
-        return [{"brugernavn": r["username"], "navn": r["display_name"] or r["username"]}
+        return [{"brugernavn": r["username"], "navn": r["display_name"] or r["username"],
+                 "roller": list(r.get("roles") or [])}
                 for r in svar.data or []]
 
     ### ----- egen adgangskode -----------------------------------------------
@@ -122,6 +123,12 @@ class SupabaseKontoRepository:
         with kald("ændre moduladgang"):
             self.klient.rpc("inbase_set_module_access",
                             {"p_user_id": bruger_id, "p_modules": moduler}).execute()
+
+    def saet_afdelinger(self, bruger_id: str, afdelinger: list[str]) -> None:
+        """Afdelinger (roller) via RPC'en fra migrering 014 (kun administratorer)."""
+        with kald("ændre afdelinger"):
+            self.klient.rpc("inbase_set_roles",
+                            {"p_user_id": bruger_id, "p_roles": afdelinger}).execute()
 
     def slet(self, bruger_id: str) -> None:
         self._funktion(FUNKTION_ADMINISTRER, {"action": "delete", "user_id": bruger_id},
