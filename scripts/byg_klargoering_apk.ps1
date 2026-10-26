@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Bygger IN-BASE Klargøring (Android-appen i android\) og lægger den i assets\mdm\.
 
