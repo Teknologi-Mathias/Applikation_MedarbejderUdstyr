@@ -64,9 +64,10 @@ class UiTest(TjenesteTest):
 
     def test_onboarding_og_offboarding_er_separate_hovedpunkter(self):
         sektioner = [s for s, _ in STRUKTUR if s]
-        self.assertEqual(len(sektioner), 2)
+        self.assertEqual(len(sektioner), 3)
         self.assertTrue(sektioner[0].startswith("Onboarding"))
         self.assertTrue(sektioner[1].startswith("Offboarding"))
+        self.assertEqual(sektioner[2], "Telefoner (MDM)", "med undersiden Arkiv")
 
     def test_sagsvindue_viser_milepaele_og_laaste_opgaver(self):
         dialog = SagDialog(self.vindue, self.on, ["tester"])

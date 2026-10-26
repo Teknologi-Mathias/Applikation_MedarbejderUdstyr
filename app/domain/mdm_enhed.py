@@ -7,6 +7,9 @@ Forløb: telefonen oprettes (Afventer klargøring) → QR-koden scannes, og
 styrings-appen låser og klargør telefonen → den melder tilbage med model,
 serienr. og IMEI (Klargjort). Udgået sættes manuelt, når telefonen tages ud.
 
+En telefon, der fjernes fra listen, slettes ikke, men arkiveres (Telefoner → Arkiv),
+så nulstillingskoden mm. bevares og telefonen kan gendannes.
+
 Statusserne svarer til check-betingelsen i migrering 008 – ændres de her,
 skal de også ændres dér.
 """
@@ -28,8 +31,9 @@ NAVN_MOENSTER = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,19}$")
 INFOFELTER = ("navn", "telefonnummer", "note")
 # Felter, som telefonen melder tilbage ved klargøring.
 RAPPORTFELTER = ("producent", "model", "serienummer", "imei", "android_version")
-# Felter, der gemmes ved ændringer (svarer til inbase_mdm_update_devices i migrering 012).
-GEMTE_FELTER = INFOFELTER + RAPPORTFELTER + ("status", "klargjort", "nulstillingskode", "mail")
+# Felter, der gemmes ved ændringer (svarer til inbase_mdm_update_devices i migrering 013).
+GEMTE_FELTER = INFOFELTER + RAPPORTFELTER + ("status", "klargjort", "nulstillingskode", "mail",
+                                            "arkiveret")
 
 # Ændringskoder: én kode pr. telefon og handling, tastes i telefonens administrator-menu.
 CHROME = "chrome"          # supportkoden: vis/skjul Chrome
@@ -51,6 +55,7 @@ class MdmEnhed:
     klargjort: str = ""             # tidspunkt for seneste klargøring
     nulstillingskode: str = ""      # *#*#46227#*#* på telefonen → fabriksnulstilling
     mail: bool = False              # firma-mail (IMAP) i Gmail-appen
+    arkiveret: str = ""             # tidspunkt, telefonen blev fjernet fra listen ("" = aktiv)
     oprettet_af: str = ""
     id: str = ""
     oprettet: str = ""

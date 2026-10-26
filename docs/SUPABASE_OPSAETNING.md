@@ -73,9 +73,11 @@ i denne rækkefølge, og tjek at hver giver "Success":
 12. `012_mdm_mail_og_signering.sql` – Telefoner: om telefonen har firma-mail (kan slås til/fra
     med en ændringskode) og styrings-appens signeringsnøgle, kun for administratorer
     (se docs/MDM_OPSAETNING.md).
+13. `013_mdm_arkiv.sql` – Telefoner: "Fjern fra listen" arkiverer i stedet for at slette
+    (Telefoner → Arkiv), så nulstillingskoden bevares, og telefonen kan gendannes.
 
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004). Fremtidige ændringer kommer som nye filer `013_...`, `014_...`.
+fra 004). Fremtidige ændringer kommer som nye filer `014_...`, `015_...`.
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 

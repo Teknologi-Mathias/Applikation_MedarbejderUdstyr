@@ -29,11 +29,13 @@ STANDARD = (ONBOARDING, OFFBOARDING, OENSKER)
 
 
 def modul_for_side(noegle: str) -> Optional[str]:
-    """Menupunktets nøgle ("on_aktive", "telefoner" …) -> modul, eller None (altid åben)."""
+    """Menupunktets nøgle ("on_aktive", "telefoner_arkiv" …) -> modul, eller None (altid åben)."""
     if noegle.startswith("on_"):
         return ONBOARDING
     if noegle.startswith("off_"):
         return OFFBOARDING
+    if noegle.startswith("telefoner_"):
+        return TELEFONER
     return noegle if noegle in MODULER else None
 
 

@@ -494,7 +494,7 @@ def aendring_fra_raekke(raekke: dict) -> Aendring:
 
 
 # ---------------------------------------------------------------------------
-# Telefoner (mdm_devices, migrering 007-012)
+# Telefoner (mdm_devices, migrering 007-013)
 # ---------------------------------------------------------------------------
 
 MDM_FELTER = (
@@ -511,6 +511,7 @@ MDM_FELTER = (
     ("klargjort", "provisioned_at", TIDSPUNKT),
     ("nulstillingskode", "reset_code", TEKST),
     ("mail", "mail", BOOL),
+    ("arkiveret", "archived_at", TIDSPUNKT),
     ("oprettet_af", "created_by_username", TEKST),
     ("oprettet", "created_at", TIDSPUNKT),
     ("opdateret", "updated_at", TIDSPUNKT),

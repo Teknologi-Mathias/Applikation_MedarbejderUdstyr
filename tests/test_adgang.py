@@ -23,6 +23,7 @@ class ReglerTest(unittest.TestCase):
         self.assertEqual(adgang.moduler_for(valgt), (adgang.TELEFONER,))
         self.assertEqual(adgang.modul_for_side("on_skabeloner"), adgang.ONBOARDING)
         self.assertIsNone(adgang.modul_for_side("dashboard"))
+        self.assertEqual(adgang.modul_for_side("telefoner_arkiv"), adgang.TELEFONER)
 
     def test_modulnavne_stemmer_med_migrering_010(self):
         sql = MIGRERING_010.read_text(encoding="utf-8")

@@ -46,6 +46,7 @@ klargøringen. Alternativt kan du angive et https-link. APK'en ændres ikke.
    1. `app/infrastructure/database/migrations/008_mdm_lokal_klargoering.sql`
    2. `app/infrastructure/database/migrations/009_mdm_nulstillingskode.sql`
    3. `app/infrastructure/database/migrations/012_mdm_mail_og_signering.sql` (efter 010 og 011)
+   4. `app/infrastructure/database/migrations/013_mdm_arkiv.sql` (Arkiv under Telefoner)
 
    007 skal være kørt først, og det er den allerede.
 2. Styrings-appen ligger færdigbygget i `assets/mdm/inbase-klargoering.apk` og følger med

@@ -1,10 +1,14 @@
-"""Siden Telefoner (MDM): driftstelefoner registreret ved ERP-enhedsnavn og klargjort fra IN-BASE.
+"""Siderne Telefoner (MDM) og Arkiv: driftstelefoner registreret ved ERP-enhedsnavn og klargjort
+fra IN-BASE.
 
-Kun for brugere med modulet Telefoner (og administratorer). Siden henter fra Supabase, når den åbnes eller
-efter en handling – aldrig i baggrunden.
+Kun for brugere med modulet Telefoner (og administratorer). Siderne henter fra Supabase, når de
+åbnes eller efter en handling – aldrig i baggrunden. Telefoner, der fjernes fra listen, flyttes til
+Arkiv (ikke slettet), så nulstillingskoden mm. bevares.
 """
+from datetime import date
+
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QMenu, QMessageBox, QToolButton
+from PySide6.QtWidgets import QFileDialog, QLabel, QMenu, QMessageBox, QToolButton
 
 from app.domain import mdm_enhed as md
 from app.ui.fejl import FEJL, udfoer
@@ -18,8 +22,20 @@ def _tid(tekst: str) -> str:
     return f"{vis_dato(tekst[:10])} {tekst[11:16]}".strip() if tekst else ""
 
 
-class MdmSide(SagListeSide):
-    def __init__(self, service, parent=None):
+def _handlingsknap(menu: QMenu) -> QToolButton:
+    knap = QToolButton()
+    knap.setText("Handling")
+    knap.setProperty("variant", "menu")
+    knap.setCursor(Qt.CursorShape.PointingHandCursor)
+    knap.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+    knap.setMenu(menu)
+    return knap
+
+
+class _MdmListeSide(SagListeSide):
+    """Fælles for Telefoner og Arkiv: kolonner, låsning, koder og CSV-eksport."""
+
+    def __init__(self, service, titel, undertitel, ekstra_kolonner=(), parent=None):
         kolonner = [
             Kolonne("Enhedsnavn", 130, lambda e: e.navn, tooltip=lambda e: e.note),
             Kolonne("Telefonnr.", 140, lambda e: e.telefonnummer),
@@ -31,23 +47,14 @@ class MdmSide(SagListeSide):
             Kolonne("Model", 170, lambda e: e.visningsmodel),
             Kolonne("Serienr.", 140, lambda e: e.serienummer, tooltip=lambda e: e.imei),
             Kolonne("Android", 80, lambda e: e.android_version),
+            *ekstra_kolonner,
             Kolonne("Klargjort", 0, lambda e: _tid(e.klargjort), sortering=lambda e: e.klargjort),
         ]
         filtre = [Filtervalg("Status", lambda: list(md.STATUSSER), lambda e: e.status)]
-        super().__init__(
-            "Telefoner (MDM)",
-            "Driftstelefoner registreret ved enhedsnavn fra ERP (fx ISM589) og klargjort med "
-            "QR-kode direkte fra IN-BASE. Kun basale apps, FL-UPDATE og FL-TMS.",
-            kolonner, filtre=filtre, sorter_efter=0, parent=parent,
-            soegning=lambda e: f"{e.imei} {e.note}",
-        )
+        super().__init__(titel, undertitel, kolonner, filtre=filtre, sorter_efter=0,
+                         parent=parent, soegning=lambda e: f"{e.imei} {e.note}")
         self.service = service
         self.soegefelt.setPlaceholderText("Søg på enhedsnavn, nummer, serienr., IMEI …")
-
-        self.mangler_label = QLabel("")
-        self.mangler_label.setObjectName("advarsel")
-        self.mangler_label.setWordWrap(True)
-        self.layout().insertWidget(1, self.mangler_label)
 
         # Almindelige brugere ser siden, men den er låst (ingen data, ingen knapper).
         self.laast_label = QLabel("🔒  Du har ikke adgang til Telefoner (MDM). Kontakt en "
@@ -55,46 +62,35 @@ class MdmSide(SagListeSide):
         self.laast_label.setObjectName("advarsel")
         self.laast_label.setWordWrap(True)
         self.layout().insertWidget(1, self.laast_label)
+        self._admin_widgets = [self.soegefelt, self.tabel, *self.filter_felter]
+        self.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(self.dobbeltklik))
 
-        ny = lav_knap("+ Ny telefon", "primary")
-        ny.clicked.connect(self.ny)
-        klargoer = lav_knap("Klargør (QR-kode)…")
-        klargoer.clicked.connect(lambda: self._paa_valgt(self.klargoer))
-        opdater = lav_knap("Opdater telefoner…")
-        opdater.setToolTip("Klargjorte telefoner henter den nyeste styrings-app fra denne pc – "
-                           "uden nulstilling.")
-        opdater.clicked.connect(self.opdater_telefoner)
-        handling = self._handlingsmenu()
-        self._admin_widgets = (ny, klargoer, opdater, handling, self.soegefelt, self.tabel,
-                               *self.filter_felter)
-        for knap in (ny, klargoer, opdater):
+    def _tilfoej_knapper(self, *knapper) -> None:
+        for knap in knapper:
             self.tilfoej_knap(knap)
-        self.tilfoej_handling(handling)
-        self.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(self.rediger))
-        self.anvend_rolle(False)
+        self._admin_widgets.extend(knapper)
 
-    def _handlingsmenu(self):
+    def _tilfoej_menu(self, punkter) -> None:
+        """punkter: [(tekst, funktion(enhed)), ...]; (None, None) giver en streg."""
         menu = QMenu(self)
-        for tekst, funktion in (("Ret oplysninger…", self.rediger),
-                                ("Vis nulstillingskode…", self.vis_kode),
-                                ("Vis supportkode (Chrome)…", self.vis_supportkode),
-                                (None, None),
-                                ("Slå firma-mail til…", lambda e: self.skift_mail(e, True)),
-                                ("Slå firma-mail fra…", lambda e: self.skift_mail(e, False)),
-                                (None, None),
-                                ("Markér som udgået", self.udgaaet), (None, None),
-                                ("Fjern fra listen", self.slet)):
+        for tekst, funktion in punkter:
             if tekst is None:
                 menu.addSeparator()
             else:
                 menu.addAction(tekst, lambda f=funktion: self._paa_valgt(f))
-        knap = QToolButton()
-        knap.setText("Handling")
-        knap.setProperty("variant", "menu")
-        knap.setCursor(Qt.CursorShape.PointingHandCursor)
-        knap.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        knap.setMenu(menu)
+        knap = _handlingsknap(menu)
+        self.tilfoej_handling(knap)
+        self._admin_widgets.append(knap)
+
+    def _eksportknap(self):
+        knap = lav_knap("Eksportér CSV…")
+        knap.setToolTip("Alle telefoner (også arkiverede) med nulstillings- og ændringskoder "
+                        "– til opbevaring offline.")
+        knap.clicked.connect(self.eksporter)
         return knap
+
+    def dobbeltklik(self, enhed) -> None:
+        self.vis_kode(enhed)
 
     def anvend_rolle(self, admin: bool) -> None:
         self.laast_label.setVisible(not admin)
@@ -102,7 +98,9 @@ class MdmSide(SagListeSide):
             widget.setEnabled(admin)
         if not admin:
             self.ryd()
-            self.mangler_label.hide()
+
+    def hent(self):
+        raise NotImplementedError
 
     ### ----- data -----------------------------------------------------------
 
@@ -111,10 +109,7 @@ class MdmSide(SagListeSide):
         self.anvend_rolle(adgang)
         if not adgang:
             return
-        mangler = self.service.klargoering_mangler()
-        self.mangler_label.setText(mangler)
-        self.mangler_label.setVisible(bool(mangler))
-        alle = udfoer(self, self.service.hent_alle)
+        alle = udfoer(self, self.hent)
         if alle is not FEJL:
             self.vis(alle)
 
@@ -131,27 +126,20 @@ class MdmSide(SagListeSide):
             self, titel, tekst, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
 
-    ### ----- handlinger -----------------------------------------------------
+    ### ----- koder og eksport -----------------------------------------------
 
-    def ny(self) -> None:
-        dialog = TelefonDialog(self, self.service)
-        if dialog.exec() and dialog.resultat is not None:
-            self.opdater()
-            self.klargoer(dialog.resultat)
-
-    def rediger(self, enhed) -> None:
-        if TelefonDialog(self, self.service, enhed).exec():
-            self.opdater()
-
-    def klargoer(self, enhed) -> None:
-        if enhed.status == md.KLARGJORT and not self._bekraeft(
-                "Klargør igen", f"{enhed.navn} er allerede klargjort. Klargøre den igen "
-                "(telefonen skal fabriksnulstilles)?"):
+    def eksporter(self) -> None:
+        sti, _ = QFileDialog.getSaveFileName(
+            self, "Eksportér telefoner og koder",
+            f"IN-BASE telefoner {date.today().isoformat()}.csv", "CSV-fil (*.csv)")
+        if not sti:
             return
-        dialog = KlargoeringDialog(self, self.service, enhed)
-        dialog.exec()
-        if dialog.klargjort:
-            self.opdater()
+        antal = udfoer(self, self.service.eksporter_csv, sti)
+        if antal is not FEJL:
+            QMessageBox.information(
+                self, "Eksportér CSV",
+                f"{antal} telefoner (inkl. arkiverede) med koder er gemt i:\n{sti}\n\n"
+                "Filen kan åbnes i Excel. Opbevar den et sikkert sted.")
 
     def vis_kode(self, enhed) -> None:
         if not enhed.nulstillingskode:
@@ -188,6 +176,79 @@ class MdmSide(SagListeSide):
             "2. Indtast supportkoden og vælg \"Vis Chrome\".\n"
             "3. Når fejlen er løst: samme sted, vælg \"Skjul Chrome\".")
 
+
+class MdmSide(_MdmListeSide):
+    def __init__(self, service, parent=None):
+        super().__init__(
+            service, "Telefoner (MDM)",
+            "Driftstelefoner registreret ved enhedsnavn fra ERP (fx ISM589) og klargjort med "
+            "QR-kode direkte fra IN-BASE. Kun basale apps, FL-UPDATE og FL-TMS.", parent=parent)
+
+        self.mangler_label = QLabel("")
+        self.mangler_label.setObjectName("advarsel")
+        self.mangler_label.setWordWrap(True)
+        self.layout().insertWidget(1, self.mangler_label)
+
+        ny = lav_knap("+ Ny telefon", "primary")
+        ny.clicked.connect(self.ny)
+        klargoer = lav_knap("Klargør (QR-kode)…")
+        klargoer.clicked.connect(lambda: self._paa_valgt(self.klargoer))
+        opdater = lav_knap("Opdater telefoner…")
+        opdater.setToolTip("Klargjorte telefoner henter den nyeste styrings-app fra denne pc – "
+                           "uden nulstilling.")
+        opdater.clicked.connect(self.opdater_telefoner)
+        self._tilfoej_knapper(ny, klargoer, opdater, self._eksportknap())
+        self._tilfoej_menu((("Ret oplysninger…", self.rediger),
+                            ("Vis nulstillingskode…", self.vis_kode),
+                            ("Vis supportkode (Chrome)…", self.vis_supportkode),
+                            (None, None),
+                            ("Slå firma-mail til…", lambda e: self.skift_mail(e, True)),
+                            ("Slå firma-mail fra…", lambda e: self.skift_mail(e, False)),
+                            (None, None),
+                            ("Markér som udgået", self.udgaaet), (None, None),
+                            ("Fjern fra listen (til Arkiv)…", self.arkiver)))
+        self.anvend_rolle(False)
+
+    def dobbeltklik(self, enhed) -> None:
+        self.rediger(enhed)
+
+    def anvend_rolle(self, admin: bool) -> None:
+        super().anvend_rolle(admin)
+        if not admin:
+            self.mangler_label.hide()
+
+    def hent(self):
+        return self.service.hent_alle()
+
+    def opdater(self) -> None:
+        if self.service.har_adgang():
+            mangler = self.service.klargoering_mangler()
+            self.mangler_label.setText(mangler)
+            self.mangler_label.setVisible(bool(mangler))
+        super().opdater()
+
+    ### ----- handlinger -----------------------------------------------------
+
+    def ny(self) -> None:
+        dialog = TelefonDialog(self, self.service)
+        if dialog.exec() and dialog.resultat is not None:
+            self.opdater()
+            self.klargoer(dialog.resultat)
+
+    def rediger(self, enhed) -> None:
+        if TelefonDialog(self, self.service, enhed).exec():
+            self.opdater()
+
+    def klargoer(self, enhed) -> None:
+        if enhed.status == md.KLARGJORT and not self._bekraeft(
+                "Klargør igen", f"{enhed.navn} er allerede klargjort. Klargøre den igen "
+                "(telefonen skal fabriksnulstilles)?"):
+            return
+        dialog = KlargoeringDialog(self, self.service, enhed)
+        dialog.exec()
+        if dialog.klargjort:
+            self.opdater()
+
     def skift_mail(self, enhed, til: bool) -> None:
         """Viser ændringskoden til telefonen og gemmer derefter, at mail er slået til/fra."""
         kode = md.aendringskode(enhed.nulstillingskode, md.MAIL_TIL if til else md.MAIL_FRA)
@@ -218,7 +279,44 @@ class MdmSide(SagListeSide):
             if udfoer(self, self.service.marker_udgaaet, enhed) is not FEJL:
                 self.opdater()
 
+    def arkiver(self, enhed) -> None:
+        if self._bekraeft("Fjern fra listen",
+                          f"Fjern {enhed.navn} fra listen?\n\nTelefonen flyttes til Arkiv med "
+                          "nulstillingskoden – intet slettes, og den kan gendannes derfra."):
+            if udfoer(self, self.service.arkiver, enhed) is not FEJL:
+                self.opdater()
+
+
+class MdmArkivSide(_MdmListeSide):
+    """Telefoner fjernet fra listen. Koderne kan stadig ses, og telefonen kan gendannes."""
+
+    def __init__(self, service, parent=None):
+        super().__init__(
+            service, "Arkiv",
+            "Telefoner fjernet fra Telefoner (MDM). De er ikke slettet – nulstillingskoder mm. "
+            "er bevaret, og telefonerne kan gendannes.",
+            [Kolonne("Arkiveret", 130, lambda e: _tid(e.arkiveret),
+                     sortering=lambda e: e.arkiveret)], parent=parent)
+        self._tilfoej_knapper(self._eksportknap())
+        self._tilfoej_menu((("Vis nulstillingskode…", self.vis_kode),
+                            ("Vis supportkode (Chrome)…", self.vis_supportkode),
+                            (None, None),
+                            ("Gendan til Telefoner", self.gendan), (None, None),
+                            ("Slet permanent…", self.slet)))
+        self.anvend_rolle(False)
+
+    def hent(self):
+        return self.service.hent_arkiverede()
+
+    def gendan(self, enhed) -> None:
+        if udfoer(self, self.service.gendan, enhed) is not FEJL:
+            self.opdater()
+
     def slet(self, enhed) -> None:
-        if self._bekraeft("Fjern fra listen", f"Fjern {enhed.navn} fra IN-BASE?"):
+        if self._bekraeft(
+                "Slet permanent",
+                f"Slet {enhed.navn} permanent?\n\nNulstillingskoden forsvinder, og telefonen kan "
+                "ikke længere nulstilles med den. Eksportér evt. en CSV-fil først.\n\n"
+                "Det kan ikke fortrydes."):
             if udfoer(self, self.service.slet, enhed) is not FEJL:
                 self.opdater()

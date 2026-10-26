@@ -7,7 +7,12 @@ oprettelse, rettelser og når en telefon melder sig klargjort.
 
 Kun brugere med modulet Telefoner (og administratorer) bruger det – håndhæves af
 RLS i migrering 010; her gives blot en pæn besked først.
+
+Telefoner, der fjernes fra listen, arkiveres (migrering 013) – nulstillingskoden
+bevares, og telefonen kan gendannes. Alle telefoner og deres koder kan eksporteres
+til en CSV-fil, der kan ligge offline.
 """
+import csv
 import logging
 import re
 import secrets
@@ -45,6 +50,12 @@ MAKS_APK = 200 * 1024 * 1024
 PAKKENAVN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
 # Sti på klargøringsserveren, når FL-UPDATE er valgt som fil på pc'en.
 FL_UPDATE_STI = "/fl-update.apk"
+
+
+def _excel_tekst(vaerdi: str) -> str:
+    """Koder, IMEI mm. som tekst i Excel – ellers forsvinder foranstillede nuller
+    ("01234567" -> 1234567), og lange tal vises som 3,5E+14."""
+    return f'="{vaerdi}"' if vaerdi else ""
 
 
 def er_apk(start: bytes) -> bool:
@@ -99,8 +110,10 @@ def valider(enhed: MdmEnhed, andre: list[MdmEnhed] = ()) -> None:
     if not md.NAVN_MOENSTER.match(enhed.navn):
         raise ValideringsFejl(f"Enhedsnavnet \"{enhed.navn}\" er ugyldigt. Brug 2-{md.MAKS_NAVN} "
                               "bogstaver, tal eller bindestreg, fx ISM589.")
-    if any(a.navn == enhed.navn and a.id != enhed.id for a in andre):
-        raise ValideringsFejl(f"Der findes allerede en telefon med enhedsnavnet {enhed.navn}.")
+    samme = next((a for a in andre if a.navn == enhed.navn and a.id != enhed.id), None)
+    if samme:
+        raise ValideringsFejl(f"Der findes allerede en telefon med enhedsnavnet {enhed.navn}"
+                              + (" i Arkiv – gendan den derfra." if samme.arkiveret else "."))
     tlf = enhed.telefonnummer.replace(" ", "").replace("+", "")
     if tlf and not tlf.isdigit():
         raise ValideringsFejl("Telefonnummeret må kun indeholde tal, mellemrum og +.")
@@ -127,6 +140,13 @@ class MdmService:
     ### ----- telefoner ------------------------------------------------------
 
     def hent_alle(self) -> list[MdmEnhed]:
+        """Telefonerne i listen (ikke de arkiverede)."""
+        return [e for e in self._alle() if not e.arkiveret]
+
+    def hent_arkiverede(self) -> list[MdmEnhed]:
+        return [e for e in self._alle() if e.arkiveret]
+
+    def _alle(self) -> list[MdmEnhed]:
         return sorted(self.repo.hent_alle(), key=lambda e: e.navn)
 
     @staticmethod
@@ -166,9 +186,48 @@ class MdmService:
         self._kraev_admin()
         self.repo.opdater([{"id": enhed.id, "status": md.UDGAAET}])
 
-    def slet(self, enhed: MdmEnhed) -> None:
+    def arkiver(self, enhed: MdmEnhed) -> None:
+        """Fjerner telefonen fra listen uden at slette den (koderne bevares)."""
         self._kraev_admin()
+        self.repo.opdater([{"id": enhed.id, "arkiveret": nu()}])
+        log.info("Telefon %s arkiveret", enhed.navn)
+
+    def gendan(self, enhed: MdmEnhed) -> None:
+        self._kraev_admin()
+        self.repo.opdater([{"id": enhed.id, "arkiveret": ""}])
+        log.info("Telefon %s gendannet fra arkivet", enhed.navn)
+
+    def slet(self, enhed: MdmEnhed) -> None:
+        """Sletter permanent – kun fra arkivet."""
+        self._kraev_admin()
+        if not enhed.arkiveret:
+            raise ValideringsFejl("Kun arkiverede telefoner kan slettes permanent.")
         self.repo.slet(enhed.id)
+        log.info("Telefon %s slettet permanent", enhed.navn)
+
+    def eksporter_csv(self, sti) -> int:
+        """Alle telefoner (også arkiverede) med koder til en CSV-fil, der kan åbnes i Excel.
+        Returnerer antal telefoner."""
+        self._kraev_admin()
+        enheder = self._alle()
+        with open(sti, "w", encoding="utf-8-sig", newline="") as fil:
+            skriver = csv.writer(fil, delimiter=";")
+            skriver.writerow(["Enhedsnavn", "Telefonnr.", "Status", "Arkiveret", "Nulstillingskode",
+                              "Supportkode (Chrome)", "Kode: mail til", "Kode: mail fra",
+                              "Firma-mail", "Producent", "Model", "Serienr.", "IMEI", "Android",
+                              "Klargjort", "Note"])
+            for e in enheder:
+                kode = e.nulstillingskode
+                tekst = [_excel_tekst(v) for v in (
+                    e.telefonnummer, kode, md.supportkode(kode),
+                    md.aendringskode(kode, md.MAIL_TIL), md.aendringskode(kode, md.MAIL_FRA),
+                    e.serienummer, e.imei)]
+                skriver.writerow([
+                    e.navn, tekst[0], e.status, e.arkiveret[:16].replace("T", " "), *tekst[1:5],
+                    "Ja" if e.mail else "Nej", e.producent, e.model, tekst[5], tekst[6],
+                    e.android_version, e.klargjort[:16].replace("T", " "), e.note])
+        log.info("%s telefoner eksporteret til %s", len(enheder), sti)
+        return len(enheder)
 
     ### ----- klargøring -----------------------------------------------------
 

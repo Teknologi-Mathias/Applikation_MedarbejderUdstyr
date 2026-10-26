@@ -1,4 +1,5 @@
 """Telefoner (MDM): QR-kode, lokal klargøringsserver og MdmService (JSON-lagring)."""
+import csv
 import io
 import json
 import re
@@ -19,7 +20,7 @@ from tests.hjaelp import TjenesteTest
 
 MIGRERINGER = Path(__file__).resolve().parents[1] / "app/infrastructure/database/migrations"
 MIGRERING_008 = MIGRERINGER / "008_mdm_lokal_klargoering.sql"
-MIGRERING_012 = MIGRERINGER / "012_mdm_mail_og_signering.sql"
+MIGRERING_013 = MIGRERINGER / "013_mdm_arkiv.sql"
 E = "android.app.extra."
 APK_DATA = b"PK falsk apk"
 
@@ -93,6 +94,26 @@ class MdmServiceTest(TjenesteTest):
         with self.assertRaises(ValideringsFejl):
             self.s.saet_mail(enhed, True)
 
+    def test_fjernet_telefon_arkiveres_med_koden_og_kan_gendannes_og_eksporteres(self):
+        enhed = self.s.opret({"navn": "ISM589"})
+        self.s.repo.opdater([{"id": enhed.id, "nulstillingskode": "01234567"}])
+        self.s.arkiver(enhed)
+        self.assertEqual(self.s.hent_alle(), [])
+        arkiveret = self.s.hent_arkiverede()[0]
+        self.assertEqual(arkiveret.nulstillingskode, "01234567", "koden bevares")
+        with self.assertRaisesRegex(ValideringsFejl, "Arkiv"):
+            self.s.opret({"navn": "ISM589"})
+        sti = self.central / "telefoner.csv"
+        self.assertEqual(self.s.eksporter_csv(sti), 1)
+        raekke = list(csv.reader(sti.read_text(encoding="utf-8-sig").splitlines(), delimiter=";"))[1]
+        self.assertEqual(raekke[0], "ISM589")
+        self.assertIn('="01234567"', raekke, "Excel må ikke fjerne foranstillede nuller")
+        self.assertIn(f'="{md.supportkode("01234567")}"', raekke)
+        self.s.gendan(enhed)
+        self.assertEqual([e.navn for e in self.s.hent_alle()], ["ISM589"])
+        with self.assertRaises(ValideringsFejl, msg="kun arkiverede kan slettes"):
+            self.s.slet(self.s.hent_alle()[0])
+
     @unittest.skipUnless(Path("assets/mdm/inbase-klargoering.apk").is_file(), "APK ikke bygget")
     def test_klargoering_husker_indstillinger_og_registrerer_rapport(self):
         enhed = self.s.opret({"navn": "ISM589"})
@@ -158,15 +179,15 @@ class AendringskodeTest(unittest.TestCase):
 
 
 class DomaeneOgDatabaseStemmerOverensTest(unittest.TestCase):
-    """Statusser (008) og gemte felter (012) står i domænet OG i migreringerne."""
+    """Statusser (008) og gemte felter (013) står i domænet OG i migreringerne."""
 
     def test_statusser_og_felter(self):
         from app.repositories.supabase.mapping import MDM_FELTER
         sql = MIGRERING_008.read_text(encoding="utf-8")
         for status in md.STATUSSER:
             self.assertIn(f"'{status}'", sql)
-        sql_012 = MIGRERING_012.read_text(encoding="utf-8")
-        tilladte = set(re.findall(r"'([a-z_]+)'", sql_012.split("if v_key not in (")[1].split(")")[0]))
+        sql_013 = MIGRERING_013.read_text(encoding="utf-8")
+        tilladte = set(re.findall(r"'([a-z_]+)'", sql_013.split("if v_key not in (")[1].split(")")[0]))
         kolonner = {k for n, k, _ in MDM_FELTER if n in md.GEMTE_FELTER}
         self.assertEqual(kolonner, tilladte - {"id"})
 

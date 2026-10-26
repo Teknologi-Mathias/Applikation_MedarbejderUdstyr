@@ -43,7 +43,7 @@ from app.ui.hjaelpere import lav_app_ikon, lav_knap, lav_sidehoved
 from app.ui.indmelding_side import IndmeldingSide
 from app.ui.indstillinger_side import IndstillingerSide
 from app.ui.login_dialog import LoginDialog
-from app.ui.mdm_side import MdmSide
+from app.ui.mdm_side import MdmArkivSide, MdmSide
 from app.ui.modul_controller import OffboardingController, OnboardingController
 from app.ui.modul_oversigt import ModulOversigtSide, alarmer_for
 from app.ui.moduler import offboarding_modul, onboarding_modul
@@ -80,7 +80,10 @@ STRUKTUR = [
         ("off_arkiv", "Arkiv"),
     ]),
     (None, [("oensker", "Ønsker & Udvikling")]),
-    (None, [("telefoner", "Telefoner (MDM)")]),
+    ("Telefoner (MDM)", [
+        ("telefoner", "Telefoner"),
+        ("telefoner_arkiv", "Arkiv"),
+    ]),
     (None, [("indstillinger", "Indstillinger")]),
 ]
 
@@ -171,6 +174,8 @@ class MainWindow(QMainWindow):
         self._tilfoej("oensker", self.oensker)
         self.telefoner = MdmSide(self.t.mdm)
         self._tilfoej("telefoner", self.telefoner)
+        self.telefoner_arkiv = MdmArkivSide(self.t.mdm)
+        self._tilfoej("telefoner_arkiv", self.telefoner_arkiv)
         self.indstillinger = IndstillingerSide(
             self.t, self._alle_arkiverede, self._alle_aktive, self.notifikationer.vis_besked,
         )
@@ -419,8 +424,9 @@ class MainWindow(QMainWindow):
             self.stak.setCurrentWidget(self.laast_side)
             return
         self.stak.setCurrentWidget(side)
-        # Telefoner hentes kun, når siden åbnes (ikke hvert minut) – sparer Supabase-trafik.
-        if isinstance(side, (SkabelonSide, IndstillingerSide, IndmeldingSide, MdmSide)):
+        # Telefoner og Arkiv hentes kun, når siden åbnes (ikke hvert minut) – sparer Supabase-trafik.
+        if isinstance(side, (SkabelonSide, IndstillingerSide, IndmeldingSide, MdmSide,
+                             MdmArkivSide)):
             side.opdater()
 
     def aabn_sag(self, proces, sag_id, opgave_id=""):
@@ -453,7 +459,8 @@ class MainWindow(QMainWindow):
                 laast = not session.har_adgang(adgang.modul_for_side(noegle))
                 self.sidebar.knapper[noegle].setText(
                     tekst.replace("&", "&&") + (LAAS if laast else ""))
-        self.telefoner.anvend_rolle(session.har_adgang(adgang.TELEFONER))
+        for side in (self.telefoner, self.telefoner_arkiv):
+            side.anvend_rolle(session.har_adgang(adgang.TELEFONER))
         self.indstillinger.anvend_rolle(admin)
 
     def skift_tema(self, tema):
@@ -483,7 +490,7 @@ class MainWindow(QMainWindow):
         self.data = {ON: ([], []), OFF: ([], [])}
         self._signatur = None
         for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
-                + [self.oensker, self.telefoner]:
+                + [self.oensker, self.telefoner, self.telefoner_arkiv]:
             side.ryd()
 
     def _session_udloebet(self, fejl):
