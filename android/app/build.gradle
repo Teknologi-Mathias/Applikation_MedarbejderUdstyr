@@ -13,6 +13,19 @@ if (!reservekodeFil.exists()) {
 }
 def reservekode = reservekodeFil.text.trim()
 
+// Signering: projektets faste nøgle fra Supabase (kun administratorer), hentet af
+// scripts/byg_klargoering_apk.ps1 til android/signering/ og slettet igen efter bygget.
+// Telefonerne afviser opdateringer signeret med en anden nøgle – derfor ALDRIG debug-nøglen.
+def signeringFil = rootProject.file("signering/signering.properties")
+def signering = new Properties()
+if (signeringFil.exists()) signeringFil.withInputStream { signering.load(it) }
+gradle.taskGraph.whenReady { graf ->
+    if (!signeringFil.exists() && graf.allTasks.any { it.name == "packageRelease" }) {
+        throw new GradleException("Signeringsnøglen mangler. Byg med scripts\\byg_klargoering_apk.ps1 " +
+                "(henter nøglen med dit IN-BASE-administratorlogin).")
+    }
+}
+
 android {
     namespace "dk.instore.inbase.klargoering"
     compileSdk 37
@@ -21,21 +34,33 @@ android {
         applicationId "dk.instore.inbase.klargoering"
         minSdk 29          // Android 10+: QR-klargøring med GET_PROVISIONING_MODE
         targetSdk 35
-        versionCode 3
-        versionName "3.0"
+        versionCode 4
+        versionName "4.0"
         resValue "string", "reservekode", reservekode
+    }
+
+    signingConfigs {
+        release {
+            if (signeringFil.exists()) {
+                storeFile rootProject.file("signering/" + signering.storeFile)
+                storePassword signering.storePassword
+                keyAlias signering.keyAlias
+                keyPassword signering.keyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             // Appen distribueres kun fra IN-BASE (kontrolsum i QR-koden), aldrig via en butik.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 
     buildFeatures {
         resValues true
+        buildConfig true   // BuildConfig.VERSION_NAME i rapporten til IN-BASE
     }
 
     compileOptions {

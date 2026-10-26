@@ -19,7 +19,7 @@ from tests.hjaelp import TjenesteTest
 
 MIGRERINGER = Path(__file__).resolve().parents[1] / "app/infrastructure/database/migrations"
 MIGRERING_008 = MIGRERINGER / "008_mdm_lokal_klargoering.sql"
-MIGRERING_009 = MIGRERINGER / "009_mdm_nulstillingskode.sql"
+MIGRERING_012 = MIGRERINGER / "012_mdm_mail_og_signering.sql"
 E = "android.app.extra."
 APK_DATA = b"PK falsk apk"
 
@@ -82,6 +82,17 @@ class MdmServiceTest(TjenesteTest):
         with self.assertRaises(ValideringsFejl):
             self.s.opret({"navn": "ISM3"})
 
+    def test_mail_kan_slaas_til_og_fra_efter_klargoering(self):
+        enhed = self.s.opret({"navn": "ISM589"})
+        self.assertFalse(enhed.mail)
+        self.assertTrue(self.s.saet_mail(enhed, True).mail)
+        self.assertTrue(self.s.hent_alle()[0].mail)
+        self.s.saet_mail(enhed, False)
+        self.assertFalse(self.s.hent_alle()[0].mail)
+        session.log_ind({"brugernavn": "HAFRA", "navn": "H", "rolle": "Bruger"})
+        with self.assertRaises(ValideringsFejl):
+            self.s.saet_mail(enhed, True)
+
     @unittest.skipUnless(Path("assets/mdm/inbase-klargoering.apk").is_file(), "APK ikke bygget")
     def test_klargoering_husker_indstillinger_og_registrerer_rapport(self):
         enhed = self.s.opret({"navn": "ISM589"})
@@ -126,6 +137,7 @@ class MdmServiceTest(TjenesteTest):
         self.assertEqual((gemt.status, gemt.model, gemt.serienummer), (md.KLARGJORT, "moto g54", "ZY22"))
         self.assertTrue(gemt.klargjort)
         self.assertEqual(gemt.nulstillingskode, k.nulstillingskode)
+        self.assertTrue(gemt.mail, "mail-valget fra klargøringen gemmes")
         self.assertRegex(k.nulstillingskode, r"^\d{8}$")
         # Skal give samme kode som AdminActivity.supportkode på telefonen.
         self.assertEqual(md.supportkode("12345678"), "483606")
@@ -133,16 +145,28 @@ class MdmServiceTest(TjenesteTest):
         self.assertEqual(ekstra["nulstillingskode"], k.nulstillingskode)
 
 
+class AendringskodeTest(unittest.TestCase):
+    def test_koder_pr_handling_og_supportkoden_er_uaendret(self):
+        # Samme værdi som før ændringskoderne – telefoner med v3 bruger den stadig.
+        self.assertEqual(md.supportkode("12345678"), "483606")
+        self.assertEqual(md.aendringskode("12345678", md.CHROME), "483606")
+        koder = {md.aendringskode("12345678", h) for h in (md.CHROME, md.MAIL_TIL, md.MAIL_FRA)}
+        self.assertEqual(len(koder), 3)
+        self.assertNotEqual(md.aendringskode("87654321", md.MAIL_TIL),
+                            md.aendringskode("12345678", md.MAIL_TIL), "koden gælder én telefon")
+        self.assertEqual(md.aendringskode("", md.MAIL_TIL), "")
+
+
 class DomaeneOgDatabaseStemmerOverensTest(unittest.TestCase):
-    """Statusser (008) og gemte felter (009) står i domænet OG i migreringerne."""
+    """Statusser (008) og gemte felter (012) står i domænet OG i migreringerne."""
 
     def test_statusser_og_felter(self):
         from app.repositories.supabase.mapping import MDM_FELTER
         sql = MIGRERING_008.read_text(encoding="utf-8")
         for status in md.STATUSSER:
             self.assertIn(f"'{status}'", sql)
-        sql_009 = MIGRERING_009.read_text(encoding="utf-8")
-        tilladte = set(re.findall(r"'([a-z_]+)'", sql_009.split("if v_key not in (")[1].split(")")[0]))
+        sql_012 = MIGRERING_012.read_text(encoding="utf-8")
+        tilladte = set(re.findall(r"'([a-z_]+)'", sql_012.split("if v_key not in (")[1].split(")")[0]))
         kolonner = {k for n, k, _ in MDM_FELTER if n in md.GEMTE_FELTER}
         self.assertEqual(kolonner, tilladte - {"id"})
 

@@ -1,38 +1,21 @@
 package dk.instore.inbase.klargoering;
 
-import android.Manifest;
-import android.app.PendingIntent;
 import android.app.WallpaperManager;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
-import android.content.pm.PackageInstaller;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.os.PersistableBundle;
-import android.os.UserManager;
-import android.provider.Telephony;
-import android.telecom.TelecomManager;
 import android.telephony.TelephonyManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -46,41 +29,16 @@ import java.util.function.Consumer;
  *   baggrund       "1" = hent baggrundsbillede fra IN-BASE
  *   nulstillingskode  kode til administrator-menuen (*#*#46227#*#*) – fabriksnulstilling
  *   mail           "1" = firma-mail: Gmail-appen synlig, IMAP-konti tilladt, Google-konti spærret
- *   tilladte       ekstra pakker (kommasepareret), der må ses ud over STANDARD_TILLADTE
+ *   tilladte       ekstra pakker (kommasepareret), der må ses ud over Politik.STANDARD_TILLADTE
  *   organisation   vises på låseskærmen (valgfri)
  *   kontakt        fx "Kontakt din IT-administrator (…)" – låseskærm og ved spærrede funktioner
+ *
+ * Reglerne (apps, begrænsninger, låseskærm) ligger i Politik og gemmes på telefonen –
+ * her køres de første gang. FL-UPDATE, baggrund og tilbagemelding sker kun ved klargøringen.
  *
  * Hvert trin fanger sine egne fejl: en fejl i ét trin stopper ikke resten.
  */
 class Klargoering {
-    private static final String[] BEGRAENSNINGER = {
-            UserManager.DISALLOW_FACTORY_RESET,
-            UserManager.DISALLOW_ADD_USER,
-            UserManager.DISALLOW_MODIFY_ACCOUNTS,
-            UserManager.DISALLOW_SAFE_BOOT,
-            UserManager.DISALLOW_DEBUGGING_FEATURES,
-            UserManager.DISALLOW_USB_FILE_TRANSFER,
-            UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA,
-            UserManager.DISALLOW_CONFIG_CREDENTIALS,
-            UserManager.DISALLOW_APPS_CONTROL,
-            UserManager.DISALLOW_UNINSTALL_APPS,
-            UserManager.DISALLOW_SET_WALLPAPER,
-    };
-
-    /** Apps, der altid må ses ud over Telefon, SMS, Indstillinger og startskærmen. */
-    private static final String[] STANDARD_TILLADTE = {
-            "com.google.android.contacts", "com.android.contacts",
-            "com.google.android.deskclock", "com.android.deskclock",
-            "com.google.android.calculator", "com.android.calculator2",
-            "com.motorola.camera3", "com.motorola.camera2", "com.motorola.camera",
-            "com.android.camera2", "com.google.android.GoogleCamera",
-            // Galleri – ellers kan de billeder, kameraet tager, ikke ses.
-            "com.google.android.apps.photos", "com.google.android.apps.photosgo",
-            "com.motorola.gallery", "com.android.gallery3d",
-    };
-
-    private static final String GMAIL = "com.google.android.gm";
-
     private final Context ctx;
     private final PersistableBundle ekstra;
     private final Consumer<String> log;
@@ -88,6 +46,7 @@ class Klargoering {
     private final ComponentName admin;
     private final JSONArray fejl = new JSONArray();
     private final JSONObject rapport = new JSONObject();
+    private Politik politik;
 
     Klargoering(Context ctx, PersistableBundle ekstra, Consumer<String> log) {
         this.ctx = ctx;
@@ -111,12 +70,22 @@ class Klargoering {
             ctx.getSharedPreferences(AdminActivity.PREFS, Context.MODE_PRIVATE).edit()
                     .putString(AdminActivity.KODE, e("nulstillingskode")).commit();
         });
-        trin("Rettigheder", this::rettigheder);
+        try {
+            politik = Politik.fraEkstra(ekstra);
+        } catch (Exception ex) {
+            // Kan kun ske ved en programfejl – uden regler kan telefonen ikke klargøres.
+            fejl.put("Regler: " + ex.getMessage());
+            log.accept("  FEJL – " + ex.getMessage());
+            return false;
+        }
+        // Reglerne gemmes, så de kan ændres og lægges på igen ved hver opstart.
+        trin("Gemmer regler", () -> politik.gem(ctx));
+        trin("Rettigheder", () -> politik.rettigheder(ctx));
         trin("Telefonoplysninger", this::oplysninger);
         if ("1".equals(e("baggrund"))) trin("Baggrundsbillede", this::baggrund);
         trin("Skjuler apps, der ikke skal bruges", this::skjulApps);
         trin("Henter og installerer FL-UPDATE", this::flUpdate);
-        trin("Låser indstillinger", this::begraensninger);
+        trin("Låser indstillinger", () -> politik.begraensninger(ctx));
         trin("Melder tilbage til IN-BASE", this::meldTilbage);
         return fejl.length() == 0;
     }
@@ -136,23 +105,8 @@ class Klargoering {
 
     // ----- trin -----------------------------------------------------------------
 
-    private void rettigheder() {
-        dpm.setPermissionGrantState(admin, ctx.getPackageName(), Manifest.permission.READ_PHONE_STATE,
-                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
-        String org = e("organisation");
-        if (!org.isEmpty()) dpm.setOrganizationName(admin, org);
-        String kontakt = e("kontakt");
-        dpm.setDeviceOwnerLockScreenInfo(admin, (e("navn") + (org.isEmpty() ? "" : " · " + org)
-                + (kontakt.isEmpty() ? "" : "\n" + kontakt)).trim());
-        if (!kontakt.isEmpty()) {
-            // Vises, når brugeren rammer en spærret funktion (fx nulstilling eller konti).
-            dpm.setShortSupportMessage(admin, kontakt);
-            dpm.setLongSupportMessage(admin, "Telefonen er en firmatelefon (" + e("navn") + "). "
-                    + kontakt);
-        }
-    }
-
     private void oplysninger() throws Exception {
+        rapport.put("app_version", BuildConfig.VERSION_NAME);
         rapport.put("producent", Build.MANUFACTURER);
         rapport.put("model", Build.MODEL);
         rapport.put("android_version", Build.VERSION.RELEASE);
@@ -171,7 +125,7 @@ class Klargoering {
     }
 
     private void baggrund() throws Exception {
-        HttpURLConnection forb = aabn(e("server") + "/baggrund");
+        HttpURLConnection forb = Installer.aabn(e("server") + "/baggrund");
         try (InputStream ind = forb.getInputStream()) {
             WallpaperManager.getInstance(ctx).setStream(ind, null, true,
                     WallpaperManager.FLAG_SYSTEM | WallpaperManager.FLAG_LOCK);
@@ -181,84 +135,21 @@ class Klargoering {
     }
 
     private void skjulApps() throws Exception {
-        PackageManager pm = ctx.getPackageManager();
-        Set<String> tilladte = new HashSet<>();
-        tilladte.add(ctx.getPackageName());
-        tilladte.add("com.android.settings");
-        java.util.Collections.addAll(tilladte, STANDARD_TILLADTE);
-        if (mail()) tilladte.add(GMAIL);
-        for (String p : e("tilladte").split(",")) if (!p.trim().isEmpty()) tilladte.add(p.trim());
-        TelecomManager tc = (TelecomManager) ctx.getSystemService(Context.TELECOM_SERVICE);
-        if (tc != null && tc.getDefaultDialerPackage() != null) tilladte.add(tc.getDefaultDialerPackage());
-        String sms = Telephony.Sms.getDefaultSmsPackage(ctx);
-        if (sms != null) tilladte.add(sms);
-        // Startskærmen må aldrig skjules.
-        Intent hjem = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
-        for (ResolveInfo r : pm.queryIntentActivities(hjem, PackageManager.MATCH_ALL)) {
-            tilladte.add(r.activityInfo.packageName);
-        }
-
-        Intent start = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> apps = pm.queryIntentActivities(start, PackageManager.MATCH_ALL);
-        Set<String> skjult = new HashSet<>();
-        for (ResolveInfo r : apps) {
-            String pakke = r.activityInfo.packageName;
-            if (tilladte.contains(pakke) || skjult.contains(pakke)) continue;
-            if (dpm.setApplicationHidden(admin, pakke, true)) skjult.add(pakke);
-        }
-        rapport.put("skjulte_apps", new JSONArray(skjult));
-        log.accept("  " + skjult.size() + " apps skjult");
+        JSONArray skjult = politik.skjulApps(ctx, true);
+        rapport.put("skjulte_apps", skjult);
+        log.accept("  " + skjult.length() + " apps skjult");
     }
 
     private void flUpdate() throws Exception {
         if (e("fl_update_url").isEmpty()) throw new Exception("intet link til FL-UPDATE i QR-koden");
         File apk = new File(ctx.getCacheDir(), "fl-update.apk");
-        HttpURLConnection forb = aabn(e("fl_update_url"));
-        try (InputStream ind = forb.getInputStream(); OutputStream ud = new FileOutputStream(apk)) {
-            kopier(ind, ud);
-        } finally {
-            forb.disconnect();
-        }
+        Installer.hent(e("fl_update_url"), apk);
         log.accept("  hentet (" + apk.length() / 1024 + " KB)");
-
-        PackageInstaller pi = ctx.getPackageManager().getPackageInstaller();
-        int id = pi.createSession(new PackageInstaller.SessionParams(
-                PackageInstaller.SessionParams.MODE_FULL_INSTALL));
-        try (PackageInstaller.Session session = pi.openSession(id)) {
-            try (OutputStream ud = session.openWrite("fl-update", 0, apk.length());
-                 InputStream ind = new FileInputStream(apk)) {
-                kopier(ind, ud);
-                session.fsync(ud);
-            }
-            CountDownLatch venter = new CountDownLatch(1);
-            InstallReceiver.venter = venter;
-            Intent svar = new Intent(ctx, InstallReceiver.class);
-            PendingIntent pend = PendingIntent.getBroadcast(ctx, id, svar,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
-            session.commit(pend.getIntentSender());
-            if (!venter.await(3, TimeUnit.MINUTES)) throw new Exception("installationen svarede ikke");
-        }
-        if (InstallReceiver.status != PackageInstaller.STATUS_SUCCESS) {
-            throw new Exception("installation afvist: " + InstallReceiver.besked);
-        }
-        String pakke = InstallReceiver.pakke;
+        String pakke = Installer.installer(ctx, apk);
         if (!pakke.isEmpty()) dpm.setUninstallBlocked(admin, pakke, true);
         rapport.put("fl_update", pakke);
         log.accept("  installeret (" + pakke + ")");
         apk.delete();
-    }
-
-    private void begraensninger() {
-        for (String b : BEGRAENSNINGER) {
-            // Med firma-mail må der tilføjes en IMAP-konto i Gmail – men aldrig en Google-konto.
-            if (mail() && UserManager.DISALLOW_MODIFY_ACCOUNTS.equals(b)) continue;
-            dpm.addUserRestriction(admin, b);
-        }
-        if (mail()) dpm.setAccountManagementDisabled(admin, "com.google", true);
-    }
-
-    private boolean mail() {
-        return "1".equals(e("mail"));
     }
 
     private void meldTilbage() throws Exception {
@@ -268,7 +159,7 @@ class Klargoering {
         Exception sidste = null;
         for (int forsoeg = 0; forsoeg < 3; forsoeg++) {
             try {
-                HttpURLConnection forb = aabn(e("server") + "/api/klargjort");
+                HttpURLConnection forb = Installer.aabn(e("server") + "/api/klargjort");
                 forb.setRequestMethod("POST");
                 forb.setDoOutput(true);
                 forb.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -287,21 +178,5 @@ class Klargoering {
         }
         throw new Exception("IN-BASE kunne ikke nås (" + sidste.getMessage() +
                 "). Er pc'en på samme Wi-Fi, og er QR-vinduet stadig åbent?");
-    }
-
-    // ----- hjælpere --------------------------------------------------------------
-
-    private static HttpURLConnection aabn(String adresse) throws Exception {
-        HttpURLConnection forb = (HttpURLConnection) new URL(adresse).openConnection();
-        forb.setConnectTimeout(15000);
-        forb.setReadTimeout(60000);
-        forb.setInstanceFollowRedirects(true);
-        return forb;
-    }
-
-    private static void kopier(InputStream ind, OutputStream ud) throws Exception {
-        byte[] buf = new byte[64 * 1024];
-        int n;
-        while ((n = ind.read(buf)) > 0) ud.write(buf, 0, n);
     }
 }

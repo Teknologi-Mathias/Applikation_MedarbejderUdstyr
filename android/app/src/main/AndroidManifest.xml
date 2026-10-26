@@ -7,8 +7,9 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- Ingen ikon på startskærmen: appen kører kun under klargøringen. -->
+    <!-- Eneste ikon på startskærmen: "IN-BASE indstillinger" (administrator-menuen). -->
     <application
         android:label="@string/app_navn"
         android:icon="@android:drawable/ic_lock_lock"
@@ -60,6 +61,29 @@
             android:name=".AdminActivity"
             android:exported="false"
             android:excludeFromRecents="true" />
+        <!-- Genvej til samme menu på startskærmen. Menuen kræver stadig en kode fra IN-BASE. -->
+        <activity-alias
+            android:name=".Indstillinger"
+            android:targetActivity=".AdminActivity"
+            android:label="IN-BASE indstillinger"
+            android:icon="@android:drawable/ic_menu_manage"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Lægger de gemte regler på igen ved opstart og efter en opdatering af appen. -->
+        <receiver
+            android:name=".OpstartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".HemmeligKodeReceiver"
             android:exported="true">

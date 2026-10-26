@@ -70,9 +70,12 @@ i denne rækkefølge, og tjek at hver giver "Success":
 11. `011_aaben_opsaetning.sql` – alle brugere ændrer skabeloner (i deres moduler),
     påmindelser og Organisation. Brugere, moduladgang, backup/slettepolitik og
     permanent sletning er stadig kun for administratorer.
+12. `012_mdm_mail_og_signering.sql` – Telefoner: om telefonen har firma-mail (kan slås til/fra
+    med en ændringskode) og styrings-appens signeringsnøgle, kun for administratorer
+    (se docs/MDM_OPSAETNING.md).
 
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004). Fremtidige ændringer kommer som nye filer `012_...`, `013_...`.
+fra 004). Fremtidige ændringer kommer som nye filer `013_...`, `014_...`.
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 

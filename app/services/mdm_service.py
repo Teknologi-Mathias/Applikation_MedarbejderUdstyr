@@ -79,7 +79,7 @@ class Klargoering:
 
     def qr_tekst(self, server: str) -> str:
         # Standardlisten over tilladte apps (Kontakter, Kamera, Ur …) ligger i styrings-appen
-        # (Klargoering.STANDARD_TILLADTE) – her sendes kun de ekstra, så QR-koden er let at scanne.
+        # (Politik.STANDARD_TILLADTE) – her sendes kun de ekstra, så QR-koden er let at scanne.
         ekstra = {
             "server": server, "token": self.token, "enhed_id": self.enhed.id,
             "navn": self.enhed.navn,
@@ -155,6 +155,13 @@ class MdmService:
         self.repo.opdater([{"id": enhed.id, **rene}])
         return ny
 
+    def saet_mail(self, enhed: MdmEnhed, mail: bool) -> MdmEnhed:
+        """Gemmer, at firma-mail er slået til/fra – efter ændringskoden er brugt på telefonen."""
+        self._kraev_admin()
+        self.repo.opdater([{"id": enhed.id, "mail": mail}])
+        log.info("Telefon %s: firma-mail %s", enhed.navn, "til" if mail else "fra")
+        return MdmEnhed.fra_dict({**enhed.til_dict(), "mail": mail})
+
     def marker_udgaaet(self, enhed: MdmEnhed) -> None:
         self._kraev_admin()
         self.repo.opdater([{"id": enhed.id, "status": md.UDGAAET}])
@@ -168,6 +175,14 @@ class MdmService:
     def klargoering_mangler(self) -> str:
         return "" if APK.is_file() else (
             f"Styrings-appen mangler ({APK}). Byg den med scripts\\byg_klargoering_apk.ps1.")
+
+    def opdaterings_apk(self) -> Path:
+        """Styrings-appen, som klargjorte telefoner henter under Opdater telefoner."""
+        self._kraev_admin()
+        mangler = self.klargoering_mangler()
+        if mangler:
+            raise ValideringsFejl(mangler)
+        return APK
 
     def reservekode(self) -> str:
         """Kode til telefoner klargjort uden egen nulstillingskode (styrings-app v1)."""
@@ -264,7 +279,7 @@ class MdmService:
         felter = {k: str(rapport.get(k) or "")[:100] for k in md.RAPPORTFELTER}
         # Koden gemmes først, når telefonen har bekræftet – så den altid passer til telefonen.
         felter.update(status=md.KLARGJORT, klargjort=nu(),
-                      nulstillingskode=klargoering.nulstillingskode)
+                      nulstillingskode=klargoering.nulstillingskode, mail=klargoering.mail)
         self.repo.opdater([{"id": klargoering.enhed.id, **felter}])
         log.info("Telefon %s klargjort (%s %s), fejl: %s", klargoering.enhed.navn,
                  felter["producent"], felter["model"], rapport.get("fejl") or "ingen")

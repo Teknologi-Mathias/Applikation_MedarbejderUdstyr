@@ -4,6 +4,7 @@ Regler ligger i MdmService – dialogerne viser og indsamler. Klargøringsdialog
 starter den midlertidige server (app/infrastructure/mdm/lokal_server.py), mens
 den er åben, og stopper den igen, når den lukkes.
 """
+import secrets
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRegularExpression, Qt, Signal
@@ -194,7 +195,8 @@ class KlargoeringDialog(QDialog):
         baggrund_raekke.addWidget(vaelg)
         self.mail = QCheckBox("Firma-mail (IMAP) i Gmail-appen")
         self.mail.setToolTip("Gmail-appen bliver synlig, og medarbejderen kan tilføje sin "
-                             "firma-mail (IMAP). Google-konti kan stadig ikke tilføjes.")
+                             "firma-mail (IMAP). Google-konti kan stadig ikke tilføjes. Kan "
+                             "også slås til senere: Handling → Slå firma-mail til.")
         self.ekstra_apps = QLineEdit(husk["ekstra_apps"])
         self.ekstra_apps.setPlaceholderText("Valgfrit – pakkenavne, kommasepareret")
         self.ekstra_apps.setToolTip("Apps, der skal kunne ses ud over Telefon, SMS, Kontakter, "
@@ -380,4 +382,67 @@ class KlargoeringDialog(QDialog):
 
     def done(self, resultat):
         self._stop_server()
+        super().done(resultat)
+
+
+class OpdateringDialog(QDialog):
+    """Opdater telefoner: serverer styrings-appen, så klargjorte telefoner (v4+) kan hente den
+    nye version fra administrator-menuen – uden nulstilling. Serveren kører, mens vinduet er åbent."""
+
+    def __init__(self, parent, apk: Path):
+        super().__init__(parent)
+        self.setWindowTitle("Opdater telefoner")
+        self.setMinimumWidth(560)
+        self._antal = 0
+        self._bro = _Bro()
+        self._bro.hentet.connect(self._telefon_hentede)
+        # Ingen telefon melder tilbage her – engangskoden bruges ikke, men skal være hemmelig.
+        self.server = KlargoeringsServer(apk, secrets.token_urlsafe(12), lambda _r: None,
+                                         paa_hentning=self._bro.hentet.emit)
+        adresse = QLabel("")
+        adresse.setStyleSheet("font-size: 22px; font-weight: bold;")
+        adresse.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status = QLabel("Venter på telefoner …")
+        self.status.setWordWrap(True)
+        try:
+            adresse.setText(self.server.start().removeprefix("http://"))
+        except OSError as fejl:
+            self.server = None
+            self.status.setText(f"Serveren kunne ikke starte ({fejl}). Er port 8765 optaget af "
+                                "et andet IN-BASE-vindue?")
+        trin = QLabel(
+            "<ol style='margin-left:-20px'>"
+            "<li>Telefonen skal være på samme Wi-Fi som denne pc.</li>"
+            "<li>Åbn <b>IN-BASE indstillinger</b> på telefonen (eller tast *#*#46227#*#*).</li>"
+            "<li>Indtast telefonens <b>nulstillingskode</b> og pc'ens adresse herunder.</li>"
+            "<li>Vælg <b>Opdater appen fra IN-BASE</b>. Telefonen henter og installerer den nye "
+            "version og lægger reglerne på igen.</li>"
+            "</ol>")
+        trin.setWordWrap(True)
+        trin.setTextFormat(Qt.TextFormat.RichText)
+        note = QLabel("Virker kun på telefoner klargjort med IN-BASE Klargøring 4.0 eller nyere. "
+                      "Ældre telefoner skal fabriksnulstilles og klargøres igen.")
+        note.setObjectName("hjaelpTekst")
+        note.setWordWrap(True)
+        knapper = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        knapper.button(QDialogButtonBox.StandardButton.Close).setText("Luk")
+        knapper.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.addWidget(trin)
+        layout.addWidget(QLabel("Pc'ens adresse:"))
+        layout.addWidget(adresse)
+        layout.addWidget(self.status)
+        layout.addWidget(note)
+        layout.addWidget(knapper)
+
+    def _telefon_hentede(self, sti: str):
+        if sti == "/inbase-klargoering.apk":
+            self._antal += 1
+            self.status.setText(f"✔ {self._antal} telefon(er) har hentet den nye version.")
+
+    def done(self, resultat):
+        if self.server is not None:
+            self.server.stop()
+            self.server = None
         super().done(resultat)

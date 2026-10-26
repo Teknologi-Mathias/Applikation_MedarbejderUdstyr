@@ -3,5 +3,7 @@ build/
 app/build/
 local.properties
 reservekode.txt
+# Signeringsnøglen (hentes fra Supabase under bygget og slettes igen) – aldrig i git
+signering/
 .idea/
 *.iml

@@ -6,7 +6,9 @@
     Kør fra projektmappen, når appen i android\ er ændret:
         .\scripts\byg_klargoering_apk.ps1
 
-    Kræver Android Studio (JDK og Android SDK). IN-BASE serverer APK'en til
+    Kræver Android Studio (JDK og Android SDK) og et IN-BASE-administratorlogin:
+    signeringsnøglen hentes fra Supabase (tools\signeringsnoegle.py) og slettes
+    igen efter bygget. Første gang laves nøglen. IN-BASE serverer APK'en til
     telefonen under klargøringen, og kontrolsummen i QR-koden beregnes af
     IN-BASE ud fra filen – så der skal ikke rettes andet efter et nyt byg.
 #>
@@ -28,6 +30,14 @@ if (-not (Test-Path $lokal)) {
     "sdk.dir=$($sdk -replace '\\', '/')" | Set-Content -Encoding ascii $lokal
 }
 
+# Signeringsnøglen hentes fra Supabase med et IN-BASE-administratorlogin og slettes efter bygget,
+# så alle administratorer bygger med samme nøgle (ellers afviser telefonerne opdateringen).
+$python = Join-Path $rod ".venv\Scripts\python.exe"
+if (-not (Test-Path $python)) { $python = "python" }
+$noegle = Join-Path $rod "tools\signeringsnoegle.py"
+& $python $noegle hent --keytool (Join-Path $env:JAVA_HOME "bin\keytool.exe")
+if ($LASTEXITCODE -ne 0) { throw "Signeringsnøglen kunne ikke hentes – se fejlen ovenfor." }
+
 Push-Location $android
 try {
     # Gradle/javac skriver advarsler på stderr – det må ikke stoppe scriptet (PowerShell 5.1).
@@ -38,6 +48,7 @@ try {
     if ($kode -ne 0) { throw "Gradle-bygget mislykkedes." }
 } finally {
     Pop-Location
+    & $python $noegle ryd
 }
 
 $apk = Join-Path $android "app\build\outputs\apk\release\app-release.apk"

@@ -28,8 +28,13 @@ NAVN_MOENSTER = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,19}$")
 INFOFELTER = ("navn", "telefonnummer", "note")
 # Felter, som telefonen melder tilbage ved klargøring.
 RAPPORTFELTER = ("producent", "model", "serienummer", "imei", "android_version")
-# Felter, der gemmes ved ændringer (svarer til inbase_mdm_update_devices i migrering 009).
-GEMTE_FELTER = INFOFELTER + RAPPORTFELTER + ("status", "klargjort", "nulstillingskode")
+# Felter, der gemmes ved ændringer (svarer til inbase_mdm_update_devices i migrering 012).
+GEMTE_FELTER = INFOFELTER + RAPPORTFELTER + ("status", "klargjort", "nulstillingskode", "mail")
+
+# Ændringskoder: én kode pr. telefon og handling, tastes i telefonens administrator-menu.
+CHROME = "chrome"          # supportkoden: vis/skjul Chrome
+MAIL_TIL = "mail:til"
+MAIL_FRA = "mail:fra"
 
 
 @dataclass
@@ -45,6 +50,7 @@ class MdmEnhed:
     android_version: str = ""
     klargjort: str = ""             # tidspunkt for seneste klargøring
     nulstillingskode: str = ""      # *#*#46227#*#* på telefonen → fabriksnulstilling
+    mail: bool = False              # firma-mail (IMAP) i Gmail-appen
     oprettet_af: str = ""
     id: str = ""
     oprettet: str = ""
@@ -63,15 +69,20 @@ class MdmEnhed:
         return cls(**{k: v for k, v in data.items() if k in navne})
 
 
-def supportkode(nulstillingskode: str) -> str:
-    """Kode til brugeren: viser/skjuler Chrome i administrator-menuen (*#*#46227#*#*).
+def aendringskode(nulstillingskode: str, handling: str) -> str:
+    """6-cifret kode til én handling (CHROME, MAIL_TIL, MAIL_FRA) i administrator-menuen.
 
-    Udledes af nulstillingskoden – samme beregning som AdminActivity.supportkode på
+    Udledes af nulstillingskoden – samme beregning som AdminActivity.aendringskode på
     telefonen – så den ikke skal gemmes, og nulstillingskoden ikke kan regnes baglæns."""
     if not nulstillingskode:
         return ""
-    h = hashlib.sha256(("chrome:" + nulstillingskode).encode("utf-8")).digest()
+    h = hashlib.sha256(f"{handling}:{nulstillingskode}".encode("utf-8")).digest()
     return f"{int.from_bytes(h[:4], 'big') % 10**6:06d}"
+
+
+def supportkode(nulstillingskode: str) -> str:
+    """Kode til brugeren: viser/skjuler Chrome i administrator-menuen (*#*#46227#*#*)."""
+    return aendringskode(nulstillingskode, CHROME)
 
 
 def normaliser_navn(navn: str) -> str:

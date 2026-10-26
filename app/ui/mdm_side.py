@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QLabel, QMenu, QMessageBox, QToolButton
 from app.domain import mdm_enhed as md
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_knap, vis_dato
-from app.ui.mdm_dialoger import KlargoeringDialog, TelefonDialog
+from app.ui.mdm_dialoger import KlargoeringDialog, OpdateringDialog, TelefonDialog
 from app.ui.sag_liste_side import Filtervalg, Kolonne, SagListeSide
 from app.ui.theme import status_stil
 
@@ -26,6 +26,8 @@ class MdmSide(SagListeSide):
             Kolonne("Status", 160, lambda e: e.status, stil=lambda e: status_stil(e.status),
                     sortering=lambda e: md.STATUSSER.index(e.status)
                     if e.status in md.STATUSSER else 99),
+            Kolonne("Mail", 60, lambda e: "Ja" if e.mail else "",
+                    tooltip=lambda e: "Firma-mail (IMAP) i Gmail" if e.mail else ""),
             Kolonne("Model", 170, lambda e: e.visningsmodel),
             Kolonne("Serienr.", 140, lambda e: e.serienummer, tooltip=lambda e: e.imei),
             Kolonne("Android", 80, lambda e: e.android_version),
@@ -58,10 +60,14 @@ class MdmSide(SagListeSide):
         ny.clicked.connect(self.ny)
         klargoer = lav_knap("Klargør (QR-kode)…")
         klargoer.clicked.connect(lambda: self._paa_valgt(self.klargoer))
+        opdater = lav_knap("Opdater telefoner…")
+        opdater.setToolTip("Klargjorte telefoner henter den nyeste styrings-app fra denne pc – "
+                           "uden nulstilling.")
+        opdater.clicked.connect(self.opdater_telefoner)
         handling = self._handlingsmenu()
-        self._admin_widgets = (ny, klargoer, handling, self.soegefelt, self.tabel,
+        self._admin_widgets = (ny, klargoer, opdater, handling, self.soegefelt, self.tabel,
                                *self.filter_felter)
-        for knap in (ny, klargoer):
+        for knap in (ny, klargoer, opdater):
             self.tilfoej_knap(knap)
         self.tilfoej_handling(handling)
         self.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(self.rediger))
@@ -72,6 +78,10 @@ class MdmSide(SagListeSide):
         for tekst, funktion in (("Ret oplysninger…", self.rediger),
                                 ("Vis nulstillingskode…", self.vis_kode),
                                 ("Vis supportkode (Chrome)…", self.vis_supportkode),
+                                (None, None),
+                                ("Slå firma-mail til…", lambda e: self.skift_mail(e, True)),
+                                ("Slå firma-mail fra…", lambda e: self.skift_mail(e, False)),
+                                (None, None),
                                 ("Markér som udgået", self.udgaaet), (None, None),
                                 ("Fjern fra listen", self.slet)):
             if tekst is None:
@@ -177,6 +187,31 @@ class MdmSide(SagListeSide):
             "1. Åbn Telefon-appen og tast *#*#46227#*#*\n"
             "2. Indtast supportkoden og vælg \"Vis Chrome\".\n"
             "3. Når fejlen er løst: samme sted, vælg \"Skjul Chrome\".")
+
+    def skift_mail(self, enhed, til: bool) -> None:
+        """Viser ændringskoden til telefonen og gemmer derefter, at mail er slået til/fra."""
+        kode = md.aendringskode(enhed.nulstillingskode, md.MAIL_TIL if til else md.MAIL_FRA)
+        if not kode:
+            QMessageBox.information(self, "Firma-mail",
+                                    f"{enhed.navn} har ingen nulstillingskode – klargør den igen.")
+            return
+        handling = "slå firma-mail til" if til else "slå firma-mail fra"
+        if self._bekraeft(
+                "Firma-mail",
+                f"{enhed.navn}: ændringskode {kode}\n\n"
+                "1. Åbn \"IN-BASE indstillinger\" på telefonen (eller tast *#*#46227#*#*).\n"
+                "2. Indtast koden og vælg \"Brug ændringskode\".\n"
+                "3. Telefonen bekræfter ændringen.\n\n"
+                f"Koden må gives til brugeren – den kan kun {handling}. Kræver IN-BASE "
+                "Klargøring 4.0 eller nyere på telefonen.\n\n"
+                f"Gem i IN-BASE, at {enhed.navn} {'har' if til else 'ikke har'} firma-mail?"):
+            if udfoer(self, self.service.saet_mail, enhed, til) is not FEJL:
+                self.opdater()
+
+    def opdater_telefoner(self) -> None:
+        apk = udfoer(self, self.service.opdaterings_apk)
+        if apk is not FEJL:
+            OpdateringDialog(self, apk).exec()
 
     def udgaaet(self, enhed) -> None:
         if self._bekraeft("Markér som udgået", f"Markér {enhed.navn} som udgået?"):
