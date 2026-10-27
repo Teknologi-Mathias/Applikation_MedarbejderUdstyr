@@ -86,15 +86,16 @@ def _udfoert_tid(sag: Sag, noegle: str) -> Optional[datetime]:
     return _tid(o.afsluttet_tid) if o is not None and o.status == Opgave.UDFOERT else None
 
 
-def _mellem_opgaver(sag: Sag, fra: str, til: tuple) -> Optional[float]:
-    """Dage fra opgaven fra blev udført, til alle relevante til-opgaver var udført."""
+def _mellem_opgaver(sag: Sag, fra: Optional[str], til: tuple) -> Optional[float]:
+    """Dage fra opgaven fra blev udført (fra=None: fra oprettelsen), til alle relevante
+    til-opgaver var udført."""
     relevante = [o for o in sag.opgaver if o.noegle in til and o.status != Opgave.UNDTAGET]
     if not relevante:
         return None
     slut = [_udfoert_tid(sag, o.noegle) for o in relevante]
     if any(t is None for t in slut):
         return None
-    return _dage(_udfoert_tid(sag, fra), max(slut))
+    return _dage(_tid(sag.oprettet) if fra is None else _udfoert_tid(sag, fra), max(slut))
 
 
 def _tidspunkt_til_booket(sag: Sag) -> Optional[float]:
@@ -202,15 +203,15 @@ class RapportService:
 
         # --- arbejdsspor: tid mellem opgaver (ud fra opgavernes afslutningstidspunkter) ---
         for navn, fra, til in (
-            ("HR-godkendelse → kontrakt retur", "kandidat_godkendt", ("kontrakt",)),
-            ("Kontrakt retur → telefon klar", "kontrakt", ("telefon",)),
-            ("Kontrakt retur → tøj sendt", "kontrakt", ("polo", "fleece")),
+            ("Oprettet → kontrakt retur", None, ("kontrakt",)),
+            ("Kontrakt retur → udstyr sendt", "kontrakt", ("udstyr",)),
+            ("Kontrakt retur → firmabil bestilt", "kontrakt", ("firmabil",)),
         ):
             vaerdier = [v for v in (_mellem_opgaver(s, fra, til) for s in onboarding)
                         if v is not None]
             maal.append(Maaling(navn, _gns_median(vaerdier), len(vaerdier), "Gennemsnit / median",
                                 "Kun forløb, hvor begge opgaver er udført med registreret "
-                                "tidspunkt (tøj: når alt valgt tøj er sendt)."))
+                                "tidspunkt."))
         vaerdier = [v for v in (_tidspunkt_til_booket(s) for s in onboarding) if v is not None]
         maal.append(Maaling("Oplæringstidspunkt → booking bekræftet", _gns_median(vaerdier),
                             len(vaerdier), "Gennemsnit / median",
@@ -253,9 +254,10 @@ class RapportService:
         ))
 
         # --- ufordelte opgaver og spor, der gentagne gange forsinker ---
-        ufordelte = sum(not o.ansvarlig for s in aabne for o in s.aabne_opgaver())
-        maal.append(Maaling("Opgaver uden ansvarlig", str(ufordelte), ufordelte, "Antal",
-                            "Åbne opgaver, der kan udføres nu, men ikke er tildelt en person."))
+        # Afdelingen ejer opgaven – kun opgaver uden både afdeling og person er ufordelte.
+        ufordelte = sum(sp.ansvar(o) == sp.IKKE_TILDELT for s in aabne for o in s.aabne_opgaver())
+        maal.append(Maaling("Opgaver uden ejer", str(ufordelte), ufordelte, "Antal",
+                            "Åbne opgaver, der kan udføres nu, uden både afdeling og person."))
         pr_spor = defaultdict(int)
         for sag in sager:
             for o in sag.opgaver:
@@ -267,11 +269,13 @@ class RapportService:
                             sum(pr_spor.values()), "Antal",
                             "Opgaver udført efter fristen eller åbne over fristen, pr. spor."))
 
-        # --- arbejdsfordeling (åbne opgaver pr. ansvarlig) ---
+        # --- arbejdsfordeling (åbne opgaver pr. person, der har taget dem, og pr. afdeling) ---
         fordeling = defaultdict(lambda: [0, 0])
         for sag in aabne:
             for o in sag.aabne_opgaver():
-                navn = o.ansvarlig or "(ingen ansvarlig)"
+                if not o.ansvarlig:
+                    continue
+                navn = o.ansvarlig
                 fordeling[navn][0] += 1
                 fordeling[navn][1] += o.er_forsinket(i_dag)
         rapport.arbejdsfordeling = sorted(

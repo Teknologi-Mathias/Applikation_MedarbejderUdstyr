@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,7 +26,9 @@ from PySide6.QtWidgets import (
 )
 
 from app import session
+from app.domain import behov as bh
 from app.domain import skabelon as sk
+from app.domain.onboarding import OnboardingForloeb
 from app.services.indstillinger_service import TEMAER
 from app.ui.bruger_side import BrugerSide
 from app.ui.data_side import DataSide
@@ -259,12 +262,90 @@ class GenereltPanel(QWidget):
         self.opdater()
 
 
-class OrganisationPanel(QWidget):
+class UdstyrsprofilKort(QWidget):
+    """Standardprofiler for udstyr pr. stilling: forvalget i "Opret kandidat".
+
+    Kun udstyr og antal – størrelser vælges pr. person. Udstyr, stillingen ikke
+    må få, kan ikke vælges. Adskilt fra arbejdsgangsskabelonerne (opgaverne)."""
+
     def __init__(self, tjenester):
         super().__init__()
         self.t = tjenester
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        kort, lag = _kort("Udstyrsprofiler pr. stilling",
+                          "Forvælges, når HR vælger stilling under Opret kandidat. HR kan altid "
+                          "tilpasse valget og vælger størrelser pr. person. En profil bestiller "
+                          "intet.")
+        gitter = QGridLayout()
+        gitter.setHorizontalSpacing(14)
+        for k, titel in enumerate(("Stilling", "Polo", "Fleece", "Telefon", "E-mail", "Firmabil")):
+            label = QLabel(titel)
+            label.setObjectName("statTitle")
+            gitter.addWidget(label, 0, k)
+        self.felter = {}
+        for r, stilling in enumerate(OnboardingForloeb.STILLINGER, start=1):
+            toej = {}
+            for k, noegle in enumerate(bh.BEKLAEDNING, start=1):
+                antal = QSpinBox()
+                antal.setRange(0, bh.MAKS_ANTAL)
+                antal.setSpecialValueText("Nej")
+                antal.setSuffix(" stk.")
+                gitter.addWidget(antal, r, k)
+                toej[noegle] = antal
+            telefon = QComboBox()
+            telefon.addItem("Nej", "")
+            for abonnement in bh.tilladte_abonnementer(stilling):
+                telefon.addItem(abonnement, abonnement)
+            udvidet = bh.tilladt_udvidet(stilling)
+            mail, bil = QCheckBox(), QCheckBox()
+            for felt in (mail, bil):
+                felt.setEnabled(udvidet)
+                if not udvidet:
+                    felt.setToolTip("Kun for " + ", ".join(bh.UDVIDET_UDSTYR))
+            gitter.addWidget(QLabel(stilling), r, 0)
+            gitter.addWidget(telefon, r, 3)
+            gitter.addWidget(mail, r, 4)
+            gitter.addWidget(bil, r, 5)
+            self.felter[stilling] = (toej, telefon, mail, bil)
+        lag.addLayout(gitter)
+        gem = lav_knap("Gem profiler", "primary")
+        gem.clicked.connect(self._gem)
+        lag.addWidget(gem, 0, Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(kort)
+
+    def opdater(self):
+        profiler = self.t.indstillinger.udstyrsprofiler()
+        for stilling, (toej, telefon, mail, bil) in self.felter.items():
+            p = profiler[stilling]
+            for noegle, antal in toej.items():
+                antal.setValue(p.toej(noegle).antal if p.toej(noegle).valgt else 0)
+            telefon.setCurrentIndex(max(telefon.findData(p.abonnement if p.mobil else ""), 0))
+            mail.setChecked(p.email)
+            bil.setChecked(p.firmabil)
+
+    def profiler(self) -> dict:
+        resultat = {}
+        for stilling, (toej, telefon, mail, bil) in self.felter.items():
+            resultat[stilling] = bh.Behov(
+                **{n: bh.Toej(a.value() > 0, "", a.value()) for n, a in toej.items()},
+                mobil=bool(telefon.currentData()), abonnement=telefon.currentData() or "",
+                email=mail.isChecked(), firmabil=bil.isChecked(),
+            ).til_dict()
+        return resultat
+
+    def _gem(self):
+        if udfoer(self, self.t.indstillinger.opdater,
+                  udstyrsprofiler=self.profiler()) is not FEJL:
+            QMessageBox.information(self, "Udstyrsprofiler", "Gemt.")
+
+
+class OrganisationPanel(QWidget):
+    def __init__(self, tjenester):
+        super().__init__()
+        self.t = tjenester
+        layout = scroll_side(self)
+        layout.setContentsMargins(0, 12, 8, 12)
         kort, lag = _kort("Organisation og regler",
                           "Fælles for alle brugere.")
         form = QFormLayout()
@@ -292,9 +373,12 @@ class OrganisationPanel(QWidget):
         gem.clicked.connect(self._gem)
         lag.addWidget(gem, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(kort)
+        self.udstyrsprofiler = UdstyrsprofilKort(tjenester)
+        layout.addWidget(self.udstyrsprofiler)
         layout.addStretch()
 
     def opdater(self):
+        self.udstyrsprofiler.opdater()
         ind = self.t.indstillinger.hent()
         self.omraader.setPlainText("\n".join(ind["omraader"]))
         self.ansvarlige.setPlainText("\n".join(ind["ansvarlige"]))

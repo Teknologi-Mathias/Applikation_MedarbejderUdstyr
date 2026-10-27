@@ -94,7 +94,8 @@ def _opgave_alarmer(sag: Sag, i_dag: date) -> list[Alarm]:
                 ADVARSEL, o.navn, f"{sag.navn} · Ansvarlig: {ansvarlig} · {naeste}",
                 "Afventer", sag.PROCES, sag.id, o.id,
             ))
-        elif not o.ansvarlig:
+        elif sp.ansvar(o) == sp.IKKE_TILDELT:
+            # Afdelingen ejer opgaven; kun opgaver uden både person og afdeling markeres.
             alarmer.append(Alarm(
                 ADVARSEL, f"Ingen ansvarlig: {o.navn}", f"{sag.navn} · Tildel en ansvarlig",
                 "Ansvarlig", sag.PROCES, sag.id, o.id,
@@ -151,12 +152,9 @@ def _offboarding_alarmer(m: Medarbejder, i_dag: date, regler: Regler) -> list[Al
 
 
 def _onboarding_alarmer(f: OnboardingForloeb, i_dag: date, regler: Regler) -> list[Alarm]:
+    # Ingen advarsel om manglende ansvarlig for forløbet: der er ingen koordinatorrolle –
+    # ejerskabet ligger pr. opgave hos afdelingerne (se _opgave_alarmer).
     alarmer = []
-    if not f.ansvarlig:
-        alarmer.append(Alarm(
-            ADVARSEL, "Forløbet har ingen ansvarlig", f"{f.navn} · {f.stilling} · {f.omraade}",
-            "Ansvarlig", f.PROCES, f.id,
-        ))
     if f.status in (f.STATUS_KONTRAKT, f.STATUS_OPLAERING):
         venter = _dage_siden(_status_siden(f), i_dag) or 0
         alarmer.append(Alarm(

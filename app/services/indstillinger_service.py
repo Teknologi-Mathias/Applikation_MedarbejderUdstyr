@@ -1,13 +1,16 @@
 """Indstillinger: fælles (alle brugere) og personlige præferencer.
 
 Fælles indstillinger (Data/indstillinger.json): backup, slettepolitik,
-områder, ansvarlige afdelinger og grænser for Action Center. Alle brugere ændrer
+områder, ansvarlige afdelinger, grænser for Action Center og standardprofiler
+for udstyr pr. stilling (app/domain/behov.py). Alle brugere ændrer
 Organisation; backup og slettepolitik (Data & sikkerhed) kun administratorer.
 
 Personlige præferencer (Lokal/praeferencer.json, pr. bruger): tema og
 Windows-notifikationer. De gemmes på pc'en, så de også virker offline. Ved
 databaseintegration flyttes de til user_profiles.
 """
+from app.domain import behov as bh
+from app.domain.onboarding import OnboardingForloeb
 from app.repositories.base import IndstillingRepository, PraeferenceRepository
 from app.repositories.fejl import ValideringsFejl
 
@@ -26,6 +29,9 @@ STANDARD = {
     "stillestaaende_dage": 14,
     # Action Center: fratrædelse/første arbejdsdag inden for så mange dage.
     "naermer_sig_dage": 7,
+    # Onboarding: forvalgt udstyr pr. stillingskategori ({stilling: behov uden
+    # størrelser}). Tom = intet forvalgt; HR vælger selv i formularen.
+    "udstyrsprofiler": {},
 }
 
 TEMAER = {"lilla": "Lilla", "lys": "Lyst (Standard)"}
@@ -52,7 +58,18 @@ class IndstillingerService:
             noegle: list(dict.fromkeys(v.strip() for v in indstillinger.get(noegle, []) if v.strip()))
             for noegle in ("omraader", "ansvarlige")
         }
+        profiler = indstillinger.get("udstyrsprofiler") or {}
+        fejl = bh.valider_profiler(profiler, OnboardingForloeb.STILLINGER)
+        if fejl:
+            raise ValideringsFejl(" ".join(fejl))
+        lister["udstyrsprofiler"] = bh.normaliser_profiler(profiler, OnboardingForloeb.STILLINGER)
         self.repo.gem({**{k: indstillinger.get(k, STANDARD[k]) for k in STANDARD}, **lister})
+
+    def udstyrsprofiler(self) -> dict:
+        """{stilling: Behov} – standardprofilen pr. stilling (tom, hvis ingen er sat op),
+        altid begrænset til det, stillingen må få."""
+        gemte = self.hent()["udstyrsprofiler"]
+        return {s: bh.profil(gemte.get(s), s) for s in OnboardingForloeb.STILLINGER}
 
     def opdater(self, **aendringer) -> dict:
         indstillinger = {**self.hent(), **aendringer}

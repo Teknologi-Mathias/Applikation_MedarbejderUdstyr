@@ -39,6 +39,17 @@ class SupabaseSkabelonRepository:
                 self.klient.table(mapping.SKABELON_TABELLER[slags]).upsert(
                     raekke, on_conflict="id").execute()
 
+    def slet(self, slags: str, skabelon_id: str) -> None:
+        """Arbejdsgange via RPC (modultjek, migrering 018); mails og påmindelser direkte
+        (RLS: medlemmer). Sager beholder skabelonens navn og deres egne opgaver."""
+        with kald("slette skabelonen"):
+            if slags == sk.SAG:
+                self.klient.rpc("inbase_delete_workflow_template",
+                                {"p_id": skabelon_id}).execute()
+            else:
+                self.klient.table(mapping.SKABELON_TABELLER[slags]).delete().eq(
+                    "id", skabelon_id).execute()
+
 
 class SupabaseIndstillingRepository:
     """app_settings (nøgle -> JSON) + områder i areas."""

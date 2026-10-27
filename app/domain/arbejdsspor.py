@@ -33,6 +33,8 @@ OEVRIGT = "oevrigt"
 SPOR = (
     ("hr", "HR"),
     ("kontrakt", "Kontrakt"),
+    ("udstyr", "Udstyr"),
+    # Ældre forløb (før én samlet udstyrsopgave): tøj, telefon og e-mail hver for sig.
     ("toej", "Arbejdstøj"),
     ("telefon", "Telefon"),
     ("email", "E-mail"),
@@ -85,10 +87,10 @@ def spor_for(opgave: Opgave) -> str:
 
 
 def ejer(opgave: Opgave) -> str:
-    """Den konkrete ansvarlige, ellers afdelingen (ikke tildelt)."""
+    """Den konkrete person, hvis en har taget opgaven – ellers afdelingen, der ejer den."""
     if opgave.ansvarlig:
         return opgave.ansvarlig
-    return f"{opgave.afdeling} (ikke tildelt)" if opgave.afdeling else "Ikke tildelt"
+    return opgave.afdeling or "Ingen ejer"
 
 
 def ansvar(opgave: Opgave) -> str:

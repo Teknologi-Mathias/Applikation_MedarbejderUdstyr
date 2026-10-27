@@ -34,3 +34,6 @@ assets/mdm/reservekode.txt
 
 # Lokal Docker-database (docker-compose.yml)
 .env.docker
+
+# Supabase CLI: midlertidige filer (projekt-link, versionstjek)
+supabase/.temp/

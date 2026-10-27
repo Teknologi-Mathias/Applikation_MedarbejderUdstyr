@@ -120,8 +120,7 @@ påvirker kun nye forløb.
 * **Brugere** oprettes af en administrator i programmet (Edge Function med
   servernøgle – aldrig i klienten) og vælger egen kode ved første log på.
 * **Ingen offline:** uden forbindelse vises en fejl, og intet gemmes lokalt.
-* **Backup** tages af Supabase. Gamle JSON-data overføres ikke – se
-  `tools/afvikl_gamle_data.py`.
+* **Backup** tages af Supabase. Gamle JSON-data overføres ikke (afviklet).
 
 ## Byg Windows-program og installer
 

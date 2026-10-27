@@ -9,11 +9,12 @@ søgning, sortering og for at bevare markeringen. Rækkerne bærer postens id
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QTableWidget,
     QVBoxLayout,
@@ -85,6 +86,16 @@ class SagListeSide(QWidget):
         for widget in handlinger:
             self.tilfoej_handling(widget)
         layout.addLayout(self._anden_raekke)
+
+        # Bekræftelse efter fx oprettelse (forsvinder af sig selv).
+        self.besked = QLabel("")
+        self.besked.setObjectName("info")
+        self.besked.setWordWrap(True)
+        self.besked.setVisible(False)
+        self._besked_timer = QTimer(self)
+        self._besked_timer.setSingleShot(True)
+        self._besked_timer.timeout.connect(lambda: self.besked.setVisible(False))
+        layout.addWidget(self.besked)
 
         kort = lav_kort(skygge=False)
         kort_layout = QVBoxLayout(kort)
@@ -208,6 +219,25 @@ class SagListeSide(QWidget):
                     tekster += " " + str(self.soegning(sag) or "").lower()
                 skjul = soegetekst not in tekster
             self.tabel.setRowHidden(row, skjul)
+
+    def vis_besked(self, tekst: str, sekunder: int = 20) -> None:
+        self.besked.setText(tekst)
+        self.besked.setVisible(True)
+        self._besked_timer.start(sekunder * 1000)
+
+    def vaelg(self, sag_id: str) -> bool:
+        """Markerer sagen (og ruller til den). Filtre og søgning ryddes, hvis de skjuler den."""
+        for row in range(self.tabel.rowCount()):
+            item = self.tabel.item(row, 0)
+            if item is not None and item.data(ID_ROLE) == sag_id:
+                if self.tabel.isRowHidden(row):
+                    self.soegefelt.clear()
+                    for felt in self.filter_felter:
+                        felt.setCurrentIndex(0)
+                self.tabel.selectRow(row)
+                self.tabel.scrollToItem(item)
+                return True
+        return False
 
     def valgt_id(self):
         rows = self.tabel.selectionModel().selectedRows()

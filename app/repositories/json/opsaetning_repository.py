@@ -43,6 +43,12 @@ class JsonSkabelonRepository:
             liste[index] = skabelon
         gem_json({s: alle[s] for s in sk.SLAGS}, self.datakilde.fil(SKABELONER))
 
+    def slet(self, slags: str, skabelon_id: str) -> None:
+        self.datakilde.kraev_online("Sletning af skabeloner")
+        alle = self.hent_alle()
+        alle[slags] = [s for s in alle[slags] if s["id"] != skabelon_id]
+        gem_json({s: alle[s] for s in sk.SLAGS}, self.datakilde.fil(SKABELONER))
+
 
 class JsonIndstillingRepository:
     """Data/indstillinger.json – fælles for alle brugere."""

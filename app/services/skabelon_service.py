@@ -60,6 +60,32 @@ class SkabelonService:
         self.repo.gem(slags, ny, len(liste) if index is None else index)
         return ny
 
+    def version(self, reference: dict) -> dict | None:
+        """Den skabelonversion, en sag blev oprettet ud fra ({"id", "version"}),
+        eller den aktuelle udgave, hvis versionen ikke længere er gemt."""
+        if not reference or not reference.get("id"):
+            return None
+        skabelon = next((s for s in self.hent_alle()[sk.SAG] if s["id"] == reference["id"]), None)
+        if skabelon is None:
+            return None
+        version = int(reference.get("version") or skabelon.get("version", 1))
+        if int(skabelon.get("version", 1)) == version:
+            return skabelon
+        return next((v for v in skabelon.get("versioner") or []
+                     if int(v.get("version", 1)) == version), skabelon)
+
+    def slet(self, slags: str, skabelon: dict) -> None:
+        """Sletter skabelonen permanent. Igangværende og arkiverede forløb har deres
+        egne kopier af opgaverne og påvirkes ikke. Den sidste skabelon til en proces
+        kan ikke slettes (der skal altid kunne oprettes forløb)."""
+        if slags == sk.SAG:
+            samme = [s for s in self.hent_alle()[sk.SAG] if s.get("proces") == skabelon.get("proces")]
+            if len(samme) <= 1:
+                raise ValideringsFejl("Den sidste arbejdsgangsskabelon kan ikke slettes – "
+                                      "opret en ny først, eller ret denne.")
+        log.info("Skabelon %s (%s) slettes", skabelon.get("navn"), slags)
+        self.repo.slet(slags, skabelon["id"])
+
     def skift_aktiv(self, slags: str, skabelon: dict) -> dict:
         return self.gem(slags, dict(skabelon, aktiv=not skabelon["aktiv"]))
 

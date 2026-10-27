@@ -41,7 +41,7 @@ _STATUS_KOLONNE = 7
 _TOM = {
     ab.MINE: "Du har ingen åbne opgaver tildelt.",
     ab.MIN_AFDELING: "Ingen åbne opgaver i dine afdelinger.",
-    ab.IKKE_TILDELT: "Alle opgaver har en ansvarlig.",
+    ab.IKKE_TILDELT: "Alle opgaver har en ejer (afdeling eller person).",
     ab.AFVENTER_ANDRE: "Ingen opgaver afventer andre.",
     ab.FORSINKEDE: "Ingen forsinkede opgaver.",
     ab.NYLIGT_AFSLUTTET: f"Ingen opgaver er udført de seneste {ab.NYLIG_DAGE} dage.",

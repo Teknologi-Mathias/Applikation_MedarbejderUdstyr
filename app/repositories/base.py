@@ -34,6 +34,9 @@ class SkabelonRepository(Protocol):
     def gem(self, slags: str, skabelon: dict, placering: int) -> None:
         """Opretter/opdaterer ÉN skabelon. placering = dens nummer i listen."""
 
+    def slet(self, slags: str, skabelon_id: str) -> None:
+        """Sletter ÉN skabelon. Sager har egne kopier af opgaverne og påvirkes ikke."""
+
 
 class BrugerRepository(Protocol):
     """Lokale konti (kun JSON-tilstanden)."""

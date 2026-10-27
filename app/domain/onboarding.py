@@ -15,7 +15,7 @@ kun sættes manuelt med begrundelse (og lukker forløbet).
     (alle færdige)              Aktiv
 """
 from app.domain.behov import Behov
-from app.domain.opgave import laes_iso_dato
+from app.domain.opgave import Opgave, laes_iso_dato
 from app.domain.sag import Sag
 
 
@@ -85,6 +85,12 @@ class OnboardingForloeb(Sag):
             return True
         return self.status == self.STATUS_AKTIV and all(
             o.afsluttet for o in self.opgaver if o.obligatorisk)
+
+    def kontrakt_sendt(self) -> bool:
+        """Er kontrakten sendt eller modtaget? Så skal det, der står på den – lønnr.
+        og ansættelsesdato – være kendt. Før det må begge mangle (kandidatfasen)."""
+        return any(o.milepael == "kontrakt" and o.status in (Opgave.AFVENTER, Opgave.UDFOERT)
+                   for o in self.opgaver)
 
     def kraever_overstyring(self, ny_status: str) -> bool:
         """True, hvis ny_status springer over krav, der endnu ikke er opfyldt.

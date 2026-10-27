@@ -223,13 +223,13 @@ class UiTest(TjenesteTest):
         self.assertEqual(self.vindue.sider["off_aktive"].tabel.rowCount(), 0, "data er fjernet")
         afslut.assert_called_once()
 
-    def test_onboardingdialog_filtrerer_skabeloner_efter_stilling(self):
+    def test_onboardingdialog_vaelger_den_ene_skabelon_automatisk(self):
         skabeloner = self.t.skabeloner.sagsskabeloner(OB.PROCES)
         dialog = OnboardingDialog(self.vindue, None, skabeloner, ["Nord"], ["tester"])
-        dialog.stilling_input.setCurrentText("FM")
-        self.assertIn("FM/DM", dialog.skabelon_input.itemText(0))
-        dialog.stilling_input.setCurrentText("Ad Hoc")
-        self.assertIn("arbejdsspor", dialog.skabelon_input.itemText(0))
+        for stilling in ("FM", "Ad Hoc"):
+            dialog.stilling_input.setCurrentText(stilling)
+            self.assertTrue(dialog.skabelon_input.isHidden())
+            self.assertEqual(dialog.skabelon_label.text(), "Onboarding (v1)")
 
     def test_skabelon_editor_bevarer_arbejdsspor_og_afviser_cirkler(self):
         from app.ui.skabelon_dialoger import SagSkabelonDialog
@@ -261,6 +261,41 @@ class UiTest(TjenesteTest):
         data = dialog.hent_data()
         self.assertEqual(data["behov"]["polo"], {"valgt": True, "stoerrelse": "M", "antal": 1})
         self.assertEqual(data["oplaering_planlagt"], "")
+
+    def test_opret_kandidat_profil_og_flow_efter_gem(self):
+        self.t.indstillinger.opdater(udstyrsprofiler={
+            "FM": {"polo": {"valgt": True, "antal": 2}, "mobil": True,
+                   "abonnement": "Tale og data"}})
+        profiler = self.t.indstillinger.udstyrsprofiler()
+        skabeloner = self.t.skabeloner.sagsskabeloner(OB.PROCES)
+        dialog = OnboardingDialog(self.vindue, None, skabeloner, ["Nord"], ["tester"], profiler)
+        self.assertEqual(dialog.stilling(), "", "ingen stilling er forvalgt")
+        self.assertFalse(dialog.planlaegning.isVisibleTo(dialog), "senere planlægning er foldet")
+        self.assertFalse(dialog.ansvarlig_input.isVisibleTo(dialog), "ingen koordinator")
+        self.assertTrue(dialog.loennr_input.isVisibleTo(dialog), "HR tildeler lønnr. (ERP)")
+        dialog.navn_input.setText("Kim Kandidat")
+        dialog.accept()
+        self.assertIn("stillingskategori", dialog.fejl_label.text())
+        dialog.stilling_input.setCurrentText("FM")
+        polo, stoerrelse, antal = dialog.toej["polo"]
+        self.assertTrue(polo.isChecked() and antal.value() == 2 and dialog.mobil_input.isChecked())
+        self.assertTrue(dialog.skabelon_input.isHidden(), "én skabelon vælges automatisk")
+        dialog.accept()                                           # størrelsen kan vente
+        data = dialog.hent_data()
+        self.assertEqual((data["ansaettelsesdato"], data["behov"]["polo"]["stoerrelse"]), ("", ""))
+        self.assertEqual(data["skabelon"]["navn"], "Onboarding")
+
+        with mock.patch("app.ui.modul_controller.OnboardingDialog") as Dialog, \
+                mock.patch("app.ui.modul_controller.SagDialog") as SagVindue:
+            Dialog.return_value.exec.return_value = True
+            Dialog.return_value.hent_data.return_value = data
+            self.vindue.ctrl["onboarding"].opret()
+        SagVindue.assert_not_called()
+        side = self.vindue.sider["on_aktive"]
+        self.assertIs(self.vindue.stak.currentWidget(), side)
+        valgt = self.t.onboarding.hent(side.valgt_id())
+        self.assertEqual((valgt.navn, valgt.ansaettelsesdato), ("Kim Kandidat", ""))
+        self.assertIn("er oprettet", side.besked.text())
 
 
 if __name__ == "__main__":

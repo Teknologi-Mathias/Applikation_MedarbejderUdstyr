@@ -107,6 +107,7 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
     from app.repositories.supabase.sag_repository import SupabaseSagRepository
 
     historik.saet_brugerkilde(session.brugernavn)
+    skabeloner = SkabelonService(SupabaseSkabelonRepository(klient))
     return Tjenester(
         backend=BACKEND_SUPABASE,
         datakilde=None,
@@ -114,9 +115,9 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
         auth=SupabaseAuthService(SupabaseKontoRepository(klient)),
         indstillinger=IndstillingerService(SupabaseIndstillingRepository(klient),
                                            SupabasePraeferenceRepository(klient)),
-        skabeloner=SkabelonService(SupabaseSkabelonRepository(klient)),
+        skabeloner=skabeloner,
         offboarding=OffboardingService(SupabaseSagRepository(klient, Medarbejder)),
-        onboarding=OnboardingService(SupabaseSagRepository(klient, OnboardingForloeb)),
+        onboarding=OnboardingService(SupabaseSagRepository(klient, OnboardingForloeb), skabeloner),
         backup=None,
         paamindelser=PaamindelsesService(
             JsonLokalFil(lokal_mappe / stier.NOTIFIKATIONSLOG_FIL.name)
@@ -143,15 +144,16 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
         JsonIndstillingRepository(datakilde),
         JsonPraeferenceRepository(lokal_mappe / stier.PRAEFERENCE_FIL.name),
     )
+    skabeloner = SkabelonService(JsonSkabelonRepository(datakilde))
     return Tjenester(
         backend=BACKEND_JSON,
         datakilde=datakilde,
         lagring=LagringService(datakilde, konfig, SAGSTYPER),
         auth=AuthService(JsonBrugerRepository(datakilde)),
         indstillinger=indstillinger,
-        skabeloner=SkabelonService(JsonSkabelonRepository(datakilde)),
+        skabeloner=skabeloner,
         offboarding=OffboardingService(sag_repos[Medarbejder.PROCES]),
-        onboarding=OnboardingService(sag_repos[OnboardingForloeb.PROCES]),
+        onboarding=OnboardingService(sag_repos[OnboardingForloeb.PROCES], skabeloner),
         backup=BackupService(datakilde, indstillinger),
         paamindelser=PaamindelsesService(
             JsonLokalFil(lokal_mappe / stier.NOTIFIKATIONSLOG_FIL.name)

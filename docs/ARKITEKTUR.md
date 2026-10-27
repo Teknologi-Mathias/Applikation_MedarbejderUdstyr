@@ -94,15 +94,37 @@ Onboarding og offboarding er to moduler oven på samme motor:
   tiden, Frist nærmer sig, Forsinket) og `ansvar` (bruger, afdelingskø, ikke
   tildelt). En blokeret opgave over fristen er stadig forsinket: den tæller i
   Forsinkede, Action Center, klarhed og kontrolrummet – og viser, hvad den venter på.
-* **Standardskabelonen**: kontrakten (Administration: Afventer = sendt, Udført =
-  retur) låser tøj, telefon, mail, firmabil og lønnr. op; oplæringsvagten (HR)
-  kan aftales når som helst; Merch har opfølgningssamtalen 1 uge efter start.
+* **Standardskabelonen "Onboarding"** (alle stillinger, migrering 018) har kun de
+  opgaver, hvor nogen skal gøre noget – 5 i alt:
+  kontrakt (Administration: Afventer = sendt, Udført = retur) → "Udstyr sendt"
+  (Administration, ét samlet for telefon, e-mail, polo og fleece; listen står som
+  næste handling) og "Firmabil bestilt"; "Oplæringsdag fastlagt" (HR, kan aftales
+  når som helst); opfølgningssamtale (Merch, 1 uge efter start). Det, HR afgør
+  ved oprettelsen (godkendt kandidat, lønnr., behov, datoer), er felter – ikke
+  opgaver. Status starter derfor ved "Afventer kontrakt".
+* **Ejerskab**: afdelingen ejer opgaven (skabelonen). Personlig tildeling er
+  valgfri; kun opgaver uden både afdeling og person regnes som "uden ejer"
+  (`arbejdsspor.ansvar`).
+* **Skabeloner** kan slettes (alle med adgang til modulet; `SkabelonService.slet`,
+  RPC `inbase_delete_workflow_template`). Forløb har egne kopier af opgaverne og
+  påvirkes ikke; den sidste arbejdsgangsskabelon til en proces kan ikke slettes.
 * **HR's behov** (`behov.py`): polo/fleece (XS–3XL, antal 1–5), mobil
   (abonnement), e-mail og firmabil. Mobil med tale og data, mail og firmabil kun
   for FM, DM og Afløser. Betingede opgaver undtages automatisk ("Ikke relevant –
   behovet er ikke valgt af HR") og genåbnes, hvis behovet vælges igen. Påbegyndte
   eller udførte opgaver ændres aldrig lydløst; sagsvinduet viser en advarsel.
-* **Oplæring**: tidspunktet er `planlagt` på opgaven "Oplæringsvagt booket";
+* **Kandidatoprettelse** (én dialog: Kandidat, Udstyr, Senere planlægning):
+  stillingen vælges aktivt; dens **udstyrsprofil** (Indstillinger → Organisation,
+  `app_settings.udstyrsprofiler`, migrering 016) forvælger udstyr og antal – aldrig
+  størrelser, aldrig noget stillingen ikke må få, og aldrig en bestilling. Én
+  relevant skabelon vælges automatisk. Efter gem vises kandidaten markeret i
+  Aktive forløb; sagsvinduet åbnes ikke af sig selv.
+* **Lønnr.**: HR tildeler det (ERP) ved oprettelsen. Det står på kontrakten.
+* **Fasebaserede krav** (`OnboardingService.valider`): lønnr. og ansættelsesdato må
+  mangle, indtil kontrakten er sendt; tøjstørrelser kræves først, når udstyret
+  sættes i gang eller sendes. Fastlægges datoen senere, får åbne opgaver uden frist
+  fristen fra sagens egen skabelonversion (`workflow.udfyld_frister`).
+* **Oplæring**: tidspunktet er `planlagt` på opgaven "Oplæringsdag fastlagt";
   bookingen er opgavens status (Ikke startet / Afventer bekræftelse / Udført).
 * **Klarhed til opstart** (`klarhed`): Klar til opstart, På plan, Opstart i
   risiko, Opstart blokeret, Afsluttet. Kun advarsler – processen stoppes aldrig.

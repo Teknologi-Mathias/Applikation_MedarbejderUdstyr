@@ -27,7 +27,10 @@ MAAL = (Path(__file__).resolve().parents[1]
         / "app/infrastructure/database/migrations/015_seed_standarder.sql")
 # Standarder fra før arbejdssporene (004): deaktiveres – slettes ikke.
 UDGAAEDE = (("sager", "onboarding", "Onboarding – standard"),
-            ("sager", "onboarding", "Onboarding – FM/DM"))
+            ("sager", "onboarding", "Onboarding – FM/DM"),
+            # Arbejdssporene før det forenklede flow (deaktiveret af migrering 018).
+            ("sager", "onboarding", "Onboarding – arbejdsspor"),
+            ("sager", "onboarding", "Onboarding – arbejdsspor FM/DM"))
 
 
 def _sql_json(data) -> str:

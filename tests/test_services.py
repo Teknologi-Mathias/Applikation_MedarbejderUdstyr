@@ -49,20 +49,22 @@ class OffboardingServiceTest(TjenesteTest):
 
 
 class OnboardingServiceTest(TjenesteTest):
-    def test_kandidat_uden_loennr_og_fm_skabelon(self):
+    def test_enkelt_forloeb_kun_opgaver_med_reel_handling(self):
         f = self.ny_onboarding(stilling="FM")
         self.assertEqual(f.loennr, "")
-        self.assertEqual(f.status, OB.STATUS_KANDIDAT)
-        self.assertIn("Introduktion til ledelsesopgaver", [o.navn for o in f.opgaver])
+        # HR opretter kun godkendte kandidater: forløbet starter ved kontrakten.
+        self.assertEqual(f.status, OB.STATUS_KONTRAKT)
+        self.assertEqual([o.noegle for o in f.opgaver],
+                         ["kontrakt", "udstyr", "firmabil", "oplaering_booket", "opfoelgning"])
 
     def test_laast_opgave_kan_ikke_markeres_udfoert(self):
         f = self.ny_onboarding()
-        laast = next(o for o in f.opgaver if o.noegle == "medarbejderapp")
+        laast = next(o for o in f.opgaver if o.noegle == "opfoelgning")   # venter på kontrakt
         with self.assertRaises(ValideringsFejl):
             self.t.onboarding.marker_opgave_udfoert(f, laast.id)
 
     def test_milepaele_driver_status(self):
-        f = self.ny_onboarding()
+        f = self.ny_onboarding(loennr="501")      # lønnr. står på kontrakten
         for milepael in ("kandidat", "kontrakt"):
             for o in [o for o in f.opgaver if o.milepael == milepael]:
                 f = self.t.onboarding.marker_opgave_udfoert(f, o.id)
@@ -74,7 +76,7 @@ class OnboardingServiceTest(TjenesteTest):
             self.t.onboarding.saet_manuel_status(f, OB.STATUS_AKTIV, "")
         f = self.t.onboarding.saet_manuel_status(f, OB.STATUS_AKTIV, "Startede akut")
         overstyring = f.historik.af_type("overstyring")[0]
-        self.assertIn("Kandidat godkendt", overstyring["data"]["mangler"])
+        self.assertIn("Kontrakt sendt og modtaget retur", overstyring["data"]["mangler"])
         self.assertEqual(f.status, OB.STATUS_AKTIV)
 
     def test_annullering_arkiverer(self):
@@ -131,7 +133,7 @@ class PaamindelseTest(TjenesteTest):
 
 class RapportTest(TjenesteTest):
     def test_maalinger_har_n_og_mangler_data_aerligt(self):
-        f = self.ny_onboarding(stilling="DM")
+        f = self.ny_onboarding(stilling="DM", loennr="502")
         rapport = self.t.rapporter.beregn([f], Filter(), date.today())
         maal = {m.navn: m for m in rapport.maalinger}
         self.assertIsNone(maal["Kandidat → kontrakt bekræftet"].vaerdi)
@@ -147,18 +149,19 @@ class RapportTest(TjenesteTest):
         self.assertEqual(fm["Åbne forløb"].vaerdi, "0")
 
     def test_maalinger_pr_arbejdsspor_bygger_paa_opgavernes_tidspunkter(self):
-        f = self.ny_onboarding(stilling="DM", behov={"mobil": True, "abonnement": "Kun data"})
+        f = self.ny_onboarding(stilling="DM", loennr="503",
+                               behov={"mobil": True, "abonnement": "Kun data"})
         maal = {m.navn: m for m in self.t.rapporter.beregn([f], Filter(), date.today()).maalinger}
-        self.assertIsNone(maal["HR-godkendelse → kontrakt retur"].vaerdi, "ingen data endnu")
-        for noegle in ("kandidat_godkendt", "kontrakt", "telefon"):
+        self.assertIsNone(maal["Oprettet → kontrakt retur"].vaerdi, "ingen data endnu")
+        for noegle in ("kontrakt", "udstyr"):
             f = self.t.onboarding.marker_opgave_udfoert(
                 f, next(o.id for o in f.opgaver if o.noegle == noegle))
         rapport = self.t.rapporter.beregn([f], Filter(), date.today())
         maal = {m.navn: m for m in rapport.maalinger}
-        self.assertEqual(maal["HR-godkendelse → kontrakt retur"].n, 1)
-        self.assertEqual(maal["Kontrakt retur → telefon klar"].n, 1)
-        self.assertEqual(maal["Kontrakt retur → tøj sendt"].n, 0, "intet tøj valgt")
-        self.assertIn("Afdeling: Administration", [r[0] for r in rapport.arbejdsfordeling])
+        self.assertEqual(maal["Oprettet → kontrakt retur"].n, 1)
+        self.assertEqual(maal["Kontrakt retur → udstyr sendt"].n, 1)
+        self.assertEqual(maal["Kontrakt retur → firmabil bestilt"].n, 0, "ingen bil valgt")
+        self.assertIn("Afdeling: HR", [r[0] for r in rapport.arbejdsfordeling])  # oplæringsdag
 
 
 class AuthTest(TjenesteTest):

@@ -97,25 +97,27 @@ class KlarhedTest(unittest.TestCase):
 
 
 class StandardskabelonTest(TjenesteTest):
-    def test_kontrakt_laaser_udstyr_men_ikke_oplaeringsvagt(self):
+    def test_kontrakt_laaser_udstyr_men_ikke_oplaeringsdagen(self):
         sag = self.ny_onboarding(behov=FULDT_BEHOV)
         efter = {o.noegle: o for o in sag.opgaver}
         self.assertEqual(efter["kontrakt"].afdeling, "Administration")
-        self.assertTrue(sag.er_blokeret(efter["telefon"]))
-        sag = self.t.onboarding.marker_opgave_udfoert(sag, efter["kandidat_godkendt"].id)
-        efter = {o.noegle: o for o in sag.opgaver}
+        self.assertTrue(sag.er_blokeret(efter["udstyr"]))
         self.assertFalse(sag.er_blokeret(efter["oplaering_booket"]))
         with self.assertRaises(ValideringsFejl):
-            self.t.onboarding.marker_opgave_udfoert(sag, efter["polo"].id)
+            self.t.onboarding.marker_opgave_udfoert(sag, efter["udstyr"].id)
+        # Ét samlet udstyr med listen fra behovet; firmabil for sig.
+        self.assertEqual(efter["udstyr"].naeste_handling,
+                         "Send: Telefon (Tale og data), E-mail, Polo M × 2, Fleece L × 1")
+        self.assertEqual(efter["firmabil"].status, "Ikke startet")
         # Felterne overlever lagringen.
-        gemt = self.t.onboarding.hent(sag.id).find_opgave(efter["polo"].id)
+        gemt = self.t.onboarding.hent(sag.id).find_opgave(efter["udstyr"].id)
         self.assertEqual((gemt.spor, gemt.betingelse, gemt.afhaenger_af),
-                         ("toej", "polo", ["kontrakt"]))
+                         ("udstyr", "udstyr", ["kontrakt"]))
 
     def test_skabelon_med_cirkel_kan_ikke_gemmes(self):
         skabelon = self.t.skabeloner.sagsskabeloner("onboarding")[0]
         skabelon["opgaver"][0]["afhaenger_af"] = ["opfoelgning"]
-        skabelon["opgaver"][-1]["afhaenger_af"] = ["kandidat_godkendt"]
+        skabelon["opgaver"][-1]["afhaenger_af"] = ["kontrakt"]     # opfølgning → kontrakt
         with self.assertRaises(ValideringsFejl):
             self.t.skabeloner.gem("sager", skabelon)
 

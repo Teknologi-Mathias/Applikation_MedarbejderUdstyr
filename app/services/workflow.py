@@ -66,6 +66,17 @@ def opret_opgaver(skabelon: dict, startdato: str) -> list[Opgave]:
     ]
 
 
+def udfyld_frister(sag: Sag, skabelon: dict) -> None:
+    """Giver åbne opgaver uden frist deres skabelonfrist ud fra sagens startdato
+    (fx når onboardingens ansættelsesdato først fastlægges efter oprettelsen).
+    Opgaverne findes på nøgle, ellers navn; udfyldte frister ændres ikke."""
+    poster = {p.get("noegle") or p["navn"]: p for p in skabelon.get("opgaver", [])}
+    for o in sag.opgaver:
+        post = poster.get(o.noegle or o.navn)
+        if post is not None and not o.frist and not o.afsluttet:
+            o.frist = frist_fra_dage(sag.startdato(), post.get("frist_dage", 0))
+
+
 # Begrundelse på opgaver, som er undtaget automatisk, fordi behovet ikke er valgt.
 IKKE_VALGT = "Ikke relevant – behovet er ikke valgt af HR"
 

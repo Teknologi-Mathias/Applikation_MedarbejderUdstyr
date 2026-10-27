@@ -40,11 +40,11 @@ from app.ui.theme import FARVER, TONER, spor_stil
 from app.ui.widgets import STIL_ROLE, PilleDelegate
 
 _KORT_IKON = {kr.FORSINKEDE: "forsinket", kr.STARTER_SNART: "kalender",
-              kr.UDEN_ANSVARLIG: "person", kr.I_RISIKO: "risiko"}
+              kr.MANGLER_KONTRAKT: "kontrakt", kr.I_RISIKO: "risiko"}
 _KOE_TOM = {
     kr.KONTRAKT: "Ingen kontrakter kræver handling.",
-    kr.UDSTYR: "Ingen registrerede behov mangler.",
-    kr.OPLAERING: "Ingen oplæring eller jobs mangler.",
+    kr.UDSTYR: "Intet udstyr eller firmabil mangler.",
+    kr.OPLAERING: "Alle oplæringsdage er fastlagt.",
     kr.AFVENTER: "Ingen opgaver afventer andre.",
     kr.RETUR: "Intet udstyr mangler fra fratrådte.",
     kr.AFSLUTNING: "Ingen sager venter på afslutning.",
@@ -199,9 +199,8 @@ class DashboardSide(QWidget):
             raekke.addWidget(kort, 1)
         layout.addLayout(raekke)
 
-        layout.addWidget(self._sektion("Arbejdskøer", "Konkrete opgaver pr. arbejdsområde. "
-                                       "Klik for at åbne opgaven, højreklik for hurtige "
-                                       "handlinger."))
+        layout.addWidget(self._sektion("Arbejdskøer", "Medarbejdere med åbent arbejde pr. "
+                                       "område. Klik for at åbne sagen – opgaverne ses dér."))
         gitter = QGridLayout()
         gitter.setSpacing(12)
         self.koe_lister = {}
@@ -217,7 +216,7 @@ class DashboardSide(QWidget):
         layout.addLayout(gitter)
 
         self.haster_titel = self._sektion("Haster nu", "Forsinkelser, opstarter i risiko, "
-                                          "opgaver uden ansvarlig og opgaver, der står stille – "
+                                          "opgaver uden ejer og opgaver, der står stille – "
                                           "vigtigste først.")
         layout.addWidget(self.haster_titel)
         kort = lav_kort(skygge=False)
@@ -288,11 +287,7 @@ class DashboardSide(QWidget):
         for koe in kr.koeer(aktive, i_dag, regler):
             liste = self.koe_lister[koe.noegle]
             liste.vis_alarmer(koe.poster, _KOE_TOM[koe.noegle])
-            enhed = f"{len(koe.poster)} {koe.enhed}"
-            if koe.enhed == "opgaver":
-                hvem = "medarbejder" if koe.antal_sager == 1 else "medarbejdere"
-                enhed += f" hos {koe.antal_sager} {hvem}"
-            liste.antal.setToolTip(enhed)
+            liste.antal.setToolTip(f"{len(koe.poster)} {koe.enhed}")
             liste.kort.ikon_label.setPixmap(ikoner.pixmap(koe.ikon, _ikon_farve(), 20))
 
         haster = kr.haster_nu(aktive, i_dag, regler)

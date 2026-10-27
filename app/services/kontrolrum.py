@@ -9,15 +9,16 @@ arbejdsbakke og Teamoverblik altid er enige:
 - app/services/action_center.py: regler (Indstillinger) og Alarm-modellen, så
   køerne vises med Action Centerets liste og hurtige handlinger.
 
-Betingede behov (tøj, mobil …) giver kun køelementer, når HR har registreret
-behovet. Intet gemmes – alt beregnes ud fra sagernes aktuelle tilstand.
+Køerne viser én række pr. medarbejder (navnet og antal åbne opgaver i køen); de
+enkelte opgaver ses i sagen. Betingede behov (tøj, mobil …) giver kun
+køelementer, når HR har registreret behovet. Intet gemmes – alt beregnes ud
+fra sagernes aktuelle tilstand.
 """
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Iterable, Optional
 
 from app.domain import arbejdsspor as sp
-from app.domain.behov import BEKLAEDNING
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
 from app.domain.opgave import Opgave, laes_iso_dato
@@ -31,16 +32,6 @@ TEAM = "team"
 
 def _dage(antal: int) -> str:
     return f"{antal} {'dag' if antal == 1 else 'dage'}"
-
-
-def _vis_dato(iso: str) -> str:
-    dato = laes_iso_dato(str(iso)[:10])
-    return dato.strftime("%d-%m-%Y") if dato else ""
-
-
-def _vis_tid(iso: str) -> str:
-    """"2026-12-01T08:00:00" -> "01-12-2026 08:00"."""
-    return f"{_vis_dato(iso)} {str(iso)[11:16]}".strip() if iso else ""
 
 
 def sidst_aendret(sag, opgave: Opgave) -> Optional[datetime]:
@@ -65,7 +56,7 @@ def _aktive(sager) -> list:
 
 FORSINKEDE = "forsinkede"
 STARTER_SNART = "starter_snart"
-UDEN_ANSVARLIG = "uden_ansvarlig"
+MANGLER_KONTRAKT = "mangler_kontrakt"
 I_RISIKO = "i_risiko"
 
 
@@ -90,7 +81,6 @@ def overblik(sager: Iterable, i_dag: date, regler: Regler | None = None) -> list
     def team(filter_):
         return sum(ab.sag_matcher(s, filter_, i_dag, risiko_dage=dage) for s in onboarding)
 
-    uden = [p for p in ab.poster(sager, ab.IKKE_TILDELT, i_dag) if not p.blokeret]
     return [
         Overblik(FORSINKEDE, "Forsinkede opgaver", len(ab.poster(sager, ab.FORSINKEDE, i_dag)),
                  "opgaver", "Åbne opgaver over fristen – også dem, der venter på en forudsætning",
@@ -98,9 +88,9 @@ def overblik(sager: Iterable, i_dag: date, regler: Regler | None = None) -> list
         Overblik(STARTER_SNART, "Starter snart", team(ab.KOMMENDE), "medarbejdere",
                  f"Første arbejdsdag inden for {_dage(dage)} (Indstillinger → Nærmer sig)",
                  (TEAM, ab.KOMMENDE)),
-        Overblik(UDEN_ANSVARLIG, "Opgaver uden ansvarlig", len(uden), "opgaver",
-                 "Opgaver, der kan udføres nu, men ikke er tildelt en person",
-                 (ARBEJDSBAKKE, ab.IKKE_TILDELT)),
+        Overblik(MANGLER_KONTRAKT, "Mangler kontrakt", team(ab.MANGLER_KONTRAKT),
+                 "medarbejdere", "Kontrakten er ikke sendt eller ikke modtaget retur endnu",
+                 (TEAM, ab.MANGLER_KONTRAKT)),
         Overblik(I_RISIKO, "Opstart i risiko", team(ab.RISIKO), "medarbejdere",
                  "Forsinkede eller blokerede obligatoriske opgaver, eller tæt på start med "
                  "åbne opgaver", (TEAM, ab.RISIKO)),
@@ -123,39 +113,26 @@ class Koe:
     navn: str
     ikon: str                 # navn i app/ui/ikoner.py
     forklaring: str
-    poster: list              # [Alarm] – én pr. opgave (eller pr. sag, se enhed)
-    enhed: str = "opgaver"    # "opgaver" eller "sager"/"medarbejdere"
+    poster: list              # [Alarm] – én pr. medarbejder (sag)
+    enhed: str = "medarbejdere"
 
     @property
     def antal_sager(self) -> int:
         return len({a.sag_id for a in self.poster})
 
 
-def _opgave_post(sag, o: Opgave, i_dag: date, regler: Regler, tilstandstekst: str,
-                 ekstra: str = "") -> Alarm:
-    """Én opgave i en kø. Arbejdstilstand, tidsrisiko og ansvar vises hver for sig:
-    en blokeret opgave over fristen er både "Forsinket" og viser, hvad den venter på."""
+def _opgave_post(sag, o: Opgave, i_dag: date, regler: Regler) -> Alarm:
+    """En opgaves plads i køen: hvor alvorlig den er. Tidsrisikoen vinder over
+    blokeringen – en blokeret opgave over fristen er stadig "Forsinket"."""
     tilstand = sp.arbejdstilstand(sag, o)
-    tid = sp.tidsrisiko(o, i_dag, regler.naermer_sig_dage)
     dage_over = o.dage_over_frist(i_dag) or 0
-    if tilstand == sp.BLOKERET:
-        tilstandstekst = sag.blokeringsaarsag(o)
-    dele = [tilstandstekst]
-    if ekstra:
-        dele.append(ekstra)
-    if tid == sp.FORSINKET:
-        dele.append(f"{_dage(dage_over)} over frist")
-    elif o.frist:
-        dele.append(f"Frist {_vis_dato(o.frist)}")
-    dele.append(f"Ansvarlig: {sp.ejer(o)}")
-    if tid == sp.FORSINKET:
+    if sp.tidsrisiko(o, i_dag, regler.naermer_sig_dage) == sp.FORSINKET:
         niveau, badge = KRITISK, "Forsinket"
     elif tilstand in (sp.BLOKERET, sp.AFVENTER):
         niveau, badge = ADVARSEL, tilstand
     else:
         niveau, badge = PLANLAGT, tilstand
-    return Alarm(niveau, f"{sag.navn} · {o.navn}", " · ".join(d for d in dele if d), badge,
-                 sag.PROCES, sag.id, o.id, dage_over)
+    return Alarm(niveau, sag.navn, "", badge, sag.PROCES, sag.id, o.id, dage_over)
 
 
 def _sorter(poster: list) -> list:
@@ -167,104 +144,37 @@ def _aabne_i_spor(sag, spor: tuple) -> list:
     return [o for o in sag.opgaver if not o.afsluttet and sp.spor_for(o) in spor]
 
 
-# Kontraktopgaven (standardskabelonen): Afventer = sendt, Udført = modtaget retur.
-_KONTRAKT_TEKST = {
-    Opgave.IKKE_STARTET: "Afventer udarbejdelse og afsendelse",
-    Opgave.I_GANG: "Under udarbejdelse – ikke sendt",
-    Opgave.AFVENTER: "Sendt – afventer underskrift retur",
-}
-_GENEREL_TEKST = {
-    Opgave.IKKE_STARTET: "Ikke registreret som udført",
-    Opgave.I_GANG: "I gang",
-    Opgave.AFVENTER: "Afventer anden part",
-}
-
-
-def _kontrakt_koe(sager, i_dag, regler) -> list:
-    poster = []
-    for sag in sager:
-        for o in _aabne_i_spor(sag, ("kontrakt",)):
-            tekster = _KONTRAKT_TEKST if o.noegle == "kontrakt" else _GENEREL_TEKST
-            poster.append(_opgave_post(sag, o, i_dag, regler, tekster[o.status]))
-    return poster
+def _spor_koe(sager, spor: tuple, i_dag, regler) -> list:
+    """Åbne opgaver i sporene: kontrakt, oplæring og første jobs."""
+    return [_opgave_post(sag, o, i_dag, regler)
+            for sag in sager for o in _aabne_i_spor(sag, spor)]
 
 
 # Spor -> behov, når opgaven ikke selv har en betingelse.
-_SPOR_BEHOV = {"telefon": "mobil", "toej": "toej"}
-_UDSTYR_TEKST = {
-    Opgave.IKKE_STARTET: "Ikke klargjort eller sendt",
-    Opgave.I_GANG: "Under klargøring",
-    Opgave.AFVENTER: "Afventer levering eller anden part",
-}
-
-
-def _behov_tekst(behov, noegle: str) -> str:
-    if noegle == "mobil":
-        return f"Mobil · {behov.abonnement or 'abonnement ikke valgt'}"
-    valgte = [n for n in BEKLAEDNING if behov.toej(n).valgt] if noegle == "toej" else [noegle]
-    return ", ".join(f"{BEKLAEDNING[n]} {behov.toej(n).stoerrelse} × {behov.toej(n).antal}"
-                     for n in valgte if n in BEKLAEDNING)
+_SPOR_BEHOV = {"udstyr": "udstyr", "firmabil": "firmabil", "telefon": "mobil",
+               "toej": "toej", "email": "email"}
 
 
 def _udstyr_koe(sager, i_dag, regler) -> list:
-    """Telefon og tøj som hver sin opgave – kun når HR har registreret behovet."""
+    """Udstyr og firmabil (ældre forløb: tøj, telefon og e-mail hver for sig) – kun
+    når HR har registreret behovet (et behov er ikke en bestilling, og uden behov
+    mangler intet)."""
     poster = []
     for sag in sager:
         behov = getattr(sag, "behov", None)
         if behov is None:
             continue
-        for o in _aabne_i_spor(sag, ("telefon", "toej")):
-            noegle = o.betingelse or _SPOR_BEHOV[sp.spor_for(o)]
-            if not behov.betingelse_opfyldt(noegle):
-                continue
-            poster.append(_opgave_post(sag, o, i_dag, regler, _UDSTYR_TEKST[o.status],
-                                       _behov_tekst(behov, noegle)))
+        for o in _aabne_i_spor(sag, tuple(_SPOR_BEHOV)):
+            if behov.betingelse_opfyldt(o.betingelse or _SPOR_BEHOV[sp.spor_for(o)]):
+                poster.append(_opgave_post(sag, o, i_dag, regler))
     return poster
-
-
-def _oplaering_tekst(sag, o: Opgave) -> str:
-    """Et registreret tidspunkt betyder ikke, at oplæringen er booket eller gennemført."""
-    if o.status == Opgave.AFVENTER:
-        return "Afventer bekræftelse" + (f" ({_vis_tid(o.planlagt)})" if o.planlagt else "")
-    if o.planlagt:
-        return f"Tidspunkt registreret {_vis_tid(o.planlagt)} – ikke bekræftet"
-    if o.noegle.endswith("booket"):
-        return "Intet tidspunkt registreret"
-    booket = next((x for x in sag.opgaver if x.noegle in o.afhaenger_af
-                   and x.status == Opgave.UDFOERT and sp.spor_for(x) == "oplaering"), None)
-    if booket:
-        tid = f" {_vis_tid(booket.planlagt)}" if booket.planlagt else ""
-        return f"Booket{tid} – ikke registreret som gennemført"
-    return _GENEREL_TEKST[o.status]
-
-
-def _oplaering_koe(sager, i_dag, regler) -> list:
-    return [_opgave_post(sag, o, i_dag, regler, _oplaering_tekst(sag, o))
-            for sag in sager for o in _aabne_i_spor(sag, ("oplaering", "opstart"))]
 
 
 def _afventer_koe(sager, i_dag, regler) -> list:
-    """Hvad afventes, hvem skal handle, hvornår blev der sidst fulgt op, og hvornår
-    bør der følges op igen (sidst + grænsen for stillestående sager)."""
-    poster = []
-    for sag in sager:
-        for o in sag.opgaver:
-            if o.afsluttet or o.status != Opgave.AFVENTER:
-                continue
-            sidst = sidst_aendret(sag, o)
-            opfoelgning = ""
-            if sidst:
-                igen = sidst.date() + timedelta(days=regler.stillestaaende_dage)
-                opfoelgning = (f"Sidst fulgt op {_vis_dato(sidst.date().isoformat())} · "
-                               + ("Følg op nu" if igen <= i_dag
-                                  else f"Følg op {_vis_dato(igen.isoformat())}"))
-            poster.append(_opgave_post(sag, o, i_dag, regler,
-                                       f"Afventer: {o.naeste_handling or o.navn}", opfoelgning))
-    return poster
-
-
-_RETUR_TEKST = {Opgave.IKKE_STARTET: "ikke modtaget", Opgave.I_GANG: "under behandling",
-                Opgave.AFVENTER: "afventer medarbejderen"}
+    """Opgaver, der afventer en anden part (status Afventer)."""
+    return [_opgave_post(sag, o, i_dag, regler)
+            for sag in sager for o in sag.opgaver
+            if not o.afsluttet and o.status == Opgave.AFVENTER]
 
 
 def _retur_koe(sager, i_dag) -> list:
@@ -280,19 +190,31 @@ def _retur_koe(sager, i_dag) -> list:
         if not mangler:
             continue
         over = max((o.dage_over_frist(i_dag) or 0 for o in mangler), default=0)
-        sendte = sum(r.sendt for r in m.rykkere)
-        dele = [", ".join(f"{o.udstyr}: {_RETUR_TEKST[o.status]}" for o in mangler),
-                "Returlabel sendt" if m.tracking_link else "Ingen returlabel registreret",
-                f"{sendte} {'rykker' if sendte == 1 else 'rykkere'} sendt"]
-        if over > 0:
-            dele.append(f"{_dage(over)} over frist")
         poster.append(Alarm(
-            KRITISK if over > 0 else ADVARSEL,
-            f"{m.navn} · Mangler {len(mangler)} {'del' if len(mangler) == 1 else 'dele'}",
-            " · ".join(dele), "Forsinket" if over > 0 else "Mangler", m.PROCES, m.id,
+            KRITISK if over > 0 else ADVARSEL, m.navn,
+            f"{len(mangler)} {'del' if len(mangler) == 1 else 'dele'} mangler",
+            "Forsinket" if over > 0 else "Mangler", m.PROCES, m.id,
             mangler[0].id if len(mangler) == 1 else None, over,
         ))
     return poster
+
+
+def _en_pr_sag(poster: list, sager) -> list:
+    """Én række pr. medarbejder – kun navnet og antallet af åbne opgaver i køen.
+    Den vigtigste opgave bestemmer mærket (fx Forsinket) og er den, sagen åbnes på;
+    de enkelte opgaver ses i sagen."""
+    navne = {s.id: s.navn for s in sager}
+    grupper = {}
+    for a in _sorter(poster):
+        grupper.setdefault(a.sag_id, []).append(a)
+    resultat = []
+    for sag_id, gruppe in grupper.items():
+        vigtigst, antal = gruppe[0], len(gruppe)
+        resultat.append(Alarm(vigtigst.niveau, navne.get(sag_id, ""),
+                              f"{antal} {'åben opgave' if antal == 1 else 'åbne opgaver'}",
+                              vigtigst.badge, vigtigst.modul, sag_id, vigtigst.opgave_id,
+                              vigtigst.sortering))
+    return _sorter(resultat)
 
 
 def _afslutning_koe(sager, i_dag) -> list:
@@ -304,8 +226,7 @@ def _afslutning_koe(sager, i_dag) -> list:
             continue
         valgfrie = sum(not o.afsluttet for o in sag.opgaver)
         poster.append(Alarm(
-            PLANLAGT, f"{sag.navn} · Kontrollér og arkivér",
-            f"Status: {sag.status} · alle obligatoriske opgaver er lukket"
+            PLANLAGT, sag.navn, "Kontrollér og arkivér"
             + (f" · åbne valgfrie opgaver: {valgfrie}" if valgfrie else ""),
             "Afslut", sag.PROCES, sag.id,
         ))
@@ -320,19 +241,20 @@ def koeer(sager: Iterable, i_dag: date, regler: Regler | None = None) -> list[Ko
     return [
         Koe(KONTRAKT, "Mangler kontrakt", "kontrakt",
             "Kontrakter, der skal udarbejdes, sendes eller registreres retur",
-            _sorter(_kontrakt_koe(onboarding, i_dag, regler))),
-        Koe(UDSTYR, "Telefon og arbejdstøj", "udstyr",
-            "Registrerede behov, der endnu ikke er klargjort eller sendt",
-            _sorter(_udstyr_koe(onboarding, i_dag, regler))),
-        Koe(OPLAERING, "Afventer oplæring eller jobs", "oplaering",
-            "Planlægning, bekræftelse og gennemførelse af oplæring og første jobs",
-            _sorter(_oplaering_koe(onboarding, i_dag, regler))),
+            _en_pr_sag(_spor_koe(onboarding, ("kontrakt",), i_dag, regler), onboarding)),
+        Koe(UDSTYR, "Udstyr og firmabil", "udstyr",
+            "Valgt udstyr, der ikke er sendt, og firmabiler, der ikke er bestilt",
+            _en_pr_sag(_udstyr_koe(onboarding, i_dag, regler), onboarding)),
+        Koe(OPLAERING, "Oplæringsdag", "oplaering",
+            "Oplæringsdage, der ikke er fastlagt og bekræftet endnu",
+            _en_pr_sag(_spor_koe(onboarding, ("oplaering", "opstart"), i_dag, regler),
+                       onboarding)),
         Koe(AFVENTER, "Afventer andre", "afventer",
             "Opgaver, der venter på svar, godkendelse eller levering fra en anden part",
-            _sorter(_afventer_koe(aktive, i_dag, regler))),
+            _en_pr_sag(_afventer_koe(aktive, i_dag, regler), aktive)),
         Koe(RETUR, "Offboarding: udstyr mangler", "retur",
             "Fratrådte medarbejdere med udstyr, der ikke er modtaget",
-            _sorter(_retur_koe(aktive, i_dag)), "medarbejdere"),
+            _sorter(_retur_koe(aktive, i_dag))),
         Koe(AFSLUTNING, "Klar til afslutning", "afslut",
             "Obligatoriske opgaver er lukket – mangler afsluttende kontrol og arkivering",
             _afslutning_koe(alle, i_dag), "sager"),
@@ -344,7 +266,7 @@ def koeer(sager: Iterable, i_dag: date, regler: Regler | None = None) -> list[Ko
 # Hvorfor en opgave er på listen (vigtigst først).
 KRITISK_FORSINKELSE = "Forsinket"
 TRUER_OPSTART = "Truer opstart"
-INGEN_ANSVARLIG = "Ingen ansvarlig"
+INGEN_ANSVARLIG = "Ingen ejer"
 FOR_LAENGE = "Står stille"
 FRIST_I_DAG = "Frist i dag"
 GRUNDE = (KRITISK_FORSINKELSE, TRUER_OPSTART, INGEN_ANSVARLIG, FOR_LAENGE, FRIST_I_DAG)
@@ -381,8 +303,7 @@ def haster_nu(sager: Iterable, i_dag: date, regler: Regler | None = None) -> lis
 
     1. Forsinkede opgaver (også blokerede), mest forsinkede først.
     2. Obligatoriske opgaver hos medarbejdere, hvis opstart er i risiko og nærmer sig.
-    3. Opgaver, der kan udføres, men ingen ejer har (ingen afdeling), eller hvor
-       en afdelingskø ikke har fordelt en opgave med nær frist.
+    3. Opgaver, der kan udføres, men hverken har en afdeling eller en person.
     4. Opgaver, der har afventet andre længere end grænsen for stillestående
        sager, og blokerede opgaver, hvis frist nærmer sig.
     5. Øvrige opgaver med frist i dag.
@@ -399,7 +320,7 @@ def haster_nu(sager: Iterable, i_dag: date, regler: Regler | None = None) -> lis
         forudsaetninger = sag.forudsaetninger(o)
         if tilstand == sp.BLOKERET and forudsaetninger:
             handling, maal = AABN_FORUDSAETNING, forudsaetninger[0].id
-        elif sp.ansvar(o) != sp.BRUGER:
+        elif sp.ansvar(o) == sp.IKKE_TILDELT:
             handling, maal = TILDEL, o.id
         else:
             handling, maal = AABN, o.id
@@ -427,13 +348,10 @@ def haster_nu(sager: Iterable, i_dag: date, regler: Regler | None = None) -> lis
                     and not (o.frist_dato() and start and o.frist_dato() > start):
                 tilfoej(TRUER_OPSTART, tekst, sag, o)
 
+    # Afdelingen ejer opgaven – kun opgaver uden både person og afdeling mangler en ejer.
     for sag, o in aabne:
-        if sag.er_blokeret(o) or o.ansvarlig:
-            continue
-        if sp.ansvar(o) == sp.IKKE_TILDELT:
+        if not sag.er_blokeret(o) and sp.ansvar(o) == sp.IKKE_TILDELT:
             tilfoej(INGEN_ANSVARLIG, "Hverken person eller afdeling", sag, o)
-        elif sp.tidsrisiko(o, i_dag, regler.naermer_sig_dage) == sp.NAERMER_SIG:
-            tilfoej(INGEN_ANSVARLIG, f"{o.afdeling}: ikke fordelt, frist nærmer sig", sag, o)
 
     for sag, o in aabne:
         if o.status == Opgave.AFVENTER:

@@ -229,16 +229,21 @@ class OnboardingController(ModulController):
         return [] if ind is FEJL else ind["omraader"]
 
     def opret(self):
+        """Opret kandidat. Efter gem vises kandidaten markeret i oversigten med en
+        bekræftelse – sagsvinduet åbnes ikke af sig selv, så "Annuller" aldrig kan
+        forveksles med at fortryde en oprettelse, der allerede er gemt."""
         skabeloner = udfoer(self.vindue, self.t.skabeloner.sagsskabeloner, "onboarding")
-        if skabeloner is FEJL:
+        profiler = udfoer(self.vindue, self.t.indstillinger.udstyrsprofiler)
+        if skabeloner is FEJL or profiler is FEJL:
             return
-        dialog = OnboardingDialog(self.vindue, None, skabeloner, self._omraader(), self.ansvarlige())
+        dialog = OnboardingDialog(self.vindue, None, skabeloner, self._omraader(),
+                                  self.ansvarlige(), profiler)
         if not dialog.exec():
             return
         data = dialog.hent_data()
         sag = self._udfoer(self.service.opret, self.service.ny_sag(data), data["skabelon"], data)
         if sag is not FEJL:
-            self.aabn_sag(sag.id)
+            self.vindue.vis_oprettet(sag)
 
     def rediger(self, sag_id):
         sag = self._hent(sag_id)

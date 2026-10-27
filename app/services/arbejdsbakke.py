@@ -23,7 +23,7 @@ NYLIGT_AFSLUTTET = "afsluttet"
 VISNINGER = (
     (MINE, "Mine opgaver"),
     (MIN_AFDELING, "Min afdeling"),
-    (IKKE_TILDELT, "Ikke tildelte"),
+    (IKKE_TILDELT, "Uden ejer"),
     (AFVENTER_ANDRE, "Afventer andre"),
     (FORSINKEDE, "Forsinkede"),
     (NYLIGT_AFSLUTTET, "Nyligt afsluttet"),
@@ -74,7 +74,8 @@ def poster(sager: Iterable, visning: str, i_dag: date, brugernavn: str = "",
             elif visning == MIN_AFDELING:
                 med = o.afdeling in afdelinger
             elif visning == IKKE_TILDELT:
-                med = not o.ansvarlig
+                # Afdelingen ejer opgaven: kun opgaver uden både person og afdeling.
+                med = sp.ansvar(o) == sp.IKKE_TILDELT
             elif visning == AFVENTER_ANDRE:
                 med = o.status == Opgave.AFVENTER
             elif visning == FORSINKEDE:
@@ -103,15 +104,17 @@ RISIKO = "risiko"
 KOMMENDE = "kommende"
 MANGLER_BEKRAEFTELSE = "mangler_bekraeftelse"
 KLAR_TIL_AFSLUTNING = "klar_til_afslutning"
+MANGLER_KONTRAKT = "mangler_kontrakt"
 TEAM_FILTRE = (
     (ALLE, "Alle aktive forløb"),
     (SAG_MIN_AFDELING, "Min afdeling"),
     (SAG_MINE, "Mine opgaver"),
-    (UDEN_ANSVARLIG, "Opgaver uden ansvarlig"),
+    (UDEN_ANSVARLIG, "Opgaver uden ejer"),
     (SAG_FORSINKEDE, "Forsinkede opgaver"),
     (BLOKEREDE, "Blokerede forløb"),
     (RISIKO, "Opstart i risiko"),
     (KOMMENDE, "Kommende arbejdsstarter"),
+    (MANGLER_KONTRAKT, "Mangler kontrakt"),
     (MANGLER_BEKRAEFTELSE, "Mangler bekræftelse"),
     (KLAR_TIL_AFSLUTNING, "Klar til afslutning"),
 )
@@ -137,9 +140,11 @@ def sag_matcher(sag, filter_: str, i_dag: date, brugernavn: str = "",
     if filter_ == SAG_MINE:
         return any(_min(o, brugernavn) for o in aabne)
     if filter_ == UDEN_ANSVARLIG:
-        return any(not o.ansvarlig and not sag.er_blokeret(o) for o in aabne)
+        return any(sp.ansvar(o) == sp.IKKE_TILDELT and not sag.er_blokeret(o) for o in aabne)
     if filter_ == SAG_FORSINKEDE:
         return any(o.er_forsinket(i_dag) for o in aabne)
+    if filter_ == MANGLER_KONTRAKT:
+        return any(sp.spor_for(o) == "kontrakt" for o in aabne)
     if filter_ == MANGLER_BEKRAEFTELSE:
         return any(o.status == Opgave.AFVENTER for o in aabne)
     if filter_ in (BLOKEREDE, RISIKO):
@@ -177,9 +182,10 @@ def noegletal(sager: Iterable, i_dag: date, risiko_dage: int = 7) -> list[Noegle
                   "Forsinkede opgaver eller tæt på start med åbne opgaver"),
         Noegletal("Forsinkede opgaver", sum(o.er_forsinket(i_dag) for _, o in opgaver),
                   SAG_FORSINKEDE, "Opgaver over fristen – også dem, der er blokerede"),
-        Noegletal("Uden ansvarlig",
-                  sum(not o.ansvarlig and not s.er_blokeret(o) for s, o in opgaver),
-                  UDEN_ANSVARLIG, "Opgaver, der kan udføres, men ikke er tildelt en person"),
+        Noegletal("Uden ejer",
+                  sum(sp.ansvar(o) == sp.IKKE_TILDELT and not s.er_blokeret(o)
+                      for s, o in opgaver),
+                  UDEN_ANSVARLIG, "Opgaver uden både afdeling og person"),
         Noegletal("Afventer andre", sum(o.status == Opgave.AFVENTER for _, o in opgaver),
                   MANGLER_BEKRAEFTELSE, "Opgaver, der afventer en ekstern part"),
         Noegletal("Klar til afslutning", antal_sager(KLAR_TIL_AFSLUTNING), KLAR_TIL_AFSLUTNING,

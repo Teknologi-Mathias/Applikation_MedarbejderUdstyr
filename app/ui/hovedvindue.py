@@ -544,6 +544,16 @@ class MainWindow(QMainWindow):
                              MdmArkivSide)):
             side.opdater()
 
+    def vis_oprettet(self, sag):
+        """Efter oprettelse: modulets aktive forløb med den nye sag markeret og en
+        bekræftelse. Opgaver og tidslinje åbnes bevidst herfra (dobbeltklik)."""
+        noegle = f"{'on' if sag.PROCES == ON else 'off'}_aktive"
+        self.vis_side(noegle)
+        side = self.sider[noegle]
+        side.vaelg(sag.id)
+        side.vis_besked(f"✓ {sag.navn} er oprettet og gemt (status: {sag.status}). "
+                        "Dobbeltklik eller vælg 'Åbn forløb' for at se opgaver og tidslinje.")
+
     def aabn_sag(self, proces, sag_id, opgave_id=""):
         self.ctrl[proces].aabn_sag(sag_id, opgave_id)
 

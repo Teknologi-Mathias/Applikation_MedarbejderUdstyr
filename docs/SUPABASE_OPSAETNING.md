@@ -10,7 +10,6 @@ sig selv – alt herunder er bevidste, manuelle handlinger.
 | Engangs-nulstilling | `app/infrastructure/database/reset/nulstil_forretningsdata.sql` |
 | Edge Functions | `supabase/functions/admin-create-user`, `admin-manage-user` |
 | Klientkonfiguration | `%APPDATA%\IN-BASE\.env` på hver pc |
-| Afvikling af gamle JSON-data | `python tools/afvikl_gamle_data.py` |
 
 **I kodebasen vs. manuelt:** Migreringer, Edge Functions og klient er færdige
 i kodebasen. *Du* skal selv køre migreringerne i SQL Editor, rette
@@ -82,9 +81,22 @@ i denne rækkefølge, og tjek at hver giver "Success":
 15. `015_seed_standarder.sql` – standarderne igen (genereret), nu med onboarding-
     skabelonerne "Onboarding – arbejdsspor" (+ FM/DM). De gamle onboarding-
     standarder fra 004 deaktiveres (slettes ikke). Kan køres igen uden dubletter.
+16. `016_udstyrsprofiler.sql` – standardprofiler for udstyr pr. stilling
+    (`app_settings.udstyrsprofiler`, tom som standard). Medlemmer må ændre nøglen
+    (Indstillinger → Organisation). Kun tilføjelser; kan køres igen. Indtil den er
+    kørt, kan kun administratorer gemme Organisation.
+
+17. `017_loennr_foer_kontrakt.sql` – onboardingskabelonerne: "Lønnr. tildelt" er en
+    HR-opgave i kandidatfasen, og kontrakten venter på den (lønnr. står på
+    kontrakten). Ny skabelonversion; sager påvirkes ikke. Kan køres igen.
+
+18. `018_enkelt_onboardingflow.sql` – ny standardskabelon "Onboarding" (5 opgaver,
+    alle stillinger); de tidligere arbejdsspor-standarder deaktiveres (slettes
+    ikke). Sletning af skabeloner: RPC `inbase_delete_workflow_template` (modultjek)
+    og delete for mails og påmindelser. Sager påvirkes ikke. Kan køres igen.
 
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004 og 015). Fremtidige ændringer kommer som nye filer `016_...`, `017_...`.
+fra 004, 015, 016, 017 og 018). Fremtidige ændringer kommer som nye filer `019_...`.
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 
@@ -121,9 +133,9 @@ Dashboard → **Authentication**:
 2. **Authentication → Users**: find testkontoen (e-mailen i
    `SUPABASE_TEST_EMAIL` i projektets gamle `.env`) → ⋯ → **Delete user**.
    Slet kun denne konto. Den må ikke genbruges som administrator.
-3. Slet `test_supabase_connection.py` og linjerne `SUPABASE_URL`,
-   `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_TEST_EMAIL`, `SUPABASE_TEST_PASSWORD`
-   fra projektets `.env`. Den kode og de navne bruges ikke af IN-BASE.
+3. Slet linjerne `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
+   `SUPABASE_TEST_EMAIL`, `SUPABASE_TEST_PASSWORD` fra projektets `.env`
+   (forbindelsestesten er fjernet fra kodebasen). Navnene bruges ikke af IN-BASE.
 
 ## 4. Deploy Edge Functions
 
@@ -260,24 +272,11 @@ en trigger i databasen).
 
 Samme pc, to profiler: start én IN-BASE, log ud (sidebar), log på som den anden.
 
-## 9. Gamle lokale data (JSON) afvikles
+## 9. Gamle lokale data (JSON)
 
-De gamle data overføres ikke. På hver pc, hvor IN-BASE har været brugt:
-
-```
-python tools/afvikl_gamle_data.py            # viser, ændrer intet
-python tools/afvikl_gamle_data.py --slet     # sletter efter at du skriver SLET
-python tools/afvikl_gamle_data.py --data X:\delt\IN-BASE\Data   # netværksdrev
-```
-
-Forretningsdata (slettes): `Data\medarbejdere.json`, `arkiv.json`,
-`onboarding.json`, `onboarding_arkiv.json`, `skabeloner.json`,
-`indstillinger.json`, `brugere.json` (gamle kode-hashes), `Data\Backup\`,
-`Lokal\Offline\` og `%APPDATA%\MedarbejderUdstyr\Data\` (data fra ≤ V0.5.1).
-Teknisk (beholdes, medmindre `--ogsaa-teknisk`): `notifikationslog.json`,
-`praeferencer.json`, `Logs\`. Kildekode og `%APPDATA%\IN-BASE\.env` røres
-aldrig. Skal HR beholde en sidste kopi, så tag den før sletning og opbevar
-den efter jeres slettepolitik – uden for projektmappen.
+De gamle JSON-data overføres ikke og er afviklet (værktøjet til det er fjernet
+efter brug). Ligger der stadig gamle filer på en pc, slettes de manuelt efter
+jeres slettepolitik: `Data\*.json`, `Data\Backup\` og `Lokal\Offline\`.
 
 JSON-tilstanden (`INBASE_BACKEND=json`) er kun til udvikling og tests. Den har
 ingen standardbruger; den første administrator oprettes med

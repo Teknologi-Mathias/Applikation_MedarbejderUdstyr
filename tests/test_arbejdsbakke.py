@@ -33,7 +33,8 @@ class ArbejdsbakkeTest(unittest.TestCase):
         self.assertEqual(self.navne(ab.MINE, brugernavn="bo"), ["Opfølgning"])
         self.assertEqual(self.navne(ab.MIN_AFDELING, afdelinger=["Administration"]),
                          ["Kontrakt", "Telefon"])
-        self.assertEqual(self.navne(ab.IKKE_TILDELT), ["Kontrakt", "Telefon"])
+        # Afdelingen ejer opgaven: kun opgaver uden både afdeling og person er uden ejer.
+        self.assertEqual(self.navne(ab.IKKE_TILDELT), [])
         self.assertEqual(self.navne(ab.AFVENTER_ANDRE), ["Kontrakt"])
         self.assertEqual(self.navne(ab.FORSINKEDE), ["Opfølgning"])
         self.assertEqual(self.navne(ab.NYLIGT_AFSLUTTET), ["Godkendt"])
@@ -62,8 +63,7 @@ class TeamTest(unittest.TestCase):
         self.assertEqual(tal["Aktive forløb"], 2)
         self.assertEqual(tal["Starter snart"], 1)
         self.assertEqual(tal["Forsinkede opgaver"], 2)
-        # Kontrakten (ikke tildelt, kan udføres) tæller; den blokerede telefon gør ikke.
-        self.assertEqual(tal["Uden ansvarlig"], 2)
+        self.assertEqual(tal["Uden ejer"], 0, "afdelingerne ejer opgaverne")
         self.assertEqual(tal["Afventer andre"], 2)
 
     def test_naeste_handling_er_det_mest_presserende_spor(self):
@@ -98,14 +98,21 @@ class KontrolrumTest(unittest.TestCase):
         udstyr = lambda: next(k for k in kr.koeer([sag], I_DAG) if k.noegle == kr.UDSTYR)
         self.assertEqual(udstyr().poster, [])
         sag.behov.mobil, sag.behov.abonnement = True, "Kun data"
-        self.assertIn("Mobil · Kun data", udstyr().poster[0].undertitel)
+        self.assertEqual([a.titel for a in udstyr().poster], ["Ole"])
 
-    def test_registreret_oplaeringstid_er_ikke_booket(self):
+    def test_en_raekke_pr_kandidat_med_den_vigtigste_opgave(self):
         sag = _sag()
-        sag.opgaver.append(Opgave("Oplæringsvagt booket", noegle="oplaering_booket",
-                                  spor="oplaering", planlagt=f"{dato(5)}T08:00:00"))
+        sag.opgaver += [
+            Opgave("Oplæringsvagt booket", noegle="booket", spor="oplaering"),
+            Opgave("Første oplæring", noegle="gennemfoert", spor="oplaering",
+                   frist=(I_DAG - timedelta(days=1)).isoformat()),
+        ]
         koe = next(k for k in kr.koeer([sag], I_DAG) if k.noegle == kr.OPLAERING)
-        self.assertIn("ikke bekræftet", koe.poster[0].undertitel)
+        self.assertEqual(len(koe.poster), 1)
+        raekke = koe.poster[0]
+        self.assertEqual((raekke.titel, raekke.undertitel, raekke.badge),
+                         ("Ole", "2 åbne opgaver", "Forsinket"))
+        self.assertEqual(raekke.opgave_id, sag.opgaver[-1].id)    # åbner den forsinkede
 
 
 if __name__ == "__main__":

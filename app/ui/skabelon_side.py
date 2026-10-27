@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -80,7 +81,9 @@ class SkabelonListe(QWidget):
         self.rediger_knap = lav_knap("Rediger")
         self.kopier_knap = lav_knap("Kopiér")
         self.aktiv_knap = lav_knap("Deaktivér")
-        for knap in (self.ny_knap, self.rediger_knap, self.kopier_knap, self.aktiv_knap):
+        self.slet_knap = lav_knap("Slet", "danger")
+        for knap in (self.ny_knap, self.rediger_knap, self.kopier_knap, self.aktiv_knap,
+                     self.slet_knap):
             top.addWidget(knap)
         layout.addLayout(top)
 
@@ -88,6 +91,7 @@ class SkabelonListe(QWidget):
         self.rediger_knap.clicked.connect(self.rediger)
         self.kopier_knap.clicked.connect(self.kopier)
         self.aktiv_knap.clicked.connect(self.skift_aktiv)
+        self.slet_knap.clicked.connect(self.slet)
 
         kort = lav_kort(skygge=False)
         kort_layout = QVBoxLayout(kort)
@@ -146,7 +150,7 @@ class SkabelonListe(QWidget):
         valgt = self._valgt()
         redigerbar = self.side.redigerbar
         self.ny_knap.setEnabled(redigerbar)
-        for knap in (self.rediger_knap, self.kopier_knap, self.aktiv_knap):
+        for knap in (self.rediger_knap, self.kopier_knap, self.aktiv_knap, self.slet_knap):
             knap.setEnabled(redigerbar and valgt is not None)
         self.aktiv_knap.setText("Aktivér" if valgt and not valgt["aktiv"] else "Deaktivér")
 
@@ -185,6 +189,20 @@ class SkabelonListe(QWidget):
         if valgt:
             self.side.skift_aktiv(self.slags, valgt)
 
+    def slet(self):
+        valgt = self._valgt()
+        if not valgt or not self.side.redigerbar:
+            return
+        svar = QMessageBox.warning(
+            self, "Slet skabelon",
+            f"Vil du slette skabelonen \"{valgt['navn']}\" permanent?\n\n"
+            "Eksisterende forløb påvirkes ikke – de har deres egne kopier af opgaverne. "
+            "Vil du blot skjule den, så vælg Deaktivér i stedet.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if svar == QMessageBox.StandardButton.Yes:
+            self.side.slet(self.slags, valgt)
+
 
 class SkabelonSide(QWidget):
     def __init__(self, skabeloner, slags, proces=None, titel="Skabeloner", undertitel="",
@@ -205,7 +223,7 @@ class SkabelonSide(QWidget):
         layout.setSpacing(10)
         if not indlejret:
             hoved, _ = lav_sidehoved(titel, undertitel or (
-                "Opret, redigér, kopiér og deaktivér skabeloner. "
+                "Opret, redigér, kopiér, deaktivér og slet skabeloner. "
                 "Deaktiverede skabeloner bevares, men kan ikke vælges."))
             layout.addLayout(hoved)
 
@@ -248,4 +266,8 @@ class SkabelonSide(QWidget):
 
     def skift_aktiv(self, slags, skabelon):
         udfoer(self, self.skabeloner.skift_aktiv, slags, skabelon)
+        self.opdater()
+
+    def slet(self, slags, skabelon):
+        udfoer(self, self.skabeloner.slet, slags, skabelon)
         self.opdater()
