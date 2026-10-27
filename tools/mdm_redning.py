@@ -1,7 +1,8 @@
-"""Redning af en låst telefon uden browser: lever IN-BASE Klargøring v2 via Wi-Fi-login.
+"""Redning af en låst telefon uden browser: lever IN-BASE Klargøring via Wi-Fi-login.
 
-Bruges til telefoner klargjort med styrings-app v1 (uden nulstillingskode), fx ISM321.
-Bluetooth afviser APK-filer, og Chrome er skjult – men Androids indbyggede
+Bruges, når USB, Bluetooth og den indbyggede opdatering alle er lukkede, og telefonens
+egen nulstillingskode er gået tabt. Serverer den nyeste APK (v5+ med masterkode), så
+telefonen kan opdateres og derefter nulstilles med masterkoden. Androids indbyggede
 Wi-Fi-login-browser (captive portal) er ikke skjult og kan hente filer.
 
     python tools/mdm_redning.py
@@ -29,9 +30,9 @@ FORSIDE = f"""<!doctype html><html lang="da"><head><meta charset="utf-8">
 <h2>IN-BASE – opdatering af telefonen</h2>
 <p><a href="http://{IP}:{PORT}/inbase-klargoering.apk"
  style="display:inline-block;padding:16px 24px;background:#6b3fa0;color:#fff;border-radius:8px;
- text-decoration:none">Hent IN-BASE Klargøring v2</a></p>
+ text-decoration:none">Hent IN-BASE Klargøring</a></p>
 <p>Når den er hentet: tryk på notifikationen, tillad installation og vælg <b>Opdater</b>.<br>
-Tast derefter <b>*#*#46227#*#*</b> i Telefon-appen og indtast reservekoden.</p>
+Tast derefter <b>*#*#46227#*#*</b> i Telefon-appen og indtast koden.</p>
 </body></html>""".encode("utf-8")
 
 

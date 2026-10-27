@@ -13,6 +13,23 @@ if (!reservekodeFil.exists()) {
 }
 def reservekode = reservekodeFil.text.trim()
 
+// Masterkode: virker på ALLE telefoner (v5+) som nulstillingskode – også når telefonens egen
+// kode er væk. Kun administratoren, der bygger, kender den: android/masterkode.txt (ikke i git,
+// kopieres IKKE til IN-BASE). Byg altid med den samme fil – ellers får nye telefoner en ny kode.
+// Kun en PBKDF2-hash lægges i appen, så koden ikke kan læses ud af APK'en.
+def masterkodeFil = rootProject.file("masterkode.txt")
+if (!masterkodeFil.exists()) {
+    def r = new java.security.SecureRandom()
+    masterkodeFil.text = (1..16).collect { r.nextInt(10) }.join("")
+    println "*** NY MASTERKODE i android/masterkode.txt – gem den et sikkert sted. ***"
+}
+def masterkode = masterkodeFil.text.trim()
+if (!(masterkode ==~ /\d{12,}/)) throw new GradleException("android/masterkode.txt skal være mindst 12 cifre.")
+def masterHash = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        .generateSecret(new javax.crypto.spec.PBEKeySpec(masterkode.toCharArray(),
+                "inbase-master".getBytes("UTF-8"), 120000, 256))
+        .encoded.encodeHex().toString()
+
 // Signering: projektets faste nøgle fra Supabase (kun administratorer), hentet af
 // scripts/byg_klargoering_apk.ps1 til android/signering/ og slettet igen efter bygget.
 // Telefonerne afviser opdateringer signeret med en anden nøgle – derfor ALDRIG debug-nøglen.
@@ -34,9 +51,10 @@ android {
         applicationId "dk.instore.inbase.klargoering"
         minSdk 29          // Android 10+: QR-klargøring med GET_PROVISIONING_MODE
         targetSdk 35
-        versionCode 4
-        versionName "4.0"
+        versionCode 5
+        versionName "5.0"
         resValue "string", "reservekode", reservekode
+        resValue "string", "master_hash", masterHash
     }
 
     signingConfigs {

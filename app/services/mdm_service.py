@@ -289,12 +289,19 @@ class MdmService:
             baggrund = ""
         if self.lokal:
             self.lokal.gem({k: v[k] for k in HUSKEDE})
+        # Nulstillingskoden gemmes, FØR QR-koden vises, og genbruges ved hver ny QR-kode til
+        # samme telefon – ellers er koden tabt, hvis telefonen aldrig når at melde tilbage.
+        kode = enhed.nulstillingskode or f"{secrets.randbelow(10**8):08d}"
+        if kode != enhed.nulstillingskode:
+            self.repo.opdater([{"id": enhed.id, "nulstillingskode": kode}])
+            enhed.nulstillingskode = kode
         # Kort engangskode (16 tegn) – den gælder kun på det lokale net, mens vinduet er
         # åbent, og hvert tegn gør QR-koden tættere og sværere at scanne.
         return Klargoering(enhed, secrets.token_urlsafe(12), v["wifi_ssid"],
                            str(indstillinger.get("wifi_kode") or ""), v["wifi_type"] or "WPA",
                            fl, baggrund, ",".join(p for p in apps if p not in ugyldige),
-                           bool(indstillinger.get("mail")), v["kontakt"], advarsler=advarsler)
+                           bool(indstillinger.get("mail")), v["kontakt"], kode,
+                           advarsler=advarsler)
 
     def _fl_update(self, v: dict) -> str:
         """Sti til FL-UPDATE på pc'en (linket hentes først) – ValideringsFejl ved problemer."""
@@ -336,7 +343,6 @@ class MdmService:
         if str(rapport.get("enhed_id")) != klargoering.enhed.id:
             raise ValideringsFejl("Rapporten kom fra en anden telefon end den, der klargøres.")
         felter = {k: str(rapport.get(k) or "")[:100] for k in md.RAPPORTFELTER}
-        # Koden gemmes først, når telefonen har bekræftet – så den altid passer til telefonen.
         felter.update(status=md.KLARGJORT, klargjort=nu(),
                       nulstillingskode=klargoering.nulstillingskode, mail=klargoering.mail)
         self.repo.opdater([{"id": klargoering.enhed.id, **felter}])

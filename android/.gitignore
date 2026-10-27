@@ -3,6 +3,8 @@ build/
 app/build/
 local.properties
 reservekode.txt
+# Masterkoden (kun den, der bygger) – aldrig i git
+masterkode.txt
 # Signeringsnøglen (hentes fra Supabase under bygget og slettes igen) – aldrig i git
 signering/
 .idea/

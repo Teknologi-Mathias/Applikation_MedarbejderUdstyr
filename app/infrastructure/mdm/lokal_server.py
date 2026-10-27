@@ -37,6 +37,34 @@ def lokal_ip() -> str:
             return "127.0.0.1"
 
 
+def netvaerk() -> list[tuple[str, str]]:
+    """pc'ens aktive netværk som (navn, IP) – Wi-Fi først.
+
+    En bærbar med både netværksstik og Wi-Fi har en IP på hvert net. Telefonen er på
+    Wi-Fi, så QR-koden skal pege på pc'ens Wi-Fi-IP – ikke den, Windows bruger som
+    standard (ofte stikket)."""
+    from PySide6.QtNetwork import QAbstractSocket, QNetworkInterface
+
+    F = QNetworkInterface.InterfaceFlag
+    standard = lokal_ip()
+    fundne = []
+    for kort in QNetworkInterface.allInterfaces():
+        flag = kort.flags()
+        if not (flag & F.IsUp and flag & F.IsRunning) or flag & F.IsLoopBack:
+            continue
+        for adr in kort.addressEntries():
+            ip = adr.ip()
+            # 169.254.x.x: kortet har ingen rigtig forbindelse.
+            if ip.protocol() != QAbstractSocket.NetworkLayerProtocol.IPv4Protocol \
+                    or ip.isLinkLocal():
+                continue
+            wifi = kort.type() == QNetworkInterface.InterfaceType.Wifi
+            fundne.append((not wifi, ip.toString() != standard,
+                           kort.humanReadableName(), ip.toString()))
+    fundne.sort()
+    return [(navn, ip) for *_, navn, ip in fundne] or [("Standard", standard)]
+
+
 class KlargoeringsServer:
     def __init__(self, apk: Path, token: str, paa_rapport: Callable[[dict], None],
                  baggrund: Optional[Path] = None, fl_update: Optional[Path] = None,
@@ -55,8 +83,12 @@ class KlargoeringsServer:
         self._server = None
 
     @property
+    def port(self) -> int:
+        return self._server.server_address[1]
+
+    @property
     def url(self) -> str:
-        return f"http://{self._vaert or lokal_ip()}:{self._server.server_address[1]}"
+        return f"http://{self._vaert or lokal_ip()}:{self.port}"
 
     def start(self) -> str:
         if self._server is None:

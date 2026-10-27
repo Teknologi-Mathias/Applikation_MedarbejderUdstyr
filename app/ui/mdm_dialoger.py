@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.domain import mdm_enhed as md
-from app.infrastructure.mdm.lokal_server import KlargoeringsServer
+from app.infrastructure.mdm.lokal_server import KlargoeringsServer, netvaerk
 from app.infrastructure.mdm.qr import qr_matrix
 from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.ui.fejl import FEJL, udfoer
@@ -207,7 +207,14 @@ class KlargoeringDialog(QDialog):
         self.kontakt.setToolTip("Vises på telefonens låseskærm og når brugeren rammer en spærret "
                                 "funktion.")
 
+        self.netkort = QComboBox()
+        for navn, ip in netvaerk():
+            self.netkort.addItem(f"{navn} – {ip}", ip)
+        self.netkort.setToolTip("Det netværk på pc'en, telefonen henter fra. Telefonen er på "
+                                "Wi-Fi – vælg pc'ens Wi-Fi, også når pc'en har netværksstik.")
+
         form = QFormLayout()
+        form.addRow("Pc'ens netværk", self.netkort)
         form.addRow("Wi-Fi (SSID)", self.ssid)
         form.addRow("Wi-Fi-kode", kode_raekke)
         form.addRow("Sikkerhed", self.sikkerhed)
@@ -250,8 +257,10 @@ class KlargoeringDialog(QDialog):
         trin.setWordWrap(True)
         trin.setTextFormat(Qt.TextFormat.RichText)
         note = QLabel("Pc og telefon skal være på samme Wi-Fi, og vinduet skal være åbent, til "
-                      "telefonen er færdig. Spørger Windows Firewall, så tillad adgang på "
-                      "private netværk.")
+                      "telefonen er færdig. Har pc'en både netværksstik og Wi-Fi, så vælg Wi-Fi "
+                      "under Pc'ens netværk. Spørger Windows Firewall, så tillad adgang – også på "
+                      "offentlige netværk, hvis firmaets Wi-Fi står som offentligt. Gæste-Wi-Fi "
+                      "tillader ofte ikke, at telefon og pc taler sammen.")
         note.setObjectName("hjaelpTekst")
         note.setWordWrap(True)
 
@@ -318,6 +327,7 @@ class KlargoeringDialog(QDialog):
             self.server = KlargoeringsServer(k.apk, k.token, self._bro.rapport.emit,
                                              baggrund=Path(k.baggrund) if k.baggrund else None,
                                              fl_update=k.fl_update_fil,
+                                             vaert=self.netkort.currentData(),
                                              paa_hentning=self._bro.hentet.emit)
             url = self.server.start()
             self._qr_tekst = k.qr_tekst(url)
@@ -334,7 +344,7 @@ class KlargoeringDialog(QDialog):
             self.fejl_label.setText("QR-koden virker, men:\n• " + "\n• ".join(k.advarsler))
         self.vis_knap.setText("Lav ny QR-kode")
         self.status.setText(f"Venter på telefonen … (pc: {url})\n\nNulstillingskode: "
-                            f"{k.nulstillingskode}  (gemmes i IN-BASE, når telefonen er klargjort)")
+                            f"{k.nulstillingskode}  (gemt i IN-BASE)")
 
     def _vis_stor_qr(self):
         """QR-koden over hele skærmen – klik eller Esc lukker. Serveren kører videre."""
@@ -405,7 +415,11 @@ class OpdateringDialog(QDialog):
         self.status = QLabel("Venter på telefoner …")
         self.status.setWordWrap(True)
         try:
-            adresse.setText(self.server.start().removeprefix("http://"))
+            self.server.start()
+            # Alle pc'ens adresser – telefonen bruger den på samme Wi-Fi (den øverste er Wi-Fi).
+            net = netvaerk()
+            adresse.setText("\n".join(f"{ip}:{self.server.port}" for _navn, ip in net))
+            adresse.setToolTip("\n".join(f"{navn}: {ip}" for navn, ip in net))
         except OSError as fejl:
             self.server = None
             self.status.setText(f"Serveren kunne ikke starte ({fejl}). Er port 8765 optaget af "
@@ -430,7 +444,7 @@ class OpdateringDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
         layout.addWidget(trin)
-        layout.addWidget(QLabel("Pc'ens adresse:"))
+        layout.addWidget(QLabel("Pc'ens adresse (brug den første – pc'ens Wi-Fi):"))
         layout.addWidget(adresse)
         layout.addWidget(self.status)
         layout.addWidget(note)

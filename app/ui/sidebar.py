@@ -5,7 +5,16 @@ undersider; Ønsker & Udvikling er et selvstændigt punkt. Et hovedpunkt kan fol
 side, foldes altid ud.
 """
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app import APP_BESKRIVELSE, APP_NAVN, APP_SLOGAN, VERSION
 from app.ui.hjaelpere import lav_knap, lav_logo
@@ -47,6 +56,19 @@ class Sidebar(QFrame):
         layout.addWidget(slogan)
         layout.addSpacing(14)
 
+        # Menupunkterne kan rulles, så de ikke trykkes sammen på lave skærme.
+        rul = QScrollArea()
+        rul.setWidgetResizable(True)
+        rul.setFrameShape(QFrame.Shape.NoFrame)
+        rul.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        rul.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }")
+        menu = QWidget()
+        rul.setWidget(menu)
+        menu_layout = QVBoxLayout(menu)
+        menu_layout.setContentsMargins(0, 0, 0, 0)
+        menu_layout.setSpacing(3)
+        layout.addWidget(rul, 1)
+
         self.gruppe = QButtonGroup(self)
         self.gruppe.setExclusive(True)
         self.knapper = {}
@@ -58,7 +80,7 @@ class Sidebar(QFrame):
                 hoved.setProperty("navSektion", True)
                 hoved.setCursor(Qt.CursorShape.PointingHandCursor)
                 hoved.clicked.connect(lambda _=False, s=sektion: self._fold(s))
-                layout.addWidget(hoved)
+                menu_layout.addWidget(hoved)
             for noegle, tekst in punkter:
                 knap = QPushButton(tekst.replace("&", "&&"))   # "&" er ellers genvejstast i Qt
                 knap.setProperty("navUnder" if sektion else "nav", True)
@@ -68,12 +90,12 @@ class Sidebar(QFrame):
                 self.gruppe.addButton(knap)
                 self.knapper[noegle] = knap
                 underknapper.append(knap)
-                layout.addWidget(knap)
+                menu_layout.addWidget(knap)
             if sektion:
                 self.sektioner[sektion] = (hoved, underknapper)
-            layout.addSpacing(6)
+            menu_layout.addSpacing(6)
 
-        layout.addStretch()
+        menu_layout.addStretch()
         self.lagring_label = QLabel("")
         self.lagring_label.setWordWrap(True)
         layout.addWidget(self.lagring_label)

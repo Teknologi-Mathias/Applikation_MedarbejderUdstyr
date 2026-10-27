@@ -18,6 +18,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
 
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+
 /**
  * Administrator-menu på telefonen: ikonet "IN-BASE indstillinger" eller *#*#46227#*#* i Telefon-appen.
  *
@@ -28,6 +31,8 @@ import java.util.List;
  *   supportkode       må gives til brugeren: kan kun vise og skjule Chrome (uden Google-konto).
  *   ændringskode      én kode pr. telefon og handling, fx "slå firma-mail til". Telefonen
  *                     kan se på koden, hvilken handling den gælder.
+ *   masterkode        (v5+) gælder som nulstillingskode på alle telefoner – også når telefonens
+ *                     egen kode er væk. Kun hashen ligger i appen (android/masterkode.txt).
  *
  * Kodernes beregning (aendringskode) er den samme som i app/domain/mdm_enhed.py.
  */
@@ -96,6 +101,28 @@ public class AdminActivity extends Activity {
         return rigtig.isEmpty() ? getString(R.string.reservekode) : rigtig;
     }
 
+    /** Telefonens nulstillingskode eller masterkoden. */
+    private boolean erNulstillingskode(String indtastet) {
+        if (indtastet.isEmpty()) return false;
+        String rigtig = nulstillingskode();
+        return (!rigtig.isEmpty() && rigtig.equals(indtastet)) || erMasterkode(indtastet);
+    }
+
+    private boolean erMasterkode(String indtastet) {
+        try {
+            byte[] h = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(
+                    new PBEKeySpec(indtastet.toCharArray(),
+                            "inbase-master".getBytes(StandardCharsets.UTF_8), 120000, 256))
+                    .getEncoded();
+            StringBuilder hex = new StringBuilder();
+            for (byte b : h) hex.append(String.format("%02x", b));
+            return MessageDigest.isEqual(hex.toString().getBytes(StandardCharsets.UTF_8),
+                    getString(R.string.master_hash).getBytes(StandardCharsets.UTF_8));
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
     /** Samme beregning som aendringskode() i app/domain/mdm_enhed.py. */
     static String aendringskode(String nulstillingskode, String handling) {
         if (nulstillingskode.isEmpty()) return "";
@@ -147,8 +174,8 @@ public class AdminActivity extends Activity {
 
     private void chrome(String indtastet, boolean vis) {
         String rigtig = nulstillingskode();
-        if (rigtig.isEmpty() || indtastet.isEmpty()
-                || !(indtastet.equals(aendringskode(rigtig, "chrome")) || indtastet.equals(rigtig))) {
+        if (indtastet.isEmpty() || !(indtastet.equals(aendringskode(rigtig, "chrome"))
+                || erNulstillingskode(indtastet))) {
             forkert();
             return;
         }
@@ -167,8 +194,7 @@ public class AdminActivity extends Activity {
 
     /** Henter styrings-appen fra IN-BASE (Telefoner → Opdater telefoner) og installerer den. */
     private void opdater(String indtastet, String server) {
-        String rigtig = nulstillingskode();
-        if (rigtig.isEmpty() || !rigtig.equals(indtastet)) {
+        if (!erNulstillingskode(indtastet)) {
             forkert();
             return;
         }
@@ -201,8 +227,7 @@ public class AdminActivity extends Activity {
     }
 
     private void kontroller(String indtastet) {
-        String rigtig = nulstillingskode();
-        if (rigtig.isEmpty() || !rigtig.equals(indtastet)) {
+        if (!erNulstillingskode(indtastet)) {
             forkert();
             return;
         }
