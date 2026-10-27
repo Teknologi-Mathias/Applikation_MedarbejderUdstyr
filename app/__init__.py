@@ -12,10 +12,10 @@ __version__ = "0.9.2"
 VERSION = f"V{__version__}"   # visning i programmet, fx "V0.7.1"
 
 APP_NAVN = "IN-BASE"
-APP_SLOGAN = "Interne processer, samlet ét sted."
+APP_SLOGAN = "Administrationsværktøj, prototype."
 APP_BESKRIVELSE = (
-    "Et fælles sted til opfølgning, automatisering, dokumentation og "
-    "sammenhæng mellem virksomhedens eksisterende systemer."
+    "Et fælles sted til onboarding og offboarding "
+    "Skaber sammenhæng mellem "
 )
 
 _SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
