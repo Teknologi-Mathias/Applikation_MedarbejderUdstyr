@@ -78,7 +78,8 @@ def poster(sager: Iterable, visning: str, i_dag: date, brugernavn: str = "",
             elif visning == AFVENTER_ANDRE:
                 med = o.status == Opgave.AFVENTER
             elif visning == FORSINKEDE:
-                med = status == sp.FORSINKET
+                # Også blokerede: blokeringen fjerner ikke tidsrisikoen.
+                med = o.er_forsinket(i_dag)
             else:
                 med = True
             if med:
@@ -138,7 +139,7 @@ def sag_matcher(sag, filter_: str, i_dag: date, brugernavn: str = "",
     if filter_ == UDEN_ANSVARLIG:
         return any(not o.ansvarlig and not sag.er_blokeret(o) for o in aabne)
     if filter_ == SAG_FORSINKEDE:
-        return any(sp.visningsstatus(sag, o, i_dag) == sp.FORSINKET for o in aabne)
+        return any(o.er_forsinket(i_dag) for o in aabne)
     if filter_ == MANGLER_BEKRAEFTELSE:
         return any(o.status == Opgave.AFVENTER for o in aabne)
     if filter_ in (BLOKEREDE, RISIKO):
@@ -174,9 +175,8 @@ def noegletal(sager: Iterable, i_dag: date, risiko_dage: int = 7) -> list[Noegle
                   f"Første arbejdsdag inden for {risiko_dage} dage"),
         Noegletal("Opstart i risiko", antal_sager(RISIKO), RISIKO,
                   "Forsinkede opgaver eller tæt på start med åbne opgaver"),
-        Noegletal("Forsinkede opgaver",
-                  sum(sp.visningsstatus(s, o, i_dag) == sp.FORSINKET for s, o in opgaver),
-                  SAG_FORSINKEDE, "Opgaver over fristen (ikke blokerede)"),
+        Noegletal("Forsinkede opgaver", sum(o.er_forsinket(i_dag) for _, o in opgaver),
+                  SAG_FORSINKEDE, "Opgaver over fristen – også dem, der er blokerede"),
         Noegletal("Uden ansvarlig",
                   sum(not o.ansvarlig and not s.er_blokeret(o) for s, o in opgaver),
                   UDEN_ANSVARLIG, "Opgaver, der kan udføres, men ikke er tildelt en person"),

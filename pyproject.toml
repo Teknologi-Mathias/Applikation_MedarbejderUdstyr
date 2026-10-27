@@ -1,0 +1,15 @@
+# Kun værktøjskonfiguration (Ruff, pytest). Afhængigheder står i
+# requirements.txt / requirements-dev.txt / requirements-build.txt.
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+extend-exclude = ["build", "dist", "release", "installer", "android", "Data", "Lokal", ".vexp"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"

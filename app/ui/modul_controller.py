@@ -131,6 +131,8 @@ class ModulController:
         """Hurtige handlinger fra Action Center (højreklik)."""
         if handling == al.HISTORIK:
             return self.vis_historik(sag_id)
+        if handling == al.ARKIVER:
+            return self.arkiver(sag_id)
         sag = self._hent(sag_id)
         if sag is None:
             return

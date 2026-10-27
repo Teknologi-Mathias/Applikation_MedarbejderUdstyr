@@ -44,6 +44,9 @@ Regler:
 | Arbejdsbakker, teamfiltre, nøgletal | `app/services/arbejdsbakke.py`, `app/ui/arbejdsbakke_side.py`, `teamoverblik_side.py` |
 | Samtidige ændringer (fletning) | `app/services/workflow.py` (`flet`), `sag_service.gem_aendret` |
 | Action Center | `app/services/action_center.py` |
+| Arbejdsoverblik (kontrolrum: kort, køer, Haster nu) | `app/services/kontrolrum.py`, `app/ui/dashboard_side.py` |
+| Navigation (områder, faner, tandhjul) | `app/ui/hovedvindue.py` (`OMRAADER`), `app/ui/sidebar.py` |
+| Ikoner | `app/ui/ikoner.py` |
 | Påmindelser (Windows) | `app/services/paamindelser.py` |
 | Nøgletal | `app/services/rapport_service.py` |
 | Login og adgangskoder | `app/services/auth_service.py` (`SupabaseAuthService`) |
@@ -87,6 +90,10 @@ Onboarding og offboarding er to moduler oven på samme motor:
 * **Visningsstatus** (Klar, I gang, Afventer, Blokeret, Forsinket, Færdig, Ikke
   relevant) beregnes – de gemte statusser er uændrede. Samme beregning bruges af
   Teamoverblik, arbejdsbakker, sagsvinduet, Action Center og rapporter.
+* **Tre dimensioner**: `arbejdstilstand` (Klar … Blokeret), `tidsrisiko` (Til
+  tiden, Frist nærmer sig, Forsinket) og `ansvar` (bruger, afdelingskø, ikke
+  tildelt). En blokeret opgave over fristen er stadig forsinket: den tæller i
+  Forsinkede, Action Center, klarhed og kontrolrummet – og viser, hvad den venter på.
 * **Standardskabelonen**: kontrakten (Administration: Afventer = sendt, Udført =
   retur) låser tøj, telefon, mail, firmabil og lønnr. op; oplæringsvagten (HR)
   kan aftales når som helst; Merch har opfølgningssamtalen 1 uge efter start.
@@ -103,6 +110,21 @@ Onboarding og offboarding er to moduler oven på samme motor:
   første arbejdsdag (fx opfølgningen) tæller ikke med.
 * En onboarding er først afsluttet, når status er Aktiv OG alle obligatoriske
   opgaver er lukket.
+
+## Arbejdsoverblik (kontrolrum) og navigation
+
+* `kontrolrum.py` beregner fire overblikskort (forsinkede opgaver, starter snart,
+  opgaver uden ansvarlig, opstart i risiko), seks køer (kontrakt, telefon og tøj,
+  oplæring og jobs, afventer andre, offboarding-udstyr, klar til afslutning) og
+  "Haster nu". Alt bygger på arbejdsspor, arbejdsbakke og Action Center; kortene
+  tæller med samme funktion som den liste, de åbner (arbejdsbakke/Teamoverblik).
+  Køerne genbruger `Alarm` og `ActionListe` (klik og hurtige handlinger).
+* Betingede behov giver kun køelementer, når HR har registreret behovet.
+  "Afventer andre" viser sidste opfølgning (tidslinjen) og næste opfølgning
+  (grænsen for stillestående sager). Der er intet separat opfølgningsfelt.
+* Venstremenuen har hovedområder (`OMRAADER`); undersiderne er faner øverst.
+  Sidenøglerne og `adgang.modul_for_side` er uændrede, så en flyttet side aldrig
+  giver ny adgang. Indstillinger er tandhjulet ved brugerområdet.
 
 ## Afdelinger (roller)
 

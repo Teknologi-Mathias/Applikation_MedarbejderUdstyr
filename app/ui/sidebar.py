@@ -1,10 +1,10 @@
-"""Venstremenuen: Dashboard, Onboarding, Offboarding, Ønsker & Udvikling og Indstillinger.
+"""Venstremenuen: hovedområderne (Arbejdsoverblik, Arbejdsbakke, Onboarding,
+Offboarding, Telefoner, Ønsker & Udvikling) med ikon og tekst.
 
-Onboarding og Offboarding er to separate hovedpunkter med hver deres
-undersider; Ønsker & Udvikling er et selvstændigt punkt. Et hovedpunkt kan foldes sammen; det, der indeholder den aktive
-side, foldes altid ud.
+Et områdes undersider vises som faner øverst i arbejdsområdet (hovedvinduet),
+ikke her. Indstillinger er tandhjulet ved det indloggede brugerområde nederst.
 """
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -12,12 +12,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from app import APP_BESKRIVELSE, APP_NAVN, APP_SLOGAN, VERSION
-from app.ui.hjaelpere import lav_knap, lav_logo
+from app.ui import ikoner
+from app.ui.hjaelpere import lav_logo
+from app.ui.theme import FARVER
 
 
 # Forbindelsens tilstand (vises nederst i menuen).
@@ -25,13 +28,15 @@ ONLINE = "online"
 FORBINDER = "forbinder"
 MISTET = "mistet"
 
+INDSTILLINGER = "indstillinger"
+
 
 class Sidebar(QFrame):
-    side_valgt = Signal(str)
+    omraade_valgt = Signal(str)
     log_ud = Signal()
 
-    def __init__(self, struktur):
-        """struktur: [(sektion eller None, [(nøgle, tekst), ...]), ...]"""
+    def __init__(self, omraader):
+        """omraader: [(nøgle, tekst, ikon, [(side, fanetekst), ...]), ...]"""
         super().__init__()
         self.setObjectName("sidebar")
         self.setFixedWidth(240)
@@ -66,50 +71,64 @@ class Sidebar(QFrame):
         rul.setWidget(menu)
         menu_layout = QVBoxLayout(menu)
         menu_layout.setContentsMargins(0, 0, 0, 0)
-        menu_layout.setSpacing(3)
+        menu_layout.setSpacing(4)
         layout.addWidget(rul, 1)
 
         self.gruppe = QButtonGroup(self)
         self.gruppe.setExclusive(True)
-        self.knapper = {}
-        self.sektioner = {}          # sektion -> (hovedknap, [underknapper])
-        for sektion, punkter in struktur:
-            underknapper = []
-            if sektion:
-                hoved = QPushButton(f"▾  {sektion.upper()}")
-                hoved.setProperty("navSektion", True)
-                hoved.setCursor(Qt.CursorShape.PointingHandCursor)
-                hoved.clicked.connect(lambda _=False, s=sektion: self._fold(s))
-                menu_layout.addWidget(hoved)
-            for noegle, tekst in punkter:
-                knap = QPushButton(tekst.replace("&", "&&"))   # "&" er ellers genvejstast i Qt
-                knap.setProperty("navUnder" if sektion else "nav", True)
-                knap.setCheckable(True)
-                knap.setCursor(Qt.CursorShape.PointingHandCursor)
-                knap.clicked.connect(lambda _=False, n=noegle: self.side_valgt.emit(n))
-                self.gruppe.addButton(knap)
-                self.knapper[noegle] = knap
-                underknapper.append(knap)
-                menu_layout.addWidget(knap)
-            if sektion:
-                self.sektioner[sektion] = (hoved, underknapper)
-            menu_layout.addSpacing(6)
+        self.knapper = {}               # områdenøgle -> knap
+        self._ikoner = {}               # knap -> ikonnavn
+        for noegle, tekst, ikon, _ in omraader:
+            knap = QPushButton(tekst.replace("&", "&&"))   # "&" er ellers genvejstast i Qt
+            knap.setProperty("nav", True)
+            knap.setCheckable(True)
+            knap.setIconSize(QSize(18, 18))
+            knap.setCursor(Qt.CursorShape.PointingHandCursor)
+            knap.clicked.connect(lambda _=False, n=noegle: self.omraade_valgt.emit(n))
+            self.gruppe.addButton(knap)
+            self.knapper[noegle] = knap
+            self._ikoner[knap] = ikon
+            menu_layout.addWidget(knap)
 
         menu_layout.addStretch()
         self.lagring_label = QLabel("")
         self.lagring_label.setWordWrap(True)
         layout.addWidget(self.lagring_label)
-        layout.addSpacing(6)
-        bruger_raekke = QHBoxLayout()
+        layout.addSpacing(8)
+
+        # Brugerområdet: hvem er logget ind, indstillinger (tandhjul) og log ud.
+        bruger = QFrame()
+        bruger.setObjectName("brugerOmraade")
+        bruger_raekke = QHBoxLayout(bruger)
+        bruger_raekke.setContentsMargins(10, 8, 6, 8)
+        bruger_raekke.setSpacing(4)
         self.bruger_label = QLabel("")
         self.bruger_label.setObjectName("sidebarBruger")
         self.bruger_label.setWordWrap(True)
-        log_ud = lav_knap("Log ud")
-        log_ud.setStyleSheet("padding: 5px 12px; font-size: 12px;")
-        log_ud.clicked.connect(self.log_ud.emit)
+        self.indstillinger_knap = QToolButton()
+        self.indstillinger_knap.setObjectName("sidebarIkon")
+        self.indstillinger_knap.setCheckable(True)
+        self.indstillinger_knap.setToolTip("Indstillinger")
+        self.indstillinger_knap.setAccessibleName("Indstillinger")
+        self.indstillinger_knap.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.indstillinger_knap.clicked.connect(lambda: self.omraade_valgt.emit(INDSTILLINGER))
+        self.gruppe.addButton(self.indstillinger_knap)
+        self._ikoner[self.indstillinger_knap] = "indstillinger"
+        self.knapper[INDSTILLINGER] = self.indstillinger_knap
+        self.log_ud_knap = QToolButton()
+        self.log_ud_knap.setObjectName("sidebarIkon")
+        self.log_ud_knap.setText("Log ud")
+        self.log_ud_knap.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.log_ud_knap.setToolTip("Log ud af IN-BASE")
+        self.log_ud_knap.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.log_ud_knap.clicked.connect(self.log_ud.emit)
+        self._ikoner[self.log_ud_knap] = "log_ud"
+        for knap in (self.indstillinger_knap, self.log_ud_knap):
+            knap.setIconSize(QSize(20, 20))
         bruger_raekke.addWidget(self.bruger_label, 1)
-        bruger_raekke.addWidget(log_ud)
-        layout.addLayout(bruger_raekke)
+        bruger_raekke.addWidget(self.indstillinger_knap)
+        bruger_raekke.addWidget(self.log_ud_knap)
+        layout.addWidget(bruger)
         layout.addSpacing(6)
         self.opdateret_label = QLabel("")
         self.opdateret_label.setObjectName("sidebarFod")
@@ -117,31 +136,23 @@ class Sidebar(QFrame):
         fod.setObjectName("sidebarFod")
         layout.addWidget(self.opdateret_label)
         layout.addWidget(fod)
+        self.opdater_ikoner()
 
-    def _fold(self, sektion, aaben=None):
-        hoved, knapper = self.sektioner[sektion]
-        aaben = not knapper[0].isVisible() if aaben is None else aaben
-        if not aaben and any(k.isChecked() for k in knapper):
-            return   # den aktive side må ikke skjules
-        for knap in knapper:
-            knap.setVisible(aaben)
-        hoved.setText(f"{'▾' if aaben else '▸'}  {sektion.upper()}")
+    def opdater_ikoner(self):
+        """Ikonerne farves efter temaet – kaldes igen ved temaskift."""
+        for knap, navn in self._ikoner.items():
+            knap.setIcon(ikoner.ikon(navn, FARVER["sidebar_tekst"], "#FFFFFF"))
 
     def marker(self, noegle):
+        """Markér området (eller INDSTILLINGER), der indeholder den aktive side."""
         knap = self.knapper.get(noegle)
         if knap:
             knap.setChecked(True)
-            for sektion, (_, knapper) in self.sektioner.items():
-                if knap in knapper:
-                    self._fold(sektion, True)
-
-    def vis_punkt(self, noegle, synlig):
-        self.knapper[noegle].setVisible(synlig)
 
     def saet_bruger(self, bruger: dict):
         """Brugernavnet er identiteten i IN-BASE; visningsnavnet står i tooltip."""
         self.bruger_label.setText(f"{bruger.get('brugernavn', '')}\n{bruger.get('rolle', '')}")
-        self.bruger_label.setToolTip(bruger.get("navn", ""))
+        self.bruger_label.setToolTip(f"Logget ind som {bruger.get('navn', '')}")
 
     def saet_lagring(self, offline: bool, ventende: int, kilde: str = "central datamappe"):
         if offline:

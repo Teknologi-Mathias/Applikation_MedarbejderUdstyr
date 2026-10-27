@@ -79,7 +79,7 @@ class HovedvindueTest(TjenesteTest):
         vindue = MainWindow(self.t)
         try:
             vindue.efter_log_paa()
-            self.assertTrue(vindue.sidebar.knapper["on_aktive"].text().endswith(LAAS))
+            self.assertTrue(vindue.sidebar.knapper["onboarding"].text().endswith(LAAS))
             self.assertFalse(vindue.sidebar.knapper["oensker"].text().endswith(LAAS))
             vindue.vis_side("on_aktive")
             self.assertIs(vindue.stak.currentWidget(), vindue.laast_side)

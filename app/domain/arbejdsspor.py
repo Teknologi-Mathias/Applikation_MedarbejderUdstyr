@@ -4,7 +4,14 @@ Ren beregning ud fra sagens opgaver – intet gemmes. Teamoverblik,
 arbejdsbakker, Action Center og rapporter bruger de samme funktioner, så en
 status aldrig beregnes forskelligt to steder.
 
-- visningsstatus(): én opgaves status som brugeren ser den (Klar, Blokeret …).
+Tre adskilte dimensioner pr. opgave:
+- arbejdstilstand(): Klar, I gang, Afventer, Blokeret, Færdig, Ikke relevant.
+- tidsrisiko():      Til tiden, Frist nærmer sig, Forsinket – uafhængigt af
+                     blokeringen, så en blokeret opgave stadig kan være forsinket.
+- ansvar():          konkret bruger, afdelingskø eller ikke tildelt.
+
+- visningsstatus(): én samlet status til tabeller (Forsinket vises i stedet for
+                    Klar/I gang/Afventer – men aldrig i stedet for Blokeret).
 - spor_status():    sammenfatning af et spor med næste handling og ejer.
 - klarhed():        er medarbejderen klar til sin første arbejdsdag? Giver kun
                     advarsler – processen stoppes aldrig af en vurdering.
@@ -56,6 +63,15 @@ FORKLARING = {
     IKKE_RELEVANT: "Ikke relevant for denne medarbejder",
 }
 
+# Tidsrisiko (FORSINKET er fælles med visningsstatus).
+TIL_TIDEN = "Til tiden"
+NAERMER_SIG = "Frist nærmer sig"
+
+# Ansvar.
+BRUGER = "bruger"
+AFDELINGSKOE = "afdelingskø"
+IKKE_TILDELT = "ikke tildelt"
+
 # Klarhed til opstart.
 KLAR_TIL_OPSTART = "Klar til opstart"
 PAA_PLAN = "På plan"
@@ -75,16 +91,40 @@ def ejer(opgave: Opgave) -> str:
     return f"{opgave.afdeling} (ikke tildelt)" if opgave.afdeling else "Ikke tildelt"
 
 
-def visningsstatus(sag, opgave: Opgave, i_dag: date) -> str:
+def ansvar(opgave: Opgave) -> str:
+    """BRUGER (konkret person), AFDELINGSKOE (kun afdeling) eller IKKE_TILDELT."""
+    if opgave.ansvarlig:
+        return BRUGER
+    return AFDELINGSKOE if opgave.afdeling else IKKE_TILDELT
+
+
+def arbejdstilstand(sag, opgave: Opgave) -> str:
+    """Hvor er arbejdet – uden hensyn til fristen."""
     if opgave.status == Opgave.UNDTAGET:
         return IKKE_RELEVANT
     if opgave.status == Opgave.UDFOERT:
         return FAERDIG
     if sag.er_blokeret(opgave):
         return BLOKERET
-    if opgave.er_forsinket(i_dag):
-        return FORSINKET
     return {Opgave.I_GANG: I_GANG, Opgave.AFVENTER: AFVENTER}.get(opgave.status, KLAR)
+
+
+def tidsrisiko(opgave: Opgave, i_dag: date, naermer_sig_dage: int = 7) -> str:
+    """Fristens tilstand – også for blokerede opgaver. Afsluttede og opgaver
+    uden frist er altid til tiden. Grænsen er "Nærmer sig (dage)" fra Indstillinger."""
+    dage = opgave.dage_over_frist(i_dag)
+    if dage is None:
+        return TIL_TIDEN
+    if dage > 0:
+        return FORSINKET
+    return NAERMER_SIG if -dage <= naermer_sig_dage else TIL_TIDEN
+
+
+def visningsstatus(sag, opgave: Opgave, i_dag: date) -> str:
+    tilstand = arbejdstilstand(sag, opgave)
+    if tilstand in (KLAR, I_GANG, AFVENTER) and opgave.er_forsinket(i_dag):
+        return FORSINKET
+    return tilstand
 
 
 @dataclass
@@ -145,8 +185,8 @@ def klarhed(sag, i_dag: date, risiko_dage: int = 7) -> Klarhed:
     - Klar til opstart: alle relevante obligatoriske opgaver er udført.
     - Opstart blokeret: starten er inden for risiko_dage, og opgaver venter
       stadig på en forudsætning (typisk kontrakten).
-    - Opstart i risiko: forsinkede opgaver, eller starten er inden for
-      risiko_dage med åbne opgaver.
+    - Opstart i risiko: forsinkede opgaver (også blokerede), eller starten er
+      inden for risiko_dage med åbne opgaver.
     - På plan: ellers.
     Undtagne (ikke relevante) opgaver og opgaver med frist efter startdagen
     (fx opfølgningssamtalen) tæller ikke med.
@@ -161,12 +201,15 @@ def klarhed(sag, i_dag: date, risiko_dage: int = 7) -> Klarhed:
         return Klarhed(KLAR_TIL_OPSTART, dage_til_start=dage)
 
     blokerede = [o for o in aabne if sag.er_blokeret(o)]
-    forsinkede = [o for o in aabne if not sag.er_blokeret(o) and o.er_forsinket(i_dag)]
+    # En blokeret opgave over fristen er stadig en tidsrisiko for opstarten.
+    forsinkede = [o for o in aabne if o.er_forsinket(i_dag)]
     taet_paa = dage is not None and dage <= risiko_dage
     aarsager = []
     if forsinkede:
+        heraf = sum(o in blokerede for o in forsinkede)
         aarsager.append(f"{len(forsinkede)} forsinket" + ("e opgaver" if len(forsinkede) > 1
-                                                            else " opgave"))
+                                                            else " opgave")
+                        + (f" (heraf {heraf} blokeret)" if heraf else ""))
     if blokerede and taet_paa:
         aarsager.append(f"{len(blokerede)} venter på en forudsætning")
     if taet_paa:

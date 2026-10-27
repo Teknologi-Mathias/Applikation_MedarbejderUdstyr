@@ -137,7 +137,8 @@ class Sag:
         return [o for o in self.opgaver if not o.afsluttet and not self.er_blokeret(o)]
 
     def forsinkede_opgaver(self, i_dag: date):
-        return [o for o in self.aabne_opgaver() if o.er_forsinket(i_dag)]
+        """Åbne opgaver over fristen – også blokerede (blokeringen fjerner ikke tidsrisikoen)."""
+        return [o for o in self.opgaver if o.er_forsinket(i_dag)]
 
     ### ----- tid ------------------------------------------------------------
 

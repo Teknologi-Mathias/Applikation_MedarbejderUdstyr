@@ -1,0 +1,4 @@
+# Udvikling: lint/format og testkørsel (pip install -r requirements-dev.txt)
+-r requirements.txt
+ruff>=0.8
+pytest>=8

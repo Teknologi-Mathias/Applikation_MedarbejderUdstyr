@@ -1,0 +1,48 @@
+# LOKAL udviklings- og testdatabase – aldrig Supabase-projektet.
+#
+#   docker compose up -d        # start (migreringer køres første gang)
+#   docker compose down         # stop (data bevares i volumen)
+#   docker compose down -v      # stop og slet data (næste start migrerer forfra)
+#
+# PostgreSQL 15 + PostgREST (samme REST-lag som Supabase) på
+# http://127.0.0.1:3999, så tests/test_supabase_lokal.py kan køres med
+# INBASE_LOKAL_PGRST_URL=http://127.0.0.1:3999. Alternativ til
+# tools/lokal_testdatabase.py – kør ikke begge samtidig (samme port).
+# Superbrugerens adgangskode læses fra .env.docker (se .env.docker.example).
+
+name: inbase
+
+services:
+  db:
+    image: postgres:15-alpine
+    env_file: .env.docker
+    ports:
+      - "127.0.0.1:54329:5432"   # psql/DBeaver: postgres@127.0.0.1:54329
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+      - ./app/infrastructure/database/migrations:/sql/migrations:ro
+      - ./tests/sql:/sql/tests:ro
+    healthcheck:
+      # -h 127.0.0.1: først klar, når init-scriptet er færdigt (init kører kun på socket).
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  postgrest:
+    image: postgrest/postgrest:v12.2.3
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3999:3000"
+    environment:
+      # Faste testværdier fra tests/sql/supabase_stub.sql og tests/test_supabase_lokal.py.
+      PGRST_DB_URI: postgres://authenticator:lokaltest@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: lokal-test-hemmelighed-kun-til-docker-0123456789
+
+volumes:
+  pgdata:

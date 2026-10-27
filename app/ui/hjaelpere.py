@@ -127,6 +127,7 @@ def lav_pille(tekst, stil, bredde=None):
 def lav_raekke(titel, undertitel, badge, stil):
     """En række i dashboardets lister: farvet badge + titel og undertitel."""
     widget = QWidget()
+    widget.setToolTip(f"{titel}\n{undertitel}")      # hele teksten, også i smalle kort
     layout = QHBoxLayout(widget)
     layout.setContentsMargins(4, 9, 4, 9)
     layout.setSpacing(12)
@@ -145,16 +146,24 @@ def lav_raekke(titel, undertitel, badge, stil):
     return widget
 
 
-def lav_liste_kort(titel, undertitel, klikbar=True):
-    """Kort med titel, antal-badge og en liste. Returnerer (kort, liste, antal_label)."""
+def lav_liste_kort(titel, undertitel, klikbar=True, ikon=None):
+    """Kort med titel, antal-badge og en liste. Returnerer (kort, liste, antal_label).
+
+    ikon: valgfri QPixmap foran titlen (app/ui/ikoner.py)."""
     kort = lav_kort()
     layout = QVBoxLayout(kort)
     layout.setContentsMargins(20, 18, 20, 12)
     layout.setSpacing(6)
 
     top = QHBoxLayout()
+    if ikon is not None:
+        ikon_label = QLabel()
+        ikon_label.setPixmap(ikon)
+        kort.ikon_label = ikon_label
+        top.addWidget(ikon_label)
     titel_label = QLabel(titel)
     titel_label.setObjectName("cardTitle")
+    titel_label.setWordWrap(True)          # kortene må gerne blive smalle
     antal_label = QLabel("0")
     antal_label.setObjectName("antalBadge")
     antal_label.setAlignment(Qt.AlignmentFlag.AlignCenter)

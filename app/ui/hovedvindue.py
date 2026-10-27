@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QStackedWidget,
+    QTabBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -35,6 +36,7 @@ from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
 from app.repositories.fejl import DataFejl, SessionUdloebetFejl
 from app.services import action_center
+from app.services import kontrolrum
 from app.ui import fejl as ui_fejl
 from app.ui.action_liste import ANSVARLIG
 from app.ui.arbejdsbakke_side import ArbejdsbakkeSide
@@ -51,7 +53,7 @@ from app.ui.moduler import offboarding_modul, onboarding_modul
 from app.ui.notifikationer import Notifikationer
 from app.ui.opgave_oversigt_side import OpgaveOversigtSide
 from app.ui.sag_liste_side import SagListeSide
-from app.ui.sidebar import FORBINDER, MISTET, ONLINE, Sidebar
+from app.ui.sidebar import FORBINDER, INDSTILLINGER, MISTET, ONLINE, Sidebar
 from app.ui.skabelon_side import SkabelonSide
 from app.ui.teamoverblik_side import TeamoverblikSide
 from app.ui.theme import anvend_tema
@@ -62,12 +64,15 @@ ON, OFF = OnboardingForloeb.PROCES, Medarbejder.PROCES
 MODUL_FOR_PROCES = {ON: adgang.ONBOARDING, OFF: adgang.OFFBOARDING}
 LAAS = "  🔒"
 
-# Venstremenuen: Onboarding og Offboarding er separate hovedpunkter;
-# Ønsker & Udvikling er et selvstændigt punkt (ikke under medarbejderne).
-# Alle menupunkter ses af alle; moduler uden adgang vises med 🔒 (app/domain/adgang.py).
-STRUKTUR = [
-    (None, [("dashboard", "Dashboard"), ("arbejdsbakke", "Arbejdsbakke")]),
-    ("Onboarding - MERCH", [
+# Venstremenuen viser hovedområderne; et områdes undersider vises som faner øverst
+# i arbejdsområdet (et område med én side har ingen faner). Indstillinger er
+# tandhjulet ved brugerområdet. Sidenøglerne styrer adgangen (adgang.modul_for_side):
+# alle områder ses af alle; moduler uden adgang vises med 🔒 og LaastSide.
+# (nøgle, menutekst, ikon, [(side, fanetekst), ...])
+OMRAADER = [
+    ("overblik", "Arbejdsoverblik", "overblik", [("dashboard", "Arbejdsoverblik")]),
+    ("arbejdsbakke", "Arbejdsbakke", "bakke", [("arbejdsbakke", "Arbejdsbakke")]),
+    ("onboarding", "Onboarding - MERCH", "onboarding", [
         ("on_team", "Teamoverblik"),
         ("on_oversigt", "Oversigt"),
         ("on_aktive", "Aktive forløb"),
@@ -75,20 +80,22 @@ STRUKTUR = [
         ("on_skabeloner", "Skabeloner"),
         ("on_arkiv", "Arkiv og annullerede"),
     ]),
-    ("Offboarding - HAFRA", [
+    ("offboarding", "Offboarding - HAFRA", "offboarding", [
         ("off_oversigt", "Oversigt"),
         ("off_aktive", "Aktive forløb"),
         ("off_opgaver", "Opgaver og udstyr"),
         ("off_skabeloner", "Skabeloner og mails"),
         ("off_arkiv", "Arkiv"),
     ]),
-    (None, [("oensker", "Ønsker & Udvikling")]),
-    ("Telefoner (MDM)", [
+    ("telefoner", "Telefoner (MDM)", "telefon", [
         ("telefoner", "Telefoner"),
         ("telefoner_arkiv", "Arkiv"),
     ]),
-    (None, [("indstillinger", "Indstillinger")]),
+    ("oensker", "Ønsker & Udvikling", "oensker", [("oensker", "Ønsker & Udvikling")]),
 ]
+# Side -> område (Indstillinger hører ikke til et område).
+OMRAADE_FOR_SIDE = {side: noegle for noegle, _, _, sider in OMRAADER for side, _ in sider}
+ALLE_SIDER = [side for _, _, _, sider in OMRAADER for side, _ in sider] + [INDSTILLINGER]
 
 
 class LaastSide(QWidget):
@@ -160,16 +167,36 @@ class MainWindow(QMainWindow):
         rod.setContentsMargins(0, 0, 0, 0)
         rod.setSpacing(0)
 
-        self.sidebar = Sidebar(STRUKTUR)
-        self.sidebar.side_valgt.connect(self.vis_side)
+        self.sidebar = Sidebar(OMRAADER)
+        self.sidebar.omraade_valgt.connect(self.vis_omraade)
         self.sidebar.log_ud.connect(self.log_ud)
         self.stak = QStackedWidget()
+        # Kontekstuel topmenu: det aktive områdes undersider.
+        self._omraade = None
+        self._sidste_side = {}          # område -> senest viste underside
+        self.faner = QTabBar()
+        self.faner.setExpanding(False)
+        self.faner.setDrawBase(False)
+        self.faner.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.faner.currentChanged.connect(self._fane_valgt)
+        self.fane_ramme = QWidget()
+        self.fane_ramme.setObjectName("omraadeFaner")
+        fane_lag = QHBoxLayout(self.fane_ramme)
+        fane_lag.setContentsMargins(32, 18, 32, 0)
+        fane_lag.addWidget(self.faner)
+        fane_lag.addStretch()
+        arbejdsomraade = QVBoxLayout()
+        arbejdsomraade.setContentsMargins(0, 0, 0, 0)
+        arbejdsomraade.setSpacing(0)
+        arbejdsomraade.addWidget(self.fane_ramme)
+        arbejdsomraade.addWidget(self.stak, 1)
         rod.addWidget(self.sidebar)
-        rod.addWidget(self.stak, 1)
+        rod.addLayout(arbejdsomraade, 1)
 
         self.sider = {}
         self.dashboard = DashboardSide(self.t.rapporter)
-        self._forbind_action(self.dashboard.action, self.dashboard.dag)
+        self._forbind_action(*self.dashboard.handlingslister())
+        self.dashboard.vis_liste.connect(self._vis_filtreret)
         self._tilfoej("dashboard", self.dashboard)
         self.arbejdsbakke = ArbejdsbakkeSide()
         self._forbind_action(self.arbejdsbakke)
@@ -385,7 +412,8 @@ class MainWindow(QMainWindow):
         dagens = action_center.dagsoversigt(aktive, i_dag)
 
         self.dashboard.opdater({ON: self.data[ON][0] + self.data[ON][1],
-                                OFF: self.data[OFF][0] + self.data[OFF][1]}, alarmer, dagens)
+                                OFF: self.data[OFF][0] + self.data[OFF][1]}, alarmer, dagens,
+                               regler)
         self.arbejdsbakke.opdater(aktive)
         self.teamoverblik.opdater(self.data[ON][0], regler.naermer_sig_dage)
         for proces, prefix in ((ON, "on"), (OFF, "off")):
@@ -457,9 +485,54 @@ class MainWindow(QMainWindow):
 
     ### ----- navigation -----------------------------------------------------
 
+    def vis_omraade(self, omraade):
+        """Menuknap: områdets senest viste underside (ellers den første)."""
+        if omraade == INDSTILLINGER:
+            return self.vis_side(INDSTILLINGER)
+        sider = self._sider_i(omraade)
+        self.vis_side(self._sidste_side.get(omraade, sider[0][0]))
+
+    @staticmethod
+    def _sider_i(omraade):
+        return next((s for n, _, _, s in OMRAADER if n == omraade), [])
+
+    def _vis_faner(self, omraade, noegle):
+        """Topmenuen: områdets undersider som faner (skjult ved én side)."""
+        sider = self._sider_i(omraade)
+        self.faner.blockSignals(True)
+        if omraade != self._omraade:
+            while self.faner.count():
+                self.faner.removeTab(0)
+            for _, tekst in sider:
+                self.faner.addTab(tekst.replace("&", "&&"))
+            self._omraade = omraade
+        index = next((i for i, (side, _) in enumerate(sider) if side == noegle), -1)
+        if index >= 0:
+            self.faner.setCurrentIndex(index)
+        self.faner.blockSignals(False)
+        self.fane_ramme.setVisible(len(sider) > 1)
+
+    def _fane_valgt(self, index):
+        sider = self._sider_i(self._omraade)
+        if 0 <= index < len(sider):
+            self.vis_side(sider[index][0])
+
+    def _vis_filtreret(self, maal, filter_):
+        """Et overblikskort på dashboardet: åbn den liste, tallet er talt ud fra."""
+        if maal == kontrolrum.ARBEJDSBAKKE:
+            self.arbejdsbakke.vaelg(filter_)
+            self.vis_side("arbejdsbakke")
+        else:
+            self.teamoverblik.vaelg_filter(filter_)
+            self.vis_side("on_team")
+
     def vis_side(self, noegle):
         side = self.sider[noegle]
-        self.sidebar.marker(noegle)
+        omraade = OMRAADE_FOR_SIDE.get(noegle)
+        self.sidebar.marker(omraade or INDSTILLINGER)
+        self._vis_faner(omraade, noegle)
+        if omraade:
+            self._sidste_side[omraade] = noegle
         modul = adgang.modul_for_side(noegle)
         if not session.har_adgang(modul):
             self.laast_side.vis(modul)
@@ -480,6 +553,7 @@ class MainWindow(QMainWindow):
         bruger = session.bruger() or {}
         praef = self.t.indstillinger.praeference(bruger.get("brugernavn", ""))
         anvend_tema(QApplication.instance(), praef["tema"])
+        self.sidebar.opdater_ikoner()
         self.notifikationer.slaaet_til = bool(praef["windows_notifikationer"])
         self.sidebar.saet_bruger(bruger)
         self.anvend_rolle()
@@ -497,17 +571,19 @@ class MainWindow(QMainWindow):
         for knap in (self.on_slet, self.off_slet):
             knap.setVisible(admin)
         self.oensker.anvend_rolle(admin)
-        for _, punkter in STRUKTUR:
-            for noegle, tekst in punkter:
-                laast = not session.har_adgang(adgang.modul_for_side(noegle))
-                self.sidebar.knapper[noegle].setText(
-                    tekst.replace("&", "&&") + (LAAS if laast else ""))
+        # Et område er låst, hvis dets sider hører til et modul uden adgang
+        # (fanerne fører så til LaastSide – flytningen giver ingen ny adgang).
+        for noegle, tekst, _, sider in OMRAADER:
+            laast = not session.har_adgang(adgang.modul_for_side(sider[0][0]))
+            self.sidebar.knapper[noegle].setText(
+                tekst.replace("&", "&&") + (LAAS if laast else ""))
         for side in (self.telefoner, self.telefoner_arkiv):
             side.anvend_rolle(session.har_adgang(adgang.TELEFONER))
         self.indstillinger.anvend_rolle(admin)
 
     def skift_tema(self, tema):
         anvend_tema(QApplication.instance(), tema)
+        self.sidebar.opdater_ikoner()
         self.opdater_alle()
 
     def _saet_notifikationer(self, til):

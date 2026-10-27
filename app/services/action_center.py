@@ -72,15 +72,22 @@ def _status_siden(sag: Sag) -> Optional[datetime]:
 
 def _opgave_alarmer(sag: Sag, i_dag: date) -> list[Alarm]:
     alarmer = []
-    for o in sag.aabne_opgaver():
+    for o in sag.opgaver:
+        if o.afsluttet:
+            continue
         dage_over = o.dage_over_frist(i_dag)
         ansvarlig = o.ansvarlig or "ingen angivet"
+        aarsag = sag.blokeringsaarsag(o)
         if dage_over is not None and dage_over > 0:
+            # En blokeret opgave over fristen er stadig en risiko – med blokeringen.
             alarmer.append(Alarm(
                 KRITISK, o.navn,
-                f"{sag.navn} · Ansvarlig: {ansvarlig} · {_dage(dage_over)} over frist",
+                f"{sag.navn} · Ansvarlig: {ansvarlig} · {_dage(dage_over)} over frist"
+                + (f" · {aarsag}" if aarsag else ""),
                 "Forsinket", sag.PROCES, sag.id, o.id, dage_over,
             ))
+        elif aarsag:
+            continue
         elif o.status == Opgave.AFVENTER:
             naeste = o.naeste_handling or "næste handling ikke angivet"
             alarmer.append(Alarm(
@@ -205,7 +212,7 @@ def dagsoversigt(sager: Iterable[Sag], i_dag: date) -> list:
 
 
 def forsinkede(sager: Iterable[Sag], i_dag: date) -> list:
-    """Alle forsinkede opgaver: [(sag, opgave)]."""
+    """Alle forsinkede opgaver (også blokerede): [(sag, opgave)]."""
     return [
         (sag, o) for sag in sager if not sag.arkiveret and not sag.er_afsluttet()
         for o in sag.forsinkede_opgaver(i_dag)

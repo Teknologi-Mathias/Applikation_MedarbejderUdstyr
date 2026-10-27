@@ -2,9 +2,12 @@
 import unittest
 from datetime import date, timedelta
 
+from app.domain import arbejdsspor as sp
 from app.domain.onboarding import OnboardingForloeb as OB
 from app.domain.opgave import Opgave
 from app.services import arbejdsbakke as ab
+from app.services import kontrolrum as kr
+from app.services.action_center import KRITISK, action_center
 from tests.hjaelp import dato
 
 I_DAG = date.today()
@@ -69,6 +72,40 @@ class TeamTest(unittest.TestCase):
             o.spor = {"godkendt": "hr", "kontrakt": "kontrakt", "telefon": "telefon",
                       "opf": "opfoelgning"}[o.noegle]
         self.assertEqual(ab.naeste_handling(sag, I_DAG).spor, "opfoelgning")
+
+
+class KontrolrumTest(unittest.TestCase):
+    def test_blokeret_og_forsinket_taeller_stadig_som_risiko(self):
+        sag = _sag(dage=30)
+        telefon = sag.opgaver[2]
+        telefon.frist = (I_DAG - timedelta(days=3)).isoformat()
+        self.assertEqual(sp.arbejdstilstand(sag, telefon), sp.BLOKERET)
+        self.assertEqual(sp.tidsrisiko(telefon, I_DAG), sp.FORSINKET)
+        self.assertIn("Telefon", [p.opgave.navn for p in ab.poster([sag], ab.FORSINKEDE, I_DAG)])
+        alarm = next(a for a in action_center([sag], I_DAG) if a.opgave_id == telefon.id)
+        self.assertEqual(alarm.niveau, KRITISK)
+        self.assertIn("Venter på: Kontrakt", alarm.undertitel)
+        self.assertEqual(sp.klarhed(sag, I_DAG).niveau, sp.RISIKO)
+        tal = {t.noegle: t.antal for t in kr.overblik([sag], I_DAG)}
+        self.assertEqual(tal[kr.FORSINKEDE], 2)                   # telefon + opfølgning
+        haster = {h.opgave.id: h for h in kr.haster_nu([sag], I_DAG)}
+        self.assertEqual(haster[telefon.id].handling, kr.AABN_FORUDSAETNING)
+        self.assertEqual(haster[telefon.id].handling_opgave_id, sag.opgaver[1].id)
+
+    def test_udstyrskoe_kun_ved_registreret_behov(self):
+        sag = _sag()
+        sag.opgaver[2].spor, sag.opgaver[2].betingelse = "telefon", "mobil"
+        udstyr = lambda: next(k for k in kr.koeer([sag], I_DAG) if k.noegle == kr.UDSTYR)
+        self.assertEqual(udstyr().poster, [])
+        sag.behov.mobil, sag.behov.abonnement = True, "Kun data"
+        self.assertIn("Mobil · Kun data", udstyr().poster[0].undertitel)
+
+    def test_registreret_oplaeringstid_er_ikke_booket(self):
+        sag = _sag()
+        sag.opgaver.append(Opgave("Oplæringsvagt booket", noegle="oplaering_booket",
+                                  spor="oplaering", planlagt=f"{dato(5)}T08:00:00"))
+        koe = next(k for k in kr.koeer([sag], I_DAG) if k.noegle == kr.OPLAERING)
+        self.assertIn("ikke bekræftet", koe.poster[0].undertitel)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,2 @@
+# Shell-scripts køres i Linux-containere og skal have LF
+*.sh text eol=lf

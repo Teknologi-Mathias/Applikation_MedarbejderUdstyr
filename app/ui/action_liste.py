@@ -1,7 +1,8 @@
-"""Genbrugelig Action Center-liste (dashboard og modulernes oversigt).
+"""Genbrugelig Action Center-liste (dashboard, arbejdskøer og modulernes oversigt).
 
 Klik åbner sagen direkte på den relevante opgave. Højreklik giver hurtige
-handlinger: markér opgave udført, ændr frist, tildel ansvarlig og vis historik.
+handlinger: markér opgave udført, ændr frist, tildel ansvarlig og vis historik
+(og arkivér, for lister med sager, der er klar til afslutning).
 Handlingerne udføres af controlleren (via signalet handling) – ikke her.
 """
 from PySide6.QtCore import QObject, Qt, Signal
@@ -18,6 +19,7 @@ ANSVARLIG = "ansvarlig"
 HISTORIK = "historik"
 I_GANG = "i_gang"
 AFVENTER = "afventer"
+ARKIVER = "arkiver"
 
 
 class ActionListe(QObject):
@@ -25,10 +27,12 @@ class ActionListe(QObject):
     aabn_sag = Signal(str, str, str)
     handling = Signal(str, str, str, str)      # (handling, proces, sag_id, opgave_id)
 
-    def __init__(self, titel, undertitel, vis_modul=True, parent=None):
+    def __init__(self, titel, undertitel, vis_modul=True, parent=None, ikon=None,
+                 kan_arkivere=False):
         super().__init__(parent)
         self.vis_modul = vis_modul
-        self.kort, self.liste, self.antal = lav_liste_kort(titel, undertitel)
+        self.kan_arkivere = kan_arkivere
+        self.kort, self.liste, self.antal = lav_liste_kort(titel, undertitel, ikon=ikon)
         self.liste.itemClicked.connect(self._klikket)
         self.liste.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.liste.customContextMenuRequested.connect(self._menu)
@@ -56,6 +60,9 @@ class ActionListe(QObject):
                                 (ANSVARLIG, "Tildel ansvarlig…")):
                 menu.addAction(tekst, lambda n=navn: self.handling.emit(n, proces, sag_id, opgave_id))
         else:
+            if self.kan_arkivere:
+                menu.addAction("Kontrollér og arkivér…",
+                               lambda: self.handling.emit(ARKIVER, proces, sag_id, ""))
             menu.addAction("Tildel ansvarlig for sagen…",
                            lambda: self.handling.emit(ANSVARLIG, proces, sag_id, ""))
         menu.addSeparator()

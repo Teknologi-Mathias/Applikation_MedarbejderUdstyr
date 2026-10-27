@@ -15,7 +15,7 @@ from app.domain import indmelding as im  # noqa: E402
 from app.domain.onboarding import OnboardingForloeb as OB  # noqa: E402
 from app.repositories.fejl import SessionUdloebetFejl  # noqa: E402
 from app.ui import action_liste as al  # noqa: E402
-from app.ui.hovedvindue import STRUKTUR, MainWindow  # noqa: E402
+from app.ui.hovedvindue import ALLE_SIDER, OMRAADER, MainWindow  # noqa: E402
 from app.ui.indmelding_dialog import IndmeldingDialog, NyIndmeldingDialog  # noqa: E402
 from app.ui.onboarding_dialog import OnboardingDialog  # noqa: E402
 from app.ui.sag_dialog import SagDialog  # noqa: E402
@@ -54,20 +54,39 @@ class UiTest(TjenesteTest):
         super().tearDown()
 
     def test_alle_sider_kan_vises(self):
-        for _, punkter in STRUKTUR:
-            for noegle, _ in punkter:
-                self.vindue.vis_side(noegle)
-                _app.processEvents()
+        for noegle in ALLE_SIDER:
+            self.vindue.vis_side(noegle)
+            _app.processEvents()
         self.assertEqual(self.vindue.sider["on_aktive"].tabel.rowCount(), 1)
         self.assertEqual(self.vindue.sider["off_aktive"].tabel.rowCount(), 1)
         self.assertGreater(self.vindue.dashboard.action.liste.count(), 0)
 
-    def test_onboarding_og_offboarding_er_separate_hovedpunkter(self):
-        sektioner = [s for s, _ in STRUKTUR if s]
-        self.assertEqual(len(sektioner), 3)
-        self.assertTrue(sektioner[0].startswith("Onboarding"))
-        self.assertTrue(sektioner[1].startswith("Offboarding"))
-        self.assertEqual(sektioner[2], "Telefoner (MDM)", "med undersiden Arkiv")
+    def test_hovedomraader_til_venstre_og_undersider_som_faner(self):
+        omraader = {noegle: sider for noegle, _, _, sider in OMRAADER}
+        self.assertEqual([n for n, _, _, s in OMRAADER if len(s) > 1],
+                         ["onboarding", "offboarding", "telefoner"])
+        self.vindue.vis_omraade("onboarding")
+        self.assertFalse(self.vindue.fane_ramme.isHidden())
+        self.assertEqual(self.vindue.faner.count(), len(omraader["onboarding"]))
+        self.vindue.faner.setCurrentIndex(2)                   # Aktive forløb
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.sider["on_aktive"])
+        self.vindue.vis_omraade("overblik")
+        self.assertTrue(self.vindue.fane_ramme.isHidden(), "én side = ingen faner")
+        self.vindue.vis_omraade("onboarding")                  # husker sidste underside
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.sider["on_aktive"])
+        self.vindue.sidebar.indstillinger_knap.click()        # tandhjulet ved brugeren
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.indstillinger)
+
+    def test_dashboard_kort_aabner_den_filtrerede_liste(self):
+        kort = self.vindue.dashboard.kort
+        self.assertEqual(kort["starter_snart"].vaerdi.text(), "1")   # onboarding om 7 dage
+        self.assertGreater(int(kort["forsinkede"].vaerdi.text()), 0)  # offboarding -10 dage
+        kort["forsinkede"].klikket.emit("forsinkede")
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.arbejdsbakke)
+        self.assertEqual(self.vindue.arbejdsbakke.visning(), "forsinkede")
+        kort["i_risiko"].klikket.emit("i_risiko")
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.teamoverblik)
+        self.assertEqual(self.vindue.teamoverblik.filter_input.currentData(), "risiko")
 
     def test_sagsvindue_viser_milepaele_og_laaste_opgaver(self):
         dialog = SagDialog(self.vindue, self.on, ["tester"])
@@ -122,8 +141,8 @@ class UiTest(TjenesteTest):
                                           "beskrivelse": "Excel-eksporten giver en fejlbesked"})
 
     def test_oensker_er_selvstaendigt_menupunkt_med_soegning_og_filtre(self):
-        self.assertIn(("oensker", "Ønsker & Udvikling"),
-                      [p for sektion, punkter in STRUKTUR if sektion is None for p in punkter])
+        self.assertIn(("oensker", [("oensker", "Ønsker & Udvikling")]),
+                      [(n, s) for n, _, _, s in OMRAADER])
         self.ny_indmelding()
         self.ny_indmelding("Automatisk rykker")
         self.vindue.vis_side("oensker")

@@ -127,7 +127,10 @@ class OpgaveTabel(QWidget):
                 (spor, spor, None, ""),
                 (o.afdeling or "–", o.afdeling, None, ""),
                 (o.ansvarlig or "Ikke tildelt", o.ansvarlig, None, ""),
-                (vis_dato(o.frist) if o.frist else "–", o.frist or "9999", frist_stil, ""),
+                # Tidsrisikoen vises også på blokerede opgaver (rød frist + "Venter på").
+                (vis_dato(o.frist) if o.frist else "–", o.frist or "9999", frist_stil,
+                 f"Forsinket – {over} {'dag' if over == 1 else 'dage'} over frist"
+                 if over and over > 0 else ""),
                 (vis_tidspunkt(o.planlagt) or "–", o.planlagt or "9999", None, ""),
                 (p.status, p.status, spor_stil(p.status), sp.FORKLARING.get(p.status, "")),
                 (naeste or "–", naeste, None, naeste),

@@ -31,3 +31,6 @@ release/
 
 # Telefoner (MDM): reservekode til ældre telefoner – kun lokalt
 assets/mdm/reservekode.txt
+
+# Lokal Docker-database (docker-compose.yml)
+.env.docker

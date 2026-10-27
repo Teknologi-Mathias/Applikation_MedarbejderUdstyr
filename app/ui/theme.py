@@ -193,17 +193,21 @@ QToolTip {
 #appSlogan { color: @MUTED; font-size: 12px; }
 #sidebarFod { color: @DIM; font-size: 11px; }
 #sidebarBruger { color: @SIDEBAR_TEKST; font-size: 12px; font-weight: 600; }
-#navSektion {
-    color: @DIM; font-size: 11px; font-weight: 700;
-    letter-spacing: 1px; padding: 14px 6px 4px 6px;
-}
 QPushButton[nav="true"] {
-    text-align: left; padding: 11px 16px; border: none;
+    text-align: left; padding: 10px 14px; border: none;
     border-radius: 10px; color: @SIDEBAR_TEKST; background: transparent;
     font-weight: 600; font-size: 14px;
 }
 QPushButton[nav="true"]:hover { background: @SIDEBAR_HOVER; color: white; }
 QPushButton[nav="true"]:checked { background: @PRIMARY; color: white; }
+#brugerOmraade { background: @SIDEBAR_HOVER; border-radius: 10px; }
+QToolButton#sidebarIkon {
+    background: transparent; border: none; border-radius: 8px; padding: 6px;
+    color: @SIDEBAR_TEKST; font-size: 12px; font-weight: 600;
+}
+QToolButton#sidebarIkon:hover { background: @SIDEBAR; color: white; }
+QToolButton#sidebarIkon:checked { background: @PRIMARY; color: white; }
+#omraadeFaner { background: @BG; }
 
 /* ---------- Sidehoveder og kort ---------- */
 #pageTitle { font-size: 26px; font-weight: 700; color: @TEXT; }
@@ -289,7 +293,7 @@ QMenu {
     background: @SURFACE; border: 1px solid @BORDER_STRONG; border-radius: 8px; padding: 4px;
 }
 QMenu::item { padding: 8px 22px 8px 14px; border-radius: 6px; }
-QMenu::item:selected { background: @PRIMARY_SOFT; color: white; }
+QMenu::item:selected { background: @PRIMARY_SOFT; color: @PRIMARY_TEKST; }
 QMenu::item:disabled { color: @DIM; }
 QMenu::separator { height: 1px; background: @BORDER; margin: 4px 8px; }
 
@@ -323,7 +327,7 @@ QSpinBox::up-arrow { image: url(@CHEVRON_OP); width: 10px; height: 7px; }
 QSpinBox::down-arrow { image: url(@CHEVRON); width: 10px; height: 7px; }
 QComboBox QAbstractItemView {
     background: @SURFACE; border: 1px solid @BORDER_STRONG; outline: 0;
-    selection-background-color: @PRIMARY_SOFT; selection-color: white; color: @TEXT;
+    selection-background-color: @PRIMARY_SOFT; selection-color: @PRIMARY_TEKST; color: @TEXT;
 }
 QCheckBox { spacing: 8px; background: transparent; }
 QCheckBox:disabled { color: @DIM; }
@@ -345,7 +349,7 @@ QCalendarWidget QToolButton { background: transparent; color: @TEXT; border: non
 QTableWidget {
     background: @SURFACE; border: none; gridline-color: transparent;
     alternate-background-color: @SURFACE_2;
-    selection-background-color: @PRIMARY_SOFT; selection-color: red;
+    selection-background-color: @PRIMARY_SOFT; selection-color: @PRIMARY_TEKST;
     outline: 0;
 }
 QTableWidget::item { padding: 4px 10px; border: none; }
@@ -374,20 +378,7 @@ QScrollBar::handle:horizontal:hover { background: @DIM; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
-/* ---------- Navigation med undersider ---------- */
-QPushButton[navSektion="true"] {
-    text-align: left; padding: 9px 12px; border: none; border-radius: 8px;
-    color: @DIM; background: transparent; font-size: 11px; font-weight: 800;
-    letter-spacing: 1px;
-}
-QPushButton[navSektion="true"]:hover { color: @SIDEBAR_TEKST; background: @SIDEBAR_HOVER; }
-QPushButton[navUnder="true"] {
-    text-align: left; padding: 7px 14px 7px 26px; border: none;
-    border-radius: 8px; color: @SIDEBAR_TEKST; background: transparent;
-    font-weight: 500; font-size: 13px;
-}
-QPushButton[navUnder="true"]:hover { background: @SIDEBAR_HOVER; color: @SIDEBAR_TEKST_STAERK; }
-QPushButton[navUnder="true"]:checked { background: @PRIMARY; color: white; font-weight: 600; }
+/* ---------- Diverse ---------- */
 #antalBadge {
     background: @PRIMARY_SOFT; color: @PRIMARY_TEKST; border-radius: 10px;
     font-weight: 700; font-size: 12px; padding: 3px 8px;
