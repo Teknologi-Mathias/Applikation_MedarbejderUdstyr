@@ -15,7 +15,8 @@ Returnerer funktionens resultat, eller markøren FEJL ved fejl:
 import logging
 from typing import Callable, Optional
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.repositories.fejl import (
     DataFejl,
@@ -44,9 +45,18 @@ class Fejl:
 FEJL = Fejl()
 
 
-def udfoer(parent, funktion, *args, efter_konflikt=None, **kwargs):
+def _vent(funktion, args, kwargs):
+    """Ventecursor, mens kaldet kører (netværk kan tage tid) – fjernes før en fejlboks."""
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
     try:
         return funktion(*args, **kwargs)
+    finally:
+        QApplication.restoreOverrideCursor()
+
+
+def udfoer(parent, funktion, *args, efter_konflikt=None, **kwargs):
+    try:
+        return _vent(funktion, args, kwargs)
     except ValideringsFejl as fejl:
         QMessageBox.information(parent, "Kan ikke gennemføres", str(fejl))
     except KonfliktFejl as fejl:

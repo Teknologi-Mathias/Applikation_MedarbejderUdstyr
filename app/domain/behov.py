@@ -81,6 +81,8 @@ class Behov:
     email: bool = False
     firmabil: bool = False
     firmabil_bemaerkning: str = ""
+    # Udstyrsposter (nøgler fra udstyrsposter()), som Administration har sendt.
+    sendt: list = field(default_factory=list)
 
     def toej(self, noegle: str) -> Toej:
         return getattr(self, noegle)
@@ -112,6 +114,9 @@ class Behov:
                             "(skriv større behov i bemærkningen).")
         if self.mobil and self.abonnement not in tilladte_abonnementer(stilling):
             fejl.append("Vælg abonnement: " + " eller ".join(tilladte_abonnementer(stilling)) + ".")
+        if self.email and not self.mobil:
+            # Firma-mailen ligger på telefonen (Gmail på den klargjorte telefon).
+            fejl.append("E-mailkonto kræver mobiltelefon.")
         if not tilladt_udvidet(stilling):
             kun = ", ".join(UDVIDET_UDSTYR)
             if self.email:
@@ -120,19 +125,31 @@ class Behov:
                 fejl.append(f"Firmabil kan kun vælges for {kun}.")
         return fejl
 
-    def udstyrsliste(self) -> list[str]:
-        """Det valgte udstyr (ikke firmabil – den bestilles for sig), fx
-        ["Telefon (Tale og data)", "E-mail", "Polo M × 2"]. Tom = intet udstyr."""
-        liste = []
+    def udstyrsposter(self) -> list[tuple[str, str]]:
+        """Det valgte udstyr som (nøgle, tekst) (ikke firmabil – den bestilles for sig),
+        fx [("telefon", "Telefon (Tale og data)"), ("polo", "Polo M × 2")]."""
+        poster = []
         if self.mobil:
-            liste.append(f"Telefon ({self.abonnement})" if self.abonnement else "Telefon")
+            poster.append(("telefon", f"Telefon ({self.abonnement})" if self.abonnement
+                           else "Telefon"))
         if self.email:
-            liste.append("E-mail")
+            poster.append(("email", "E-mail"))
         for noegle, navn in BEKLAEDNING.items():
             t = self.toej(noegle)
             if t.valgt:
-                liste.append(f"{navn} {t.stoerrelse or '(størrelse mangler)'} × {t.antal}")
-        return liste
+                poster.append((noegle, f"{navn} {t.stoerrelse or '(størrelse mangler)'} "
+                                       f"× {t.antal}"))
+        return poster
+
+    def udstyrsliste(self) -> list[str]:
+        """Det valgte udstyr som tekst, fx ["Telefon (Tale og data)", "E-mail",
+        "Polo M × 2"]. Tom = intet udstyr."""
+        return [tekst for _, tekst in self.udstyrsposter()]
+
+    def sendte_poster(self) -> list[str]:
+        """De sendte poster, som stadig er valgt (et fravalg glemmer forsendelsen)."""
+        valgte = {n for n, _ in self.udstyrsposter()}
+        return [n for n in self.sendt if n in valgte]
 
     def linjer(self) -> list[str]:
         """Læsbar oversigt, fx ["Polo: M × 2", "Mobil: Kun data", ...]."""
@@ -148,6 +165,10 @@ class Behov:
         if self.firmabil and self.firmabil_bemaerkning:
             bil += f" ({self.firmabil_bemaerkning})"
         linjer.append(f"Firmabil: {bil}")
+        poster = self.udstyrsposter()
+        if poster:
+            sendt = set(self.sendte_poster())
+            linjer.append("Sendt: " + (", ".join(t for n, t in poster if n in sendt) or "intet"))
         return linjer
 
     def aendringer(self, ny: "Behov") -> list[str]:
@@ -166,6 +187,7 @@ class Behov:
             "email": self.email,
             "firmabil": self.firmabil,
             "firmabil_bemaerkning": self.firmabil_bemaerkning if self.firmabil else "",
+            "sendt": self.sendte_poster(),
         }
 
     @classmethod
@@ -180,6 +202,7 @@ class Behov:
             bool(data.get("email")),
             bool(data.get("firmabil")),
             str(data.get("firmabil_bemaerkning") or "").strip(),
+            [str(n) for n in data.get("sendt") or [] if n],
         )
 
 
@@ -195,11 +218,13 @@ def profil(data, stilling: str) -> Behov:
         if t.valgt and not 1 <= t.antal <= MAKS_ANTAL:
             t.antal = 1
     b.toej_bemaerkning = b.firmabil_bemaerkning = ""
+    b.sendt = []
     if b.abonnement not in tilladte_abonnementer(stilling):
         tilladte = tilladte_abonnementer(stilling)
         b.abonnement = tilladte[0] if b.mobil and len(tilladte) == 1 else ""
     if not tilladt_udvidet(stilling):
         b.email = b.firmabil = False
+    b.email = b.email and b.mobil
     return b
 
 

@@ -130,6 +130,12 @@ class SupabaseKontoRepository:
             self.klient.rpc("inbase_set_roles",
                             {"p_user_id": bruger_id, "p_roles": afdelinger}).execute()
 
+    def saet_opdateringskanal(self, bruger_id: str, kanal: str) -> None:
+        """Opdateringskanal (stabil/pilot) via RPC'en fra migrering 019 (kun administratorer)."""
+        with kald("ændre opdateringskanal"):
+            self.klient.rpc("inbase_set_update_channel",
+                            {"p_user_id": bruger_id, "p_channel": kanal}).execute()
+
     def slet(self, bruger_id: str) -> None:
         self._funktion(FUNKTION_ADMINISTRER, {"action": "delete", "user_id": bruger_id},
                        "slette brugeren")

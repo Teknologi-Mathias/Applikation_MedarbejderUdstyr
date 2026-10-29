@@ -214,17 +214,18 @@ class MdmService:
             skriver = csv.writer(fil, delimiter=";")
             skriver.writerow(["Enhedsnavn", "Telefonnr.", "Status", "Arkiveret", "Nulstillingskode",
                               "Supportkode (Chrome)", "Kode: mail til", "Kode: mail fra",
-                              "Firma-mail", "Producent", "Model", "Serienr.", "IMEI", "Android",
+                              "Kode: skærmlås", "Firma-mail", "Producent", "Model", "Serienr.",
+                              "IMEI", "Android",
                               "Klargjort", "Note"])
             for e in enheder:
                 kode = e.nulstillingskode
                 tekst = [_excel_tekst(v) for v in (
                     e.telefonnummer, kode, md.supportkode(kode),
                     md.aendringskode(kode, md.MAIL_TIL), md.aendringskode(kode, md.MAIL_FRA),
-                    e.serienummer, e.imei)]
+                    md.aendringskode(kode, md.SKAERMLAAS), e.serienummer, e.imei)]
                 skriver.writerow([
-                    e.navn, tekst[0], e.status, e.arkiveret[:16].replace("T", " "), *tekst[1:5],
-                    "Ja" if e.mail else "Nej", e.producent, e.model, tekst[5], tekst[6],
+                    e.navn, tekst[0], e.status, e.arkiveret[:16].replace("T", " "), *tekst[1:6],
+                    "Ja" if e.mail else "Nej", e.producent, e.model, tekst[6], tekst[7],
                     e.android_version, e.klargjort[:16].replace("T", " "), e.note])
         log.info("%s telefoner eksporteret til %s", len(enheder), sti)
         return len(enheder)

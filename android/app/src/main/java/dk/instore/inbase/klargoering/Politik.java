@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.PersistableBundle;
 import android.os.UserManager;
@@ -69,8 +71,20 @@ class Politik {
             "com.google.android.marvin.talkback",
     };
 
+    /** Kendte PDF-læsere – findes også, selv om de er skjult fra en ældre klargøring. */
+    private static final String[] PDF_LAESERE = {
+            "com.google.android.apps.pdfviewer", "com.google.android.apps.nbu.files",
+    };
+
     private static final String GMAIL = "com.google.android.gm";
     static final String CHROME = "com.android.chrome";
+    /** Sat fra admin-menuen: næste ændring af skærmlåsen er godkendt (AdminReceiver). */
+    static final String SKAERMLAAS_AABEN = "skaermlaas_aaben";
+    /** Første skærmlås er sat (standardmønsteret ved klargøringen – registreres ikke). */
+    static final String SKAERMLAAS_SAT = "skaermlaas_sat";
+    /** Seneste ændring af skærmlåsen uden kode (tidspunkt) og antallet af dem. */
+    static final String SKAERMLAAS_AENDRET = "skaermlaas_aendret";
+    static final String SKAERMLAAS_ANTAL = "skaermlaas_antal";
 
     private final JSONObject data;
 
@@ -116,6 +130,30 @@ class Politik {
 
     boolean chrome() {
         return data.optBoolean("chrome");
+    }
+
+    boolean skaermlaasAaben() {
+        return data.optBoolean(SKAERMLAAS_AABEN);
+    }
+
+    /** Ændringer af skærmlåsen uden kode – tom, hvis der ingen er. */
+    String skaermlaasAendringer() {
+        int antal = data.optInt(SKAERMLAAS_ANTAL);
+        return antal == 0 ? "" : "Skærmlåsen er ændret uden kode " + antal + " gang(e), senest "
+                + s(SKAERMLAAS_AENDRET) + ". Standardmønsteret gælder måske ikke længere.";
+    }
+
+    /** Skærmlåsen er sat eller ændret (AdminReceiver). Godkendte ændringer registreres ikke. */
+    void skaermlaasAendret(String tidspunkt) throws Exception {
+        if (!data.optBoolean(SKAERMLAAS_SAT)) {
+            data.put(SKAERMLAAS_SAT, true);           // standardmønsteret ved klargøringen
+        } else if (skaermlaasAaben()) {
+            data.put(SKAERMLAAS_AABEN, false);        // godkendt i admin-menuen
+            data.put(SKAERMLAAS_ANTAL, 0);
+        } else {
+            data.put(SKAERMLAAS_AENDRET, tidspunkt);
+            data.put(SKAERMLAAS_ANTAL, data.optInt(SKAERMLAAS_ANTAL) + 1);
+        }
     }
 
     void saet(String noegle, Object vaerdi) throws Exception {
@@ -175,6 +213,8 @@ class Politik {
             dpm.setApplicationRestrictions(admin, CHROME, chromePolitik);
         }
         for (String p : s("tilladte").split(",")) if (!p.trim().isEmpty()) tilladte.add(p.trim());
+        // PDF-læseren må aldrig skjules – briefs fra Gmail og FL-TMS åbnes i den.
+        for (String p : pdfLaesere(pm)) if (!CHROME.equals(p) || chrome()) tilladte.add(p);
         TelecomManager tc = (TelecomManager) ctx.getSystemService(Context.TELECOM_SERVICE);
         if (tc != null && tc.getDefaultDialerPackage() != null) tilladte.add(tc.getDefaultDialerPackage());
         String sms = Telephony.Sms.getDefaultSmsPackage(ctx);
@@ -205,6 +245,29 @@ class Politik {
         return new JSONArray(skjult);
     }
 
+    /** Systemapps, der kan åbne en PDF (også skjulte), uden Chrome. */
+    static Set<String> pdfLaesere(PackageManager pm) {
+        Set<String> laesere = new HashSet<>();
+        Intent pdf = new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(Uri.parse("content://dk.instore.inbase/brief.pdf"), "application/pdf");
+        for (ResolveInfo r : pm.queryIntentActivities(pdf,
+                PackageManager.MATCH_ALL | PackageManager.MATCH_UNINSTALLED_PACKAGES)) {
+            boolean system = (r.activityInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            if (system && !CHROME.equals(r.activityInfo.packageName)) {
+                laesere.add(r.activityInfo.packageName);
+            }
+        }
+        for (String pakke : PDF_LAESERE) {
+            try {
+                pm.getApplicationInfo(pakke, PackageManager.MATCH_UNINSTALLED_PACKAGES);
+                laesere.add(pakke);
+            } catch (PackageManager.NameNotFoundException ex) {
+                // Ikke på telefonen.
+            }
+        }
+        return laesere;
+    }
+
     void begraensninger(Context ctx) {
         DevicePolicyManager dpm = dpm(ctx);
         ComponentName admin = AdminReceiver.komponent(ctx);
@@ -217,6 +280,20 @@ class Politik {
             }
         }
         dpm.setAccountManagementDisabled(admin, "com.google", true);
+        skaermlaas(ctx, dpm, admin);
+    }
+
+    /**
+     * Telefonen skal altid have en skærmlås (standardmønsteret tegnes ved klargøringen), så
+     * den ikke kan fjernes. Android kan ikke forhindre, at mønsteret ændres – AdminReceiver
+     * registrerer derfor ændringer, der ikke er godkendt i admin-menuen (SKAERMLAAS_AABEN).
+     */
+    private void skaermlaas(Context ctx, DevicePolicyManager dpm, ComponentName admin) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            dpm.setRequiredPasswordComplexity(DevicePolicyManager.PASSWORD_COMPLEXITY_LOW);
+        } else {
+            dpm.setPasswordQuality(admin, DevicePolicyManager.PASSWORD_QUALITY_SOMETHING);
+        }
     }
 
     private static DevicePolicyManager dpm(Context ctx) {

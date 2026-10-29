@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable
 
+from app.domain import statusprik as prik
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb as OB
 from app.domain.opgave import laes_iso_dato
 from app.ui.hjaelpere import vis_dato
 from app.ui.sag_liste_side import Filtervalg, Kolonne
-from app.ui.theme import opgaver_stil, status_stil
+from app.ui.theme import opgaver_stil, prik_stil, status_stil
 
 
 def status_tekst(sag) -> str:
@@ -62,6 +63,13 @@ def _opgave_kolonne(bredde: int = 0) -> Kolonne:
     return Kolonne("Opgaver", bredde, lambda s: s.opgave_tekst(), sortering, stil, _opgaver_tooltip)
 
 
+def _prik_kolonne(titel, prik_for: Callable, klik: str) -> Kolonne:
+    """Statusprik (app/domain/statusprik.py), der opdateres med ét klik."""
+    return Kolonne(titel, 112, lambda s: prik_for(s).tekst, lambda s: prik_for(s).sortering,
+                   lambda s: prik_stil(prik_for(s).tone),
+                   lambda s: prik_for(s).tooltip, klik)
+
+
 def _dato_kolonne(titel, felt) -> Kolonne:
     return Kolonne(titel, 150, lambda s: vis_dato(felt(s)) if felt(s) else "–",
                    lambda s: felt(s) or "9999")
@@ -100,6 +108,8 @@ def offboarding_modul() -> Modul:
             Kolonne("Medarbejdernavn", 230, lambda s: s.navn),
             _dato_kolonne("Sidste arbejdsdag", lambda s: s.fratraedelsesdato),
             _status_kolonne(),
+            _prik_kolonne("NAV", prik.nav, prik.NAV),
+            _prik_kolonne("Udstyr retur", prik.udstyr_retur, prik.UDSTYR),
             _opgave_kolonne(150),
             Kolonne("Kommentar", 0, lambda s: s.kommentar),
         ],
@@ -124,6 +134,9 @@ def onboarding_modul(omraader: Callable, ansvarlige: Callable) -> Modul:
             _status_kolonne(),
             Kolonne("Ansvarlig", 110, lambda s: s.ansvarlig or "–"),
             _dato_kolonne("Første arbejdsdag", lambda s: s.foerste_dag()),
+            _prik_kolonne("Kontrakt", prik.kontrakt, prik.KONTRAKT),
+            _prik_kolonne("Udstyr", prik.udstyr, prik.UDSTYR),
+            _prik_kolonne("Oplæring", prik.oplaering, prik.OPLAERING),
             _opgave_kolonne(),
         ],
         filtre=[

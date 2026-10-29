@@ -89,8 +89,15 @@ class MedarbejderDialog(QDialog):
             hjaelp.setObjectName("hjaelpTekst")
             form.addRow("", hjaelp)
 
+        # Aflevering (returpakke og kommentar) er under udvikling: felterne vises
+        # låst, og eksisterende værdier bevares uændret ved gem.
+        for felt in (self.tracking_input, self.kommentar_input):
+            felt.setEnabled(False)
         form.addRow("Tracking-link", self.tracking_input)
         form.addRow("Kommentar", self.kommentar_input)
+        udvikling = QLabel("Aflevering (tracking og kommentar) er under udvikling.")
+        udvikling.setObjectName("hjaelpTekst")
+        form.addRow("", udvikling)
         return form
 
     def _opbyg_status(self, medarbejder):

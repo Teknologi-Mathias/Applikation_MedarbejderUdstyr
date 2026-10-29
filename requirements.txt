@@ -1,5 +1,5 @@
 # Kørsel
-PySide6>=6.6
+PySide6-Essentials>=6.6  # QtCore, QtGui, QtNetwork, QtWidgets – ikke Addons/WebEngine (mindre installer)
 supabase>=2.33,<3        # Supabase Auth, PostgREST og Edge Functions (inkl. httpx)
 python-dotenv>=1.0       # læser %APPDATA%\IN-BASE\.env
 qrcode>=7.4              # Telefoner (MDM): QR-kode til klargøring (uden Pillow)

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from app import APP_BESKRIVELSE, APP_NAVN, APP_SLOGAN, VERSION
 from app.ui import ikoner
-from app.ui.hjaelpere import lav_logo
+from app.ui.hjaelpere import lav_knap, lav_logo
 from app.ui.theme import FARVER
 
 
@@ -34,6 +34,7 @@ INDSTILLINGER = "indstillinger"
 class Sidebar(QFrame):
     omraade_valgt = Signal(str)
     log_ud = Signal()
+    opdatering_valgt = Signal()
 
     def __init__(self, omraader):
         """omraader: [(nøgle, tekst, ikon, [(side, fanetekst), ...]), ...]"""
@@ -91,6 +92,12 @@ class Sidebar(QFrame):
             menu_layout.addWidget(knap)
 
         menu_layout.addStretch()
+        # Central opdatering: vises, når en ny version er klar (hovedvinduet).
+        self.opdatering_knap = lav_knap("", "primary")
+        self.opdatering_knap.setVisible(False)
+        self.opdatering_knap.clicked.connect(self.opdatering_valgt.emit)
+        layout.addWidget(self.opdatering_knap)
+        layout.addSpacing(6)
         self.lagring_label = QLabel("")
         self.lagring_label.setWordWrap(True)
         layout.addWidget(self.lagring_label)
@@ -153,6 +160,13 @@ class Sidebar(QFrame):
         """Brugernavnet er identiteten i IN-BASE; visningsnavnet står i tooltip."""
         self.bruger_label.setText(f"{bruger.get('brugernavn', '')}\n{bruger.get('rolle', '')}")
         self.bruger_label.setToolTip(f"Logget ind som {bruger.get('navn', '')}")
+
+    def saet_opdatering(self, version: str | None) -> None:
+        """Knappen "Ny version" – skjult, når der ingen opdatering er."""
+        self.opdatering_knap.setVisible(bool(version))
+        if version:
+            self.opdatering_knap.setText(f"⬆  Version {version} er klar")
+            self.opdatering_knap.setToolTip("Klik for at se, hvad der er nyt, og opdatere")
 
     def saet_lagring(self, offline: bool, ventende: int, kilde: str = "central datamappe"):
         if offline:

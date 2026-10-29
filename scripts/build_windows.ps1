@@ -11,8 +11,12 @@
         release\IN-BASE-Setup-v<version>.exe
         release\IN-BASE-Setup-v<version>.exe.sha256
 
-    Scriptet committer, pusher, tagger og publicerer ikke noget, og det rører
-    hverken Supabase eller konfigurationen i %APPDATA%\IN-BASE.
+    Scriptet committer, pusher og tagger ikke, og det rører ikke konfigurationen i
+    %APPDATA%\IN-BASE. Det publicerer kun med -Udgiv (pilotkanalen i den centrale
+    opdatering) og ændrer aldrig databasens data eller skema.
+
+    Der bygges kun fra en ren arbejdskopi (git status), så en release altid kan
+    genskabes fra et commit; commit-hashen står i rapporten og i udgivelsen.
 
 .PARAMETER KlientKonfig
     .env-fil med INBASE_SUPABASE_URL og INBASE_SUPABASE_ANON_KEY, som installeren
@@ -24,13 +28,30 @@
     Fuld sti til ISCC.exe, hvis Inno Setup ikke ligger et almindeligt sted.
     Kan også sættes med miljøvariablen INBASE_ISCC.
 
+.PARAMETER Udgiv
+    Udgiv installeren til pilotkanalen i den centrale opdatering bagefter
+    (tools\udgiv_version.py udgiv – kræver administrator-login). Kræver en ren
+    arbejdskopi. Frigivelse til alle sker bevidst bagefter med "frigiv".
+
+.PARAMETER Noter
+    Kort tekst om, hvad der er nyt (vises i opdateringsdialogen). Kun med -Udgiv.
+
+.PARAMETER TilladUcommittet
+    Byg selvom der er ucommittede ændringer (kun til afprøvning – kan ikke udgives).
+
 .EXAMPLE
     .\scripts\build_windows.ps1 -InnoSetupPath "D:\Værktøjer\Inno Setup 6\ISCC.exe"
+
+.EXAMPLE
+    .\scripts\build_windows.ps1 -Udgiv -Noter "Hurtigere opdatering af listerne"
 #>
 [CmdletBinding()]
 param(
     [string]$KlientKonfig = '',
-    [string]$InnoSetupPath = $env:INBASE_ISCC
+    [string]$InnoSetupPath = $env:INBASE_ISCC,
+    [switch]$Udgiv,
+    [string]$Noter = '',
+    [switch]$TilladUcommittet
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,8 +68,10 @@ if (-not $KlientKonfig) { $KlientKonfig = Join-Path $Rod '.env' }
 $DistRod = Join-Path $Rod 'dist'
 $AppMappe = Join-Path $DistRod 'IN-BASE'
 $ReleaseMappe = Join-Path $Rod 'release'
-# Målrettede tests for det, en release afhænger af (se docs\RELEASE.md).
-$Tests = @('tests.test_release', 'tests.test_database', 'tests.test_supabase_enhed')
+# Hele den lokale testpakke (ca. 2 min). Docker-/E2E-tests springer selv over (se docs\RELEASE.md).
+$TestTekst = 'hele den lokale testpakke'
+# Supabase Free: højst 50 MB pr. fil i Storage (central opdatering).
+$MaksInstaller = 50MB
 
 $script:Trin = 0
 function Trin([string]$Tekst) {
@@ -135,6 +158,23 @@ try {
     Ok "Version $Version"
     if ($Erstatter) { Write-Host "    BEMÆRK  $InstallerNavn findes allerede og bliver ERSTATTET." -ForegroundColor Yellow }
 
+    Trin 'Kontrollerer git (en release skal kunne genskabes fra et commit)'
+    $Commit = ([string](Invoke-Native { & git -C $Rod rev-parse --short HEAD })).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $Commit) { Stop-Build 'git blev ikke fundet, eller projektmappen er ikke et git-repository.' }
+    $Aendringer = ([string](Invoke-Native { & git -C $Rod status --porcelain })).Trim()
+    if ($Aendringer) {
+        if ($Udgiv) { Stop-Build 'Der er ucommittede ændringer – en sådan build kan ikke udgives. Commit først.' }
+        if (-not $TilladUcommittet) {
+            Stop-Build (@(
+                'Der er ucommittede ændringer (git status). Commit dem først, så releasen kan genskabes,',
+                'eller byg med -TilladUcommittet (kun til afprøvning).'
+            ) -join [Environment]::NewLine)
+        }
+        $Commit = "$Commit+ucommittet"
+        Write-Host '    BEMÆRK  Bygget med ucommittede ændringer – kun til afprøvning.' -ForegroundColor Yellow
+    }
+    Ok "Commit $Commit"
+
     Trin 'Klargør klientkonfigurationen til %APPDATA%\IN-BASE\.env'
     if (Test-Path -LiteralPath $InstallerArbejde) { Remove-Item -LiteralPath $InstallerArbejde -Recurse -Force }
     $SupabaseUrl = ([string](Invoke-Native { & $Python (Join-Path $Rod 'tools\lav_klientkonfig.py') $KlientKonfig $GenereretKonfig })).Trim()
@@ -149,10 +189,10 @@ try {
     }
     Ok "Supabase: $SupabaseUrl (kun URL + publishable-nøgle; kilde: $KlientKonfig)"
 
-    Trin ("Kører målrettede tests: {0}" -f ($Tests -join ', '))
+    Trin "Kører $TestTekst"
     Push-Location $Rod
     try {
-        Invoke-Native { & $Python -m unittest @Tests }
+        Invoke-Native { & $Python -m unittest discover -s tests -t . }
         if ($LASTEXITCODE -ne 0) { Stop-Build 'Testene fejlede – der bygges ikke en release.' }
     }
     finally { Pop-Location }
@@ -207,6 +247,12 @@ try {
     if ($LASTEXITCODE -ne 0) { Stop-Build "Inno Setup fejlede (exit $LASTEXITCODE). Se meddelelserne ovenfor." }
     if (-not (Test-Path -LiteralPath $Installer)) { Stop-Build "Installeren blev ikke oprettet: $Installer" }
     if ((Get-Item -LiteralPath $Installer).LastWriteTime -lt $start) { Stop-Build "Installeren blev ikke opdateret: $Installer" }
+    $Bytes = (Get-Item -LiteralPath $Installer).Length
+    if ($Bytes -gt $MaksInstaller) {
+        $Tekst = 'Installeren fylder {0:N1} MB – over 50 MB, som Supabase Free tillader pr. fil (central opdatering).' -f ($Bytes / 1MB)
+        if ($Udgiv) { Stop-Build $Tekst }
+        Write-Host "    BEMÆRK  $Tekst" -ForegroundColor Yellow
+    }
     Ok $InstallerNavn
 
     Trin 'Beregner SHA-256'
@@ -215,6 +261,13 @@ try {
     # Samme format som sha256sum: "<hash> *<filnavn>"
     [System.IO.File]::WriteAllText($hashFil, "$hash *$InstallerNavn`n", (New-Object System.Text.UTF8Encoding($false)))
     Ok $hash
+
+    if ($Udgiv) {
+        Trin 'Udgiver til pilotkanalen (central opdatering)'
+        Invoke-Native { & $Python (Join-Path $Rod 'tools\udgiv_version.py') udgiv $Installer --noter $Noter }
+        if ($LASTEXITCODE -ne 0) { Stop-Build 'Udgivelsen mislykkedes – installeren ligger i release\ og kan udgives igen med tools\udgiv_version.py.' }
+        Ok "Udgivet til pilot. Frigiv til alle: python tools\udgiv_version.py frigiv $Version"
+    }
 
     $stoerrelse = '{0:N1} MB' -f ((Get-Item -LiteralPath $Installer).Length / 1MB)
     $varighed = '{0:mm\:ss}' -f ((Get-Date) - $start)
@@ -226,9 +279,12 @@ try {
     Write-Host "  Kontrolsum  : $hashFil"
     Write-Host "  App-mappe   : $AppMappe"
     Write-Host "  Supabase    : $SupabaseUrl (lægges i %APPDATA%\IN-BASE\.env, hvis den mangler)"
-    Write-Host "  Tests       : $($Tests -join ', ')"
+    Write-Host "  Commit      : $Commit"
+    Write-Host "  Tests       : $TestTekst"
     Write-Host "  Varighed    : $varighed"
-    Write-Host '  Intet er committet, tagget eller publiceret.'
+    if ($Udgiv) { Write-Host '  Udgivet     : pilotkanalen (frigiv bagefter med tools\udgiv_version.py frigiv)' }
+    else { Write-Host '  Udgivet     : nej (byg med -Udgiv for at udgive til pilotkanalen)' }
+    Write-Host "  Intet er committet eller tagget. Tag gerne commit $($Commit -replace '\+ucommittet$', '') som v$Version i git."
     exit 0
 }
 catch {

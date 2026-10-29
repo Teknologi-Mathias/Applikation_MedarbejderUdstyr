@@ -73,13 +73,13 @@ class SupabaseSagRepository:
         return sager[0] if sager else None
 
     def signatur(self) -> tuple:
-        """Ændrer sig, når en sag i processen er oprettet, ændret eller slettet."""
+        """(aktive, arkiv): antal + seneste ændring for hver halvdel i ét kald (RPC fra
+        migrering 019). Ændrer sig, når en sag oprettes, ændres, arkiveres eller slettes –
+        så hovedvinduet kun henter den halvdel, der er ændret."""
         with kald("tjekke for ændringer"):
-            svar = (self.klient.table("lifecycle_cases").select("updated_at", count="exact")
-                    .eq("process", self.proces).order("updated_at", desc=True)
-                    .limit(1).execute())
-        seneste = svar.data[0]["updated_at"] if svar.data else None
-        return (svar.count, seneste)
+            svar = self.klient.rpc("inbase_case_signature", {"p_process": self.proces}).execute()
+        data = svar.data if isinstance(svar.data, dict) else {}
+        return (tuple(data.get("aktive") or ()), tuple(data.get("arkiv") or ()))
 
     ### ----- skrivning ------------------------------------------------------
 

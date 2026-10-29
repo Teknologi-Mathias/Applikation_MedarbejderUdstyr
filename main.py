@@ -14,7 +14,8 @@ from app.bootstrap import byg_fra_konfiguration, klargoer
 from app.infrastructure.database.config import KonfigurationsFejl
 from app.infrastructure.database.connection import DatabaseIkkeTilgaengelig
 from app.infrastructure.logning import opsaet_logning
-from app.repositories.fejl import DataFejl
+from app.repositories.fejl import DataFejl, KompatibilitetsFejl
+from app.ui.enkelt_instans import EnkeltInstans
 from app.ui.hjaelpere import lav_app_ikon
 from app.ui.hovedvindue import MainWindow
 from app.ui.login_dialog import LoginDialog
@@ -61,6 +62,11 @@ def main():
     app.setApplicationName(APP_NAVN)
     app.setApplicationVersion(__version__)
     app.setWindowIcon(lav_app_ikon())   # alle vinduer og beskedbokse
+    instans = EnkeltInstans()
+    if instans.koerer_allerede():
+        log.info("IN-BASE kører allerede – det åbne vindue vises")
+        return 0
+    instans.start()
     anvend_tema(app)
 
     try:
@@ -71,6 +77,9 @@ def main():
         return 1
     try:
         klargoer(tjenester)
+    except KompatibilitetsFejl as fejl:
+        QMessageBox.critical(None, "Databasen skal opdateres", str(fejl))
+        return 1
     except DataFejl as fejl:
         log.error("Opstart fejlede: %s", fejl)
         if not _tilbyd_offline(tjenester, fejl):
@@ -88,6 +97,8 @@ def main():
     session.log_ind(login.bruger)
 
     window = MainWindow(tjenester)
+    window.instans = instans
+    instans.vis.connect(window.vis_fra_baggrund)
     window.efter_log_paa()
     window.show()
     return app.exec()

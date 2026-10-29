@@ -28,7 +28,7 @@ from app.infrastructure.database.config import (
     hent_konfiguration,
     mangler_tekst,
 )
-from app.repositories.fejl import DataFejl
+from app.repositories.fejl import DataFejl, OfflineFejl
 from app.repositories.json.bruger_repository import JsonBrugerRepository
 from app.repositories.json.datakilde import Datakilde
 from app.repositories.json.indmelding_repository import JsonIndmeldingRepository
@@ -49,6 +49,7 @@ from app.services.lagring_service import LagringService, OnlineLagring
 from app.services.mdm_service import MdmService
 from app.services.offboarding_service import OffboardingService
 from app.services.onboarding_service import OnboardingService
+from app.services.opdatering_service import OpdateringService
 from app.services.paamindelser import PaamindelsesService
 from app.services.rapport_service import RapportService
 from app.services.skabelon_service import SkabelonService
@@ -76,6 +77,7 @@ class Tjenester:
     rapporter: RapportService
     indmeldinger: IndmeldingService       # Ønsker & Udvikling
     mdm: MdmService                       # Telefoner (MDM)
+    opdatering: Optional[OpdateringService] = None   # kun Supabase (central opdatering)
 
     def modul(self, proces: str):
         return self.onboarding if proces == OnboardingForloeb.PROCES else self.offboarding
@@ -99,6 +101,7 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
     from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRepository
     from app.repositories.supabase.konto_repository import SupabaseKontoRepository
     from app.repositories.supabase.mdm_repository import SupabaseMdmRepository
+    from app.repositories.supabase.opdatering_repository import SupabaseOpdateringRepository
     from app.repositories.supabase.opsaetning_repository import (
         SupabaseIndstillingRepository,
         SupabasePraeferenceRepository,
@@ -126,6 +129,8 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
         indmeldinger=IndmeldingService(SupabaseIndmeldingRepository(klient), session.bruger),
         mdm=MdmService(SupabaseMdmRepository(klient),
                        JsonLokalFil(lokal_mappe / stier.MDM_LOKAL_FIL.name), session.bruger),
+        opdatering=OpdateringService(SupabaseOpdateringRepository(klient),
+                                     lokal_mappe / stier.OPDATERING_MAPPE.name),
     )
 
 
@@ -168,11 +173,17 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
 def klargoer(tjenester: Tjenester) -> None:
     """Kaldes én gang ved opstart (før log på). Kaster DataFejl ved problemer.
 
-    Supabase: intet – skemaet ændres aldrig af programmet, og intet importeres.
+    Supabase: kun skemavagten – er databasen ældre end klienten kræver, kastes
+    KompatibilitetsFejl. Uden forbindelse fortsættes til log på (tjekkes igen
+    efter log på). Skemaet ændres aldrig af programmet, og intet importeres.
     JSON: tjekker skriveadgang og opdaterer ældre JSON-format i datamappen
     (efter en backup). Der importeres aldrig data fra andre steder.
     """
     if tjenester.backend == BACKEND_SUPABASE:
+        try:
+            tjenester.opdatering.kontroller_skema()
+        except OfflineFejl:
+            log.warning("Skemaversionen kunne ikke kontrolleres (ingen forbindelse)")
         return
     datakilde = tjenester.datakilde
     if datakilde.offline:

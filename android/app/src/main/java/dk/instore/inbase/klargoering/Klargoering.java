@@ -138,6 +138,10 @@ class Klargoering {
         JSONArray skjult = politik.skjulApps(ctx, true);
         rapport.put("skjulte_apps", skjult);
         log.accept("  " + skjult.length() + " apps skjult");
+        if (Politik.pdfLaesere(ctx.getPackageManager()).isEmpty()) {
+            fejl.put("PDF: ingen PDF-læser på telefonen – briefs fra mail og FL-TMS kan ikke åbnes");
+            log.accept("  ADVARSEL – ingen PDF-læser fundet");
+        }
     }
 
     private void flUpdate() throws Exception {

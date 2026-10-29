@@ -120,7 +120,9 @@ påvirker kun nye forløb.
 * **Brugere** oprettes af en administrator i programmet (Edge Function med
   servernøgle – aldrig i klienten) og vælger egen kode ved første log på.
 * **Ingen offline:** uden forbindelse vises en fejl, og intet gemmes lokalt.
-* **Backup** tages af Supabase. Gamle JSON-data overføres ikke (afviklet).
+* **Backup:** `scripts\backup_supabase.ps1` dumper databasen og afprøver gendannelsen
+  i en midlertidig Docker-container (Supabase Free tager ingen backup) – se
+  docs/SUPABASE_OPSAETNING.md, afsnit 13. Gamle JSON-data overføres ikke (afviklet).
 
 ## Byg Windows-program og installer
 
@@ -130,7 +132,9 @@ Ret versionen i `app/__init__.py` (`__version__`) og kør:
 .\scripts\build_windows.ps1
 ```
 
-Resultatet er `release\IN-BASE-Setup-v<version>.exe` + SHA-256-kontrolsum.
+Resultatet er `release\IN-BASE-Setup-v<version>.exe` + SHA-256-kontrolsum. Med
+`-Udgiv` lægges den også i den centrale opdatering (pilotkanalen); klienterne
+opdaterer sig selv, når den frigives (`tools\udgiv_version.py frigiv <version>`).
 Opsætning, afprøvning og fejlfinding: [docs/RELEASE.md](docs/RELEASE.md).
 Installeren lægger forbindelsen til Supabase (URL + offentlig nøgle fra
 projektets `.env`) i `%APPDATA%\IN-BASE\.env`, hvis filen mangler – den ligger

@@ -11,6 +11,8 @@ lukket, logges brugeren ud på en kontrolleret måde (åbne dialoger lukkes,
 data fjernes fra siderne, log på-skærmen vises).
 """
 import logging
+import time
+from dataclasses import replace
 from datetime import date
 
 from PySide6.QtCore import QTime, QTimer, Qt
@@ -34,12 +36,13 @@ from app.domain import adgang
 from app.domain import skabelon as sk
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
-from app.repositories.fejl import DataFejl, SessionUdloebetFejl
+from app.repositories.fejl import DataFejl, KompatibilitetsFejl, SessionUdloebetFejl
 from app.services import action_center
 from app.services import kontrolrum
 from app.ui import fejl as ui_fejl
 from app.ui.action_liste import ANSVARLIG
 from app.ui.arbejdsbakke_side import ArbejdsbakkeSide
+from app.ui.baggrund import koer_i_baggrund
 from app.ui.dashboard_side import DashboardSide
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_app_ikon, lav_knap, lav_sidehoved
@@ -51,6 +54,7 @@ from app.ui.modul_controller import OffboardingController, OnboardingController
 from app.ui.modul_oversigt import ModulOversigtSide, alarmer_for
 from app.ui.moduler import offboarding_modul, onboarding_modul
 from app.ui.notifikationer import Notifikationer
+from app.ui.opdatering_dialog import OpdateringDialog
 from app.ui.opgave_oversigt_side import OpgaveOversigtSide
 from app.ui.sag_liste_side import SagListeSide
 from app.ui.sidebar import FORBINDER, INDSTILLINGER, MISTET, ONLINE, Sidebar
@@ -121,6 +125,7 @@ class LaastSide(QWidget):
 
 class MainWindow(QMainWindow):
     OPDATERINGS_INTERVAL = 60_000  # 60 sekunder, angivet i millisekunder
+    VERSIONS_TJEK = 4 * 3600       # sekunder mellem tjek for en ny version af IN-BASE
 
     def __init__(self, tjenester):
         super().__init__()
@@ -138,6 +143,13 @@ class MainWindow(QMainWindow):
         self._baggrund_forklaret = False
         self._backup_fejl_vist = False
         self._logger_ud = False
+        # Central opdatering (app/services/opdatering_service.py).
+        self.instans = None              # EnkeltInstans (main.py) – frigives før en opdatering
+        self._opdatering = None          # seneste Status fra find()
+        self._opdatering_fil = None      # hentet og kontrolleret installer
+        self._opdatering_tjekker = False
+        self._opdatering_tjekket = None  # time.monotonic() for seneste tjek
+        self._opdatering_meldt = None    # version, der er vist en notifikation for
         ui_fejl.saet_session_haandtering(self._session_udloebet)
         # Med ikon ved uret lukkes programmet kun via "Afslut".
         QApplication.instance().setQuitOnLastWindowClosed(not self.notifikationer.tilgaengelig)
@@ -147,7 +159,10 @@ class MainWindow(QMainWindow):
             OFF: OffboardingController(self, tjenester, tjenester.offboarding),
         }
         self.data = {ON: ([], []), OFF: ([], [])}   # proces -> (aktive, arkiverede)
-        self._signatur = None
+        self._signatur = {}             # proces -> (aktive, arkiv) fra seneste hentning
+        self._indstillinger = {}        # fælles indstillinger fra seneste hentning
+        self._generation = 0            # tælles op ved hver lokal ændring/hentning
+        self._tikker = False            # et minut-tjek kører i baggrunden
 
         self._opbyg_gui()
         self._daglig_backup()
@@ -170,6 +185,7 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar(OMRAADER)
         self.sidebar.omraade_valgt.connect(self.vis_omraade)
         self.sidebar.log_ud.connect(self.log_ud)
+        self.sidebar.opdatering_valgt.connect(self.vis_opdatering)
         self.stak = QStackedWidget()
         # Kontekstuel topmenu: det aktive områdes undersider.
         self._omraade = None
@@ -248,6 +264,8 @@ class MainWindow(QMainWindow):
         for tekst, funktion in punkter:
             if tekst is None:
                 menu.addSeparator()
+            elif funktion is None:
+                menu.addAction(tekst).setEnabled(False)       # fx under udvikling
             else:
                 menu.addAction(tekst, lambda f=funktion: self._paa_valgt(side, f))
         knap = QToolButton()
@@ -277,6 +295,7 @@ class MainWindow(QMainWindow):
             aktive.tilfoej_knap(knap)
         aktive.tilfoej_handling(self._handlingsmenu(aktive, handlinger))
         aktive.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(aktive, ctrl.aabn_sag))
+        aktive.celle_klik.connect(ctrl.hurtig_status)
 
         opgaver = OpgaveOversigtSide(f"{modul.navn} – {opgave_titel.lower()}",
                                      f"Åbne opgaver på tværs af alle aktive {modul.flertal}. "
@@ -287,8 +306,9 @@ class MainWindow(QMainWindow):
                                   titel=f"{modul.navn} – skabeloner",
                                   hent_sager=lambda p=modul.proces: self.data[p][0])
 
+        # Arkivet er kun til visning: statusprikkerne kan ikke klikkes der.
         arkiv = SagListeSide(arkiv_titel, "Afsluttede forløb. Dobbeltklik for at se sagen.",
-                             modul.kolonner, filtre=modul.filtre)
+                             [replace(k, klik="") for k in modul.kolonner], filtre=modul.filtre)
         arkiv.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(arkiv, ctrl.aabn_sag))
         slet = lav_knap("Slet permanent", "danger")
         for knap, funktion in ((lav_knap("Vis sag"), ctrl.aabn_sag),
@@ -323,7 +343,7 @@ class MainWindow(QMainWindow):
              ("Arkivér", ctrl.arkiver, "danger")],
             [("Opret rykker…", ctrl.opret_rykker),
              ("Marker rykker som sendt…", ctrl.marker_rykker_sendt),
-             ("Registrér returlabel som sendt…", ctrl.registrer_returlabel),
+             ("Registrér returlabel som sendt (under udvikling)", None),
              ("Tilføj notat til tidslinjen…", ctrl.tilfoej_notat), (None, None),
              ("Vis tidslinje", ctrl.vis_historik)],
             [sk.SAG, sk.MAIL], "Offboarding – arkiv",
@@ -349,29 +369,58 @@ class MainWindow(QMainWindow):
         return [] if brugere is FEJL else sorted(
             b["brugernavn"] for b in brugere if b.get("aktiv", True))
 
-    def _signatur_nu(self):
-        return (self.t.onboarding.signatur(), self.t.offboarding.signatur(),
-                self.t.lagring.offline)
+    def _hent(self, tving: bool, kendte: dict) -> dict:
+        """Netværksdelen af en opdatering – kan køre i baggrunden (rører ingen widgets).
 
-    def _laes_data(self, stille=False) -> bool:
-        """Henter sagerne. stille=True (minut-tjekket): ingen fejlboks ved mistet
-        forbindelse – kun indikatoren i menuen."""
-        try:
-            for proces, service in ((ON, self.t.onboarding), (OFF, self.t.offboarding)):
-                # Moduler uden adgang hentes ikke (vises heller ikke på dashboardet).
-                self.data[proces] = ((service.hent_aktive(), service.hent_arkiverede())
-                                     if session.har_adgang(MODUL_FOR_PROCES[proces]) else ([], []))
-            self._signatur = self._signatur_nu()
-            return True
-        except SessionUdloebetFejl as fejl:
-            self._session_udloebet(fejl)
-            return False
-        except DataFejl as fejl:
-            log.exception("Data kunne ikke indlæses")
-            self._saet_forbindelse(MISTET)
-            if not stille:
-                QMessageBox.critical(self, "Datafejl", str(fejl))
-            return False
+        Signaturen har en halvdel for aktive og en for arkiverede sager; kun de
+        lister, hvis halvdel er ændret siden sidst, hentes (tving=True: alle). Moduler
+        uden adgang hentes ikke (vises heller ikke på dashboardet). Resultatet lægges
+        ind af _anvend() på UI-tråden.
+        """
+        start = time.monotonic()
+        resultat = {"signaturer": {}, "data": {}, "indstillinger": self.t.indstillinger.hent()}
+        for proces, service in ((ON, self.t.onboarding), (OFF, self.t.offboarding)):
+            if not session.har_adgang(MODUL_FOR_PROCES[proces]):
+                resultat["signaturer"][proces] = None
+                resultat["data"][proces] = ([], [])
+                continue
+            signatur = service.signatur()
+            kendt = None if tving else kendte.get(proces)
+            resultat["signaturer"][proces] = signatur
+            resultat["data"][proces] = (
+                service.hent_aktive() if kendt is None or signatur[0] != kendt[0] else None,
+                service.hent_arkiverede() if kendt is None or signatur[1] != kendt[1] else None,
+            )
+        hentet = [f"{proces} {navn} {len(liste)}" for proces, lister in resultat["data"].items()
+                  for navn, liste in zip(("aktive", "arkiv"), lister) if liste]
+        if hentet:
+            log.info("Data hentet på %.2f s: %s", time.monotonic() - start, ", ".join(hentet))
+        return resultat
+
+    def _anvend(self, resultat: dict) -> None:
+        """Lægger de hentede lister ind (None = uændret) og husker signaturerne."""
+        for proces, (aktive, arkiv) in resultat["data"].items():
+            gamle = self.data[proces]
+            self.data[proces] = (gamle[0] if aktive is None else aktive,
+                                 gamle[1] if arkiv is None else arkiv)
+        self._signatur = dict(resultat["signaturer"])
+        self._indstillinger = resultat["indstillinger"]
+
+    def sag_gemt(self, sag) -> None:
+        """En sag er netop gemt her: læg den ind i listerne og vis – uden at hente alt
+        igen. Signaturen røres ikke, så næste minut-tjek henter den ændrede liste én gang
+        (og et minut-tjek, der var i gang, kasseres – det er ældre end denne ændring)."""
+        self._generation += 1
+        aktive, arkiv = (list(liste) for liste in self.data[sag.PROCES])
+        maal, anden = (arkiv, aktive) if sag.arkiveret else (aktive, arkiv)
+        anden[:] = [s for s in anden if s.id != sag.id]
+        index = next((i for i, s in enumerate(maal) if s.id == sag.id), None)
+        if index is None:
+            maal.append(sag)
+        else:
+            maal[index] = sag
+        self.data[sag.PROCES] = (aktive, arkiv)
+        self.vis_data()
 
     def _saet_forbindelse(self, tilstand):
         """Kun relevant uden for JSON-offline-tilstanden (som har sin egen visning)."""
@@ -381,31 +430,38 @@ class MainWindow(QMainWindow):
             self._sidst_ok = QTime.currentTime().toString("HH:mm")
         self.sidebar.saet_forbindelse(tilstand, getattr(self, "_sidst_ok", ""))
 
-    def _signatur_sikker(self):
-        """Signaturen, eller None hvis forbindelsen er væk (vises i menuen)."""
-        try:
-            return self._signatur_nu()
-        except SessionUdloebetFejl:
-            raise
-        except DataFejl:
-            log.warning("Ingen forbindelse ved minut-tjekket", exc_info=True)
-            return None
-
     def opdater_alle(self, tving=True):
-        """Genindlæser data (altid, eller kun hvis filerne er ændret) og opdaterer siderne."""
-        genindlaes = tving
-        if not tving:
-            signatur = self._signatur_sikker()
-            if signatur is None:
-                self._saet_forbindelse(MISTET)
-                return
-            genindlaes = signatur != self._signatur
-        # Siderne opdateres også uden nye data (frister og alarmer følger datoen).
-        if genindlaes and not self._laes_data(stille=not tving):
+        """Henter data i forgrunden (tving: alle lister; ellers kun de ændrede) og
+        opdaterer siderne. Minut-tjekket bruger i stedet _opdater_i_baggrund()."""
+        self._generation += 1
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            resultat = self._hent(tving, self._signatur)
+        except SessionUdloebetFejl as fejl:
+            QApplication.restoreOverrideCursor()
+            self._session_udloebet(fejl)
             return
-        indstillinger = udfoer(self, self.t.indstillinger.hent)
-        regler = action_center.Regler.fra_indstillinger(
-            {} if indstillinger is FEJL else indstillinger)
+        except DataFejl as fejl:
+            QApplication.restoreOverrideCursor()
+            log.exception("Data kunne ikke indlæses")
+            self._saet_forbindelse(MISTET)
+            QMessageBox.critical(self, "Datafejl", str(fejl))
+            return
+        QApplication.restoreOverrideCursor()
+        self._anvend(resultat)
+        self.vis_data()
+        self._opdater_aktuel_side()
+
+    def _opdater_aktuel_side(self):
+        """Sider med egne data (skabeloner, indstillinger, ønsker) hentes, når de vises."""
+        aktuel = self.stak.currentWidget()
+        if isinstance(aktuel, (SkabelonSide, IndstillingerSide, IndmeldingSide)):
+            aktuel.opdater()
+
+    def vis_data(self):
+        """Opdaterer alle sider ud fra de data, vinduet har – uden netværk. Kaldes også
+        uden nye data, fordi frister og alarmer følger datoen."""
+        regler = action_center.Regler.fra_indstillinger(self._indstillinger)
         i_dag = date.today()
         aktive = self._alle_aktive()
         alarmer = action_center.action_center(aktive, i_dag, regler)
@@ -425,9 +481,6 @@ class MainWindow(QMainWindow):
             self.sider[f"{prefix}_aktive"].vis(aktive_sager)
             self.sider[f"{prefix}_opgaver"].opdater(aktive_sager)
             self.sider[f"{prefix}_arkiv"].vis(arkiv)
-        aktuel = self.stak.currentWidget()
-        if isinstance(aktuel, (SkabelonSide, IndstillingerSide, IndmeldingSide)):
-            aktuel.opdater()
         self.sidebar.saet_lagring(self.t.lagring.offline,
                                   len(self.t.lagring.ventende_aendringer()),
                                   self.t.lagring.kilde)
@@ -438,29 +491,61 @@ class MainWindow(QMainWindow):
     def _minut_tik(self):
         if session.bruger() is None:
             return
-        if not self._kontroller_session():
-            return
         self._daglig_backup()   # programmet kan køre i flere døgn i baggrunden
-        self.opdater_alle(tving=False)
-        self._vis_paamindelser()
+        self._opdater_i_baggrund()
+        if self._opdatering_tjekket is None \
+                or time.monotonic() - self._opdatering_tjekket >= self.VERSIONS_TJEK:
+            self._tjek_opdatering()
 
-    def _kontroller_session(self) -> bool:
-        """False, hvis sessionen er udløbet eller adgangen lukket (brugeren logges ud)."""
-        try:
-            self.t.auth.kontroller_session()
-        except SessionUdloebetFejl as fejl:
+    def _tik(self, kendte: dict, med_paamindelser: bool) -> dict:
+        """Baggrundstråd: sessionstjek, de ændrede lister og påmindelsesskabelonerne.
+        En udløbet session eller lukket adgang kaster SessionUdloebetFejl (log ud)."""
+        self.t.auth.kontroller_session()
+        resultat = self._hent(False, kendte)
+        resultat["paamindelser"] = (self.t.skabeloner.aktive(sk.PAAMINDELSE)
+                                    if med_paamindelser else None)
+        return resultat
+
+    def _opdater_i_baggrund(self):
+        """Minut-tjekket uden at fryse vinduet. Kun ét ad gangen."""
+        if self._tikker:
+            return
+        self._tikker = True
+        generation = self._generation
+        koer_i_baggrund(self._tik, dict(self._signatur), self.notifikationer.slaaet_til,
+                        naar_faerdig=lambda resultat: self._tik_faerdig(resultat, generation),
+                        ved_fejl=self._tik_fejl)
+
+    def _tik_faerdig(self, resultat: dict, generation: int):
+        self._tikker = False
+        if session.bruger() is None or generation != self._generation:
+            return   # logget ud, eller der er gemt/hentet imens – næste tik henter igen
+        self._anvend(resultat)
+        self.vis_data()
+        self._opdater_aktuel_side()
+        if resultat["paamindelser"] is not None:
+            self._vis_paamindelser_fra(resultat["paamindelser"])
+
+    def _tik_fejl(self, fejl: Exception):
+        self._tikker = False
+        if isinstance(fejl, SessionUdloebetFejl):
             self._session_udloebet(fejl)
-            return False
-        except DataFejl:   # fx ingen forbindelse – vises af den almindelige opdatering
-            log.warning("Sessionen kunne ikke kontrolleres", exc_info=True)
-        return True
+        elif isinstance(fejl, DataFejl):     # fx ingen forbindelse – kun indikatoren i menuen
+            log.warning("Minut-tjekket mislykkedes: %s", fejl)
+            self._saet_forbindelse(MISTET)
+        else:
+            log.error("Minut-tjekket fejlede", exc_info=fejl)
 
     def _vis_paamindelser(self):
         """Windows-notifikationer – kun hvis brugeren har dem slået til."""
         if not self.notifikationer.slaaet_til or session.bruger() is None:
             return
         skabeloner = udfoer(self, self.t.skabeloner.aktive, sk.PAAMINDELSE)
-        if skabeloner is FEJL:
+        if skabeloner is not FEJL:
+            self._vis_paamindelser_fra(skabeloner)
+
+    def _vis_paamindelser_fra(self, skabeloner):
+        if not self.notifikationer.slaaet_til or session.bruger() is None:
             return
         self.notifikationer.vis_paamindelser(
             self.t.paamindelser.nye_paamindelser(skabeloner, self._alle_aktive(), date.today())
@@ -571,6 +656,67 @@ class MainWindow(QMainWindow):
         self._saet_forbindelse(FORBINDER)
         self.opdater_alle()
         self._vis_paamindelser()
+        if self.t.opdatering is not None:
+            koer_i_baggrund(self.t.opdatering.rapporter)
+        self._tjek_opdatering()
+
+    ### ----- central opdatering ---------------------------------------------
+
+    def _find_og_hent(self, bruger):
+        """Baggrundstråd: findes der en ny version? En frivillig opdatering hentes
+        med det samme, så den er klar, når brugeren vælger at genstarte."""
+        status = self.t.opdatering.find(bruger)
+        fil = None
+        if status.maal and not status.tvungen and self.t.opdatering.kan_installere:
+            fil = self.t.opdatering.hent(status.maal)
+        return status, fil
+
+    def _tjek_opdatering(self):
+        if self.t.opdatering is None or session.bruger() is None or self._opdatering_tjekker:
+            return
+        self._opdatering_tjekker = True
+        self._opdatering_tjekket = time.monotonic()
+        koer_i_baggrund(self._find_og_hent, dict(session.bruger()),
+                        naar_faerdig=self._opdatering_fundet, ved_fejl=self._opdatering_fejl)
+
+    def _opdatering_fundet(self, resultat):
+        self._opdatering_tjekker = False
+        if session.bruger() is None:
+            return
+        self._opdatering, self._opdatering_fil = resultat
+        maal = self._opdatering.maal
+        self.sidebar.saet_opdatering(maal.version if maal else None)
+        if self._opdatering.tvungen:
+            self.vis_opdatering()
+        elif maal and self._opdatering_fil and self._opdatering_meldt != maal.version:
+            self._opdatering_meldt = maal.version
+            self.notifikationer.vis_besked(f"IN-BASE {maal.version} er klar",
+                                           "Klik på knappen i menuen for at opdatere.")
+
+    def _opdatering_fejl(self, fejl):
+        self._opdatering_tjekker = False
+        if isinstance(fejl, KompatibilitetsFejl):
+            QMessageBox.critical(self, "Databasen skal opdateres", str(fejl))
+            self.afslut()
+        elif isinstance(fejl, SessionUdloebetFejl):
+            self._session_udloebet(fejl)
+        else:   # ingen forbindelse o.l. – der prøves igen ved næste tjek
+            log.warning("Tjek for ny version mislykkedes: %s", fejl)
+
+    def vis_opdatering(self):
+        status = self._opdatering
+        if status is None or self.t.opdatering is None:
+            return
+        dialog = OpdateringDialog(self, self.t.opdatering, status, self._opdatering_fil)
+        if dialog.exec() and dialog.installer_sti:
+            if self.instans is not None:
+                self.instans.frigiv()      # installeren må ikke se IN-BASE som kørende
+            if udfoer(self, self.t.opdatering.installer, dialog.installer_sti) is not FEJL:
+                self.afslut()
+            elif self.instans is not None:
+                self.instans.start()       # installeren kom ikke i gang – kør videre
+        elif status.tvungen:
+            self.afslut()
 
     def anvend_rolle(self):
         admin = session.er_admin()
@@ -594,7 +740,7 @@ class MainWindow(QMainWindow):
     def skift_tema(self, tema):
         anvend_tema(QApplication.instance(), tema)
         self.sidebar.opdater_ikoner()
-        self.opdater_alle()
+        self.vis_data()                 # kun farverne skifter – intet hentes igen
 
     def _saet_notifikationer(self, til):
         self.notifikationer.slaaet_til = til
@@ -617,7 +763,10 @@ class MainWindow(QMainWindow):
 
     def _ryd_sider(self):
         self.data = {ON: ([], []), OFF: ([], [])}
-        self._signatur = None
+        self._signatur = {}
+        self._generation += 1           # et igangværende minut-tjek kasseres
+        self._opdatering,self._opdatering_fil, self._opdatering_tjekket = None, None, None
+        self.sidebar.saet_opdatering(None)
         for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
                 + [self.oensker, self.telefoner, self.telefoner_arkiv]:
             side.ryd()

@@ -5,7 +5,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent  # noqa: E402
+from PySide6.QtCore import QEvent, QThreadPool  # noqa: E402
 from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox  # noqa: E402
 
 from unittest import mock  # noqa: E402
@@ -17,6 +17,7 @@ from app.repositories.fejl import SessionUdloebetFejl  # noqa: E402
 from app.ui import action_liste as al  # noqa: E402
 from app.ui.hovedvindue import ALLE_SIDER, OMRAADER, MainWindow  # noqa: E402
 from app.ui.indmelding_dialog import IndmeldingDialog, NyIndmeldingDialog  # noqa: E402
+from app.ui.medarbejder_dialog import MedarbejderDialog  # noqa: E402
 from app.ui.onboarding_dialog import OnboardingDialog  # noqa: E402
 from app.ui.sag_dialog import SagDialog  # noqa: E402
 from app.ui.theme import FARVER, anvend_tema  # noqa: E402
@@ -216,12 +217,37 @@ class UiTest(TjenesteTest):
                                side_effect=SessionUdloebetFejl("Din session er udløbet.")), \
                 mock.patch("app.ui.hovedvindue.LoginDialog", AnnulleretLogin), \
                 mock.patch.object(self.vindue, "afslut") as afslut:
-            self.vindue._minut_tik()
+            self.vindue._minut_tik()             # minut-tjekket kører i baggrunden
+            QThreadPool.globalInstance().waitForDone()
+            _app.processEvents()                 # resultatet leveres på UI-tråden
             _app.processEvents()                 # log ud sker, når handlingen er færdig
         self.assertIsNone(session.bruger())
         self.assertFalse(self.vindue.timer.isActive())
         self.assertEqual(self.vindue.sider["off_aktive"].tabel.rowCount(), 0, "data er fjernet")
         afslut.assert_called_once()
+
+    def test_baggrundsopgave_leverer_resultat_og_fejl_paa_ui_traaden(self):
+        from app.ui.baggrund import koer_i_baggrund
+        resultater, fejl = [], []
+        koer_i_baggrund(lambda x: x * 2, 21, naar_faerdig=resultater.append)
+        koer_i_baggrund(lambda: 1 / 0, ved_fejl=fejl.append)
+        QThreadPool.globalInstance().waitForDone()
+        _app.processEvents()
+        self.assertEqual(resultater, [42])
+        self.assertIsInstance(fejl[0], ZeroDivisionError)
+
+    def test_gemt_sag_vises_uden_at_hente_alt_igen(self):
+        self.vindue.opdater_alle()
+        opgave = self.off.opgaver[0]
+        with mock.patch.object(self.vindue, "_hent", wraps=self.vindue._hent) as hent:
+            self.vindue.ctrl["offboarding"].action_handling(al.UDFOERT, self.off.id, opgave.id)
+            self.vindue.ctrl["offboarding"].arkiver(self.off.id)
+        hent.assert_not_called()
+        aktive, arkiv = self.vindue.data["offboarding"]
+        self.assertNotIn(self.off.id, [s.id for s in aktive])
+        self.assertEqual([s.id for s in arkiv], [self.off.id])
+        self.assertEqual(arkiv[0].find_opgave(opgave.id).status, "Udført")
+        self.assertEqual(self.vindue.sider["off_arkiv"].tabel.rowCount(), 1)
 
     def test_onboardingdialog_vaelger_den_ene_skabelon_automatisk(self):
         skabeloner = self.t.skabeloner.sagsskabeloner(OB.PROCES)
@@ -244,13 +270,22 @@ class UiTest(TjenesteTest):
 
     def test_hr_formular_laaser_udstyr_efter_stilling_og_valg(self):
         dialog = OnboardingDialog(self.vindue, None, [], ["Nord"], ["tester"])
+        synlig = lambda felt: felt.isVisibleTo(dialog)                       # noqa: E731
+        self.assertFalse(synlig(dialog.mobil_input), "intet udstyr før stillingen")
         dialog.stilling_input.setCurrentText("FM")
+        self.assertFalse(synlig(dialog.mail_input) or synlig(dialog.abonnement_input),
+                         "abonnement og e-mail først ved telefon")
+        self.assertFalse(synlig(dialog.toej_bemaerkning), "bemærkning først ved valgt tøj")
         dialog.bil_input.setChecked(True)
         dialog.mobil_input.setChecked(True)
-        self.assertTrue(dialog.abonnement_input.isEnabled())
+        dialog.mail_input.setChecked(True)
+        self.assertTrue(synlig(dialog.mail_input) and dialog.abonnement_input.isEnabled())
         self.assertEqual(dialog.abonnement_input.count(), 3)
+        dialog.mobil_input.setChecked(False)
+        self.assertFalse(synlig(dialog.mail_input) or dialog.mail_input.isChecked())
         dialog.stilling_input.setCurrentText("Ad Hoc")
         self.assertFalse(dialog.bil_input.isEnabled() or dialog.bil_input.isChecked())
+        dialog.mobil_input.setChecked(True)
         self.assertEqual(dialog.abonnement_input.currentData(), "Kun data")
         polo, stoerrelse, _ = dialog.toej["polo"]
         polo.setChecked(True)
@@ -261,6 +296,25 @@ class UiTest(TjenesteTest):
         data = dialog.hent_data()
         self.assertEqual(data["behov"]["polo"], {"valgt": True, "stoerrelse": "M", "antal": 1})
         self.assertEqual(data["oplaering_planlagt"], "")
+
+    def test_statusprikker_klikkes_og_aflevering_er_under_udvikling(self):
+        sag = self.ny_onboarding(behov={"mobil": True, "abonnement": "Tale og data"})
+        self.vindue.opdater_alle()
+        side = self.vindue.sider["on_aktive"]
+        kolonne = [k.titel for k in side.kolonner].index("Kontrakt")
+        side.vaelg(sag.id)
+        raekke = side.tabel.currentRow()
+        self.assertEqual(side.tabel.item(raekke, kolonne).text(), "Ikke sendt")
+        with mock.patch.object(self.vindue.ctrl["onboarding"], "hurtig_status") as hurtig:
+            side.celle_klik.disconnect()
+            side.celle_klik.connect(hurtig)
+            side.tabel.cellClicked.emit(raekke, kolonne)
+        hurtig.assert_called_once_with(sag.id, "kontrakt")
+
+        medarbejder = self.ny_offboarding(loennr="9123", navn="Aflevering Test")
+        dialog = MedarbejderDialog(self.vindue, medarbejder)
+        self.assertFalse(dialog.tracking_input.isEnabled() or dialog.kommentar_input.isEnabled())
+        self.assertEqual(dialog.hent_data()["kommentar"], medarbejder.kommentar, "data bevares")
 
     def test_opret_kandidat_profil_og_flow_efter_gem(self):
         self.t.indstillinger.opdater(udstyrsprofiler={

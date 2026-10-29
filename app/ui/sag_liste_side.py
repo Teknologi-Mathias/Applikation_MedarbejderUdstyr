@@ -9,7 +9,7 @@ søgning, sortering og for at bevare markeringen. Rækkerne bærer postens id
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -33,6 +33,7 @@ class Kolonne:
     sortering: Optional[Callable] = None          # sag -> sorteringsnøgle
     stil: Optional[Callable] = None               # sag -> {"bg","tekst"} (vises som pille)
     tooltip: Optional[Callable] = None            # sag -> str
+    klik: str = ""                                # handling ved klik (celle_klik-signalet)
 
 
 @dataclass
@@ -43,6 +44,9 @@ class Filtervalg:
 
 
 class SagListeSide(QWidget):
+    # (sag_id, Kolonne.klik): klik på en celle i en kolonne med en klik-handling.
+    celle_klik = Signal(str, str)
+
     def __init__(self, titel, undertitel, kolonner, knapper=(), handlinger=(),
                  filtre=(), sorter_efter=2, parent=None, soegning: Optional[Callable] = None):
         """soegning: sag -> ekstra tekst, der søges i (ud over cellerne)."""
@@ -140,7 +144,14 @@ class SagListeSide(QWidget):
         tabel.setSortingEnabled(True)
         header.setSortIndicator(min(sorter_efter, len(self.kolonner) - 1),
                                 Qt.SortOrder.AscendingOrder)
+        tabel.cellClicked.connect(self._klik)
         return tabel
+
+    def _klik(self, raekke, kolonne):
+        item = self.tabel.item(raekke, kolonne)
+        handling = self.kolonner[kolonne].klik
+        if item is not None and handling:
+            self.celle_klik.emit(item.data(ID_ROLE), handling)
 
     ### ----- visning --------------------------------------------------------
 
@@ -196,8 +207,11 @@ class SagListeSide(QWidget):
         item.setData(ID_ROLE, sag.id)
         if kolonne.stil:
             item.setData(STIL_ROLE, kolonne.stil(sag))
-        if kolonne.tooltip:
-            item.setToolTip(kolonne.tooltip(sag))
+        tooltip = kolonne.tooltip(sag) if kolonne.tooltip else ""
+        if kolonne.klik:
+            tooltip = f"{tooltip}\n\nKlik for at opdatere".strip()
+        if tooltip:
+            item.setToolTip(tooltip)
         return item
 
     def anvend_filter(self):

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from app import session
 from app.domain import adgang
 from app.domain.arbejdsspor import AFDELINGER
+from app.domain.opdatering import PILOT, STABIL
 from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.services.auth_service import ROLLE_ADMIN, ROLLE_BRUGER, ROLLER
 from app.ui.fejl import FEJL, udfoer
@@ -211,6 +212,8 @@ class BrugerSide(QWidget):
         moduler = lav_knap("Moduladgang…", tooltip="Hvilke moduler brugeren må se")
         afdelinger = lav_knap("Afdelinger…", tooltip="Hvilke afdelinger brugeren er medlem af "
                                                      "(styrer arbejdsbakken)")
+        pilot = lav_knap("Pilotkanal til/fra",
+                         tooltip="Pilotbrugere får nye versioner af IN-BASE først")
         self.aktiv_knap = lav_knap("Deaktivér / aktivér",
                                    tooltip="En deaktiveret bruger kan ikke logge på og har "
                                            "ingen adgang til data")
@@ -220,19 +223,20 @@ class BrugerSide(QWidget):
         rolle.clicked.connect(self.skift_rolle)
         moduler.clicked.connect(self.skift_moduler)
         afdelinger.clicked.connect(self.skift_afdelinger)
+        pilot.clicked.connect(self.skift_kanal)
         self.aktiv_knap.clicked.connect(self.skift_aktiv)
         slet.clicked.connect(self.slet)
         knapper.addStretch()
-        for knap in (opret, kode, rolle, moduler, afdelinger, self.aktiv_knap, slet):
+        for knap in (opret, kode, rolle, moduler, afdelinger, pilot, self.aktiv_knap, slet):
             knapper.addWidget(knap)
         layout.addLayout(knapper)
 
         kort = lav_kort(skygge=False)
         kort_layout = QVBoxLayout(kort)
         kort_layout.setContentsMargins(8, 8, 8, 8)
-        self.tabel = QTableWidget(0, 7)
+        self.tabel = QTableWidget(0, 9)
         self.tabel.setHorizontalHeaderLabels(["Brugernavn", "Navn", "Rolle", "Status", "Oprettet",
-                                              "Afdelinger", "Moduler"])
+                                              "Version", "Kanal", "Afdelinger", "Moduler"])
         self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -241,7 +245,7 @@ class BrugerSide(QWidget):
         self.tabel.verticalHeader().setVisible(False)
         self.tabel.verticalHeader().setDefaultSectionSize(42)
         self.tabel.horizontalHeader().setStretchLastSection(True)
-        for kolonne, bredde in enumerate((150, 200, 120, 110, 100, 200)):
+        for kolonne, bredde in enumerate((150, 200, 120, 110, 100, 90, 80, 200)):
             self.tabel.setColumnWidth(kolonne, bredde)
         kort_layout.addWidget(self.tabel)
         layout.addWidget(kort, 1)
@@ -260,12 +264,17 @@ class BrugerSide(QWidget):
                 b.get("rolle", ""),
                 "Aktiv" if b.get("aktiv", True) else "Deaktiveret",
                 vis_dato(b.get("oprettet", "")[:10]),
+                b.get("klient_version") or "–",
+                "Pilot" if b.get("kanal") == PILOT else "Stabil",
                 ", ".join(adgang.afdelinger_for(b)) or "–",
                 _moduler_tekst(b),
             )
             for kolonne, tekst in enumerate(celler):
                 item = QTableWidgetItem(tekst)
                 item.setData(Qt.ItemDataRole.UserRole, b["brugernavn"])
+                if kolonne == 5 and b.get("klient_set"):
+                    item.setToolTip(f"Sidst set {vis_dato(b['klient_set'][:10])} "
+                                    f"{b['klient_set'][11:16]}")
                 self.tabel.setItem(raekke, kolonne, item)
 
     def _valgt(self):
@@ -330,6 +339,19 @@ class BrugerSide(QWidget):
             {a: a for a in AFDELINGER}, adgang.afdelinger_for(self._brugere.get(brugernavn)))
         if dialog.exec() and udfoer(self, self.auth.saet_afdelinger, brugernavn,
                                     dialog.valgte) is not FEJL:
+            self.opdater()
+
+    def skift_kanal(self):
+        brugernavn = self._valgt()
+        if brugernavn is None:
+            return
+        ny = STABIL if self._brugere.get(brugernavn, {}).get("kanal") == PILOT else PILOT
+        tekst = (f"Skal {brugernavn} have nye versioner af IN-BASE først (pilotkanal)?\n\n"
+                 "Pilotbrugere afprøver en version, før den frigives til alle."
+                 if ny == PILOT else f"Skal {brugernavn} tilbage på den stabile kanal?")
+        if QMessageBox.question(self, "Opdateringskanal", tekst) != QMessageBox.StandardButton.Yes:
+            return
+        if udfoer(self, self.auth.saet_opdateringskanal, brugernavn, ny) is not FEJL:
             self.opdater()
 
     def skift_aktiv(self):

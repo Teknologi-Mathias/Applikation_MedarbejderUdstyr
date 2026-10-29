@@ -23,6 +23,7 @@ import secrets
 from app.domain import adgang
 from app.domain.bruger import BRUGERNAVN_REGEL, er_gyldigt_brugernavn, normaliser_brugernavn
 from app.domain.historik import nu
+from app.domain.opdatering import KANALER
 from app.repositories.base import BrugerRepository, KontoRepository
 from app.repositories.fejl import (
     DataFejl,
@@ -244,6 +245,13 @@ class AuthService:
         self._hent(brugere, brugernavn)["roller"] = _afdelinger(afdelinger)
         self.repo.gem_alle(brugere)
 
+    def saet_opdateringskanal(self, brugernavn: str, kanal: str) -> None:
+        if kanal not in KANALER:
+            raise ValideringsFejl("Ukendt opdateringskanal.")
+        brugere = self._alle()
+        self._hent(brugere, brugernavn)["kanal"] = kanal
+        self.repo.gem_alle(brugere)
+
 
 ### ===== Supabase Auth ======================================================
 
@@ -412,6 +420,14 @@ class SupabaseAuthService:
         self.repo.saet_afdelinger(profil["id"], valgte)
         log.info("Bruger %s er nu i afdelingerne: %s", profil["brugernavn"],
                  ", ".join(valgte) or "ingen")
+
+    def saet_opdateringskanal(self, brugernavn: str, kanal: str) -> None:
+        """Pilot eller stabil (migrering 019, kun administratorer)."""
+        if kanal not in KANALER:
+            raise ValideringsFejl("Ukendt opdateringskanal.")
+        profil = self._profil_for(brugernavn)
+        self.repo.saet_opdateringskanal(profil["id"], kanal)
+        log.info("Bruger %s er nu på opdateringskanalen %s", profil["brugernavn"], kanal)
 
     def slet(self, brugernavn: str, aktuel_brugernavn: str) -> None:
         profil = self._profil_for(brugernavn)

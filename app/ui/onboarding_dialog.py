@@ -200,9 +200,11 @@ class OnboardingDialog(QDialog):
             antal = QSpinBox()
             antal.setRange(1, bh.MAKS_ANTAL)
             antal.setSuffix(" stk.")
+            # Størrelse og antal vises først, når tøjet er valgt.
             for felt in (stoerrelse, antal):
-                felt.setEnabled(False)
-                valgt.toggled.connect(felt.setEnabled)
+                felt.setVisible(False)
+                valgt.toggled.connect(felt.setVisible)
+            valgt.toggled.connect(self._opdater_valg)
             valgt.toggled.connect(self._udstyr_aendret)
             antal.valueChanged.connect(self._udstyr_aendret)
             form.addRow("Arbejdstøj" if not self.toej else "", _raekke(valgt, stoerrelse, antal))
@@ -218,7 +220,8 @@ class OnboardingDialog(QDialog):
         self.mobil_input.toggled.connect(self._udstyr_aendret)
         self.abonnement_input.currentIndexChanged.connect(self._udstyr_aendret)
         form.addRow("Telefon", _raekke(self.mobil_input, self.abonnement_input))
-        self.mail_input = QCheckBox("E-mailkonto")
+        # Firma-mailen ligger på telefonen – vises kun, når der er valgt telefon.
+        self.mail_input = QCheckBox("E-mailkonto (på telefonen)")
         self.mail_input.toggled.connect(self._udstyr_aendret)
         form.addRow("E-mail", self.mail_input)
         self.bil_input = QCheckBox("Firmabil")
@@ -435,18 +438,27 @@ class OnboardingDialog(QDialog):
 
     ### ----- betinget visning ------------------------------------------------
 
-    def _opdater_valg(self):
-        """Skjuler og låser udstyr, stillingen ikke kan få, og felter, der ikke er relevante."""
+    def _opdater_valg(self, *_):
+        """Viser kun det, tidligere valg gør relevant: intet udstyr før stillingen,
+        abonnement og e-mail først ved telefon, størrelser og bemærkninger først ved
+        valg – og aldrig udstyr, stillingen ikke kan få."""
         stilling = self.stilling()
+        har_stilling = bool(stilling)
         udvidet = bh.tilladt_udvidet(stilling)
+        mobil = self.mobil_input.isChecked()
+        if not (udvidet and mobil):
+            self.mail_input.setChecked(False)
+        if not udvidet:
+            self.bil_input.setChecked(False)
         for felt in (self.mail_input, self.bil_input):
-            if not udvidet:
-                felt.setChecked(False)
             felt.setEnabled(udvidet)
-        for felt in (self.mail_input, self.bil_input):
-            # Vis kun e-mail og firmabil for stillinger, der kan få dem.
-            self.udstyr_form.setRowVisible(felt.parentWidget() if felt is self.bil_input
-                                           else felt, udvidet or not stilling)
+        form = self.udstyr_form
+        for raekke in range(form.rowCount()):
+            form.setRowVisible(raekke, har_stilling)
+        toej_valgt = any(v.isChecked() for v, _s, _a in self.toej.values())
+        form.setRowVisible(self.toej_bemaerkning, har_stilling and toej_valgt)
+        form.setRowVisible(self.mail_input, har_stilling and udvidet and mobil)
+        form.setRowVisible(self.bil_input.parentWidget(), har_stilling and udvidet)
         tilladte = bh.tilladte_abonnementer(stilling)
         valgt = self.abonnement_input.currentData()
         self.abonnement_input.blockSignals(True)
@@ -459,8 +471,9 @@ class OnboardingDialog(QDialog):
         self.abonnement_input.setCurrentIndex(index if index >= 0 else
                                               (1 if len(tilladte) == 1 else 0))
         self.abonnement_input.blockSignals(False)
-        self.abonnement_input.setEnabled(bool(stilling) and self.mobil_input.isChecked())
-        self.bil_bemaerkning.setEnabled(self.bil_input.isChecked())
+        self.abonnement_input.setEnabled(har_stilling and mobil)
+        self.abonnement_input.setVisible(mobil)
+        self.bil_bemaerkning.setVisible(self.bil_input.isChecked())
 
     ### ----- status (kun redigering) -----------------------------------------
 
@@ -579,6 +592,8 @@ class OnboardingDialog(QDialog):
             email=self.mail_input.isChecked(),
             firmabil=self.bil_input.isChecked(),
             firmabil_bemaerkning=self.bil_bemaerkning.text().strip(),
+            # Det sendte registreres fra tabellen – formularen bevarer det.
+            sendt=list(self.forloeb.behov.sendt) if not self.ny else [],
         )
 
     def _kraev_stoerrelse(self) -> bool:

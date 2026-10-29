@@ -39,6 +39,7 @@ GEMTE_FELTER = INFOFELTER + RAPPORTFELTER + ("status", "klargjort", "nulstilling
 CHROME = "chrome"          # supportkoden: vis/skjul Chrome
 MAIL_TIL = "mail:til"
 MAIL_FRA = "mail:fra"
+SKAERMLAAS = "skaermlaas"  # godkend et skift af skærmlåsen (ellers registreres det)
 
 
 @dataclass
@@ -75,7 +76,8 @@ class MdmEnhed:
 
 
 def aendringskode(nulstillingskode: str, handling: str) -> str:
-    """6-cifret kode til én handling (CHROME, MAIL_TIL, MAIL_FRA) i administrator-menuen.
+    """6-cifret kode til én handling (CHROME, MAIL_TIL, MAIL_FRA, SKAERMLAAS) i
+    administrator-menuen.
 
     Udledes af nulstillingskoden – samme beregning som AdminActivity.aendringskode på
     telefonen – så den ikke skal gemmes, og nulstillingskoden ikke kan regnes baglæns."""

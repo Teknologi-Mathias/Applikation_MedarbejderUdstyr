@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 
 # Netværkstimeout for PostgREST/Edge Functions (sekunder).
 TIMEOUT = 20
+# Storage (upload af installeren, tools/udgiv_version.py) må tage længere tid.
+TIMEOUT_FIL = 300
 
 _laas = threading.Lock()
 _klient = None
@@ -47,6 +49,7 @@ def opret_klient(konfig: DatabaseKonfiguration | None = None):
                     persist_session=False,
                     postgrest_client_timeout=TIMEOUT,
                     function_client_timeout=TIMEOUT,
+                    storage_client_timeout=TIMEOUT_FIL,
                 ),
             )
         except Exception as fejl:   # ugyldig URL/nøgle eller manglende pakke

@@ -20,16 +20,19 @@ import time
 import unittest
 import uuid
 
-from app import session
+from app import KRAEVET_SKEMA, session
 from app.domain import historik
+from app.domain import opdatering as op
 from app.domain import skabelon as sk
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
+from app.domain.opdatering import Udgivelse
 from app.domain.opgave import Opgave
 from app.repositories.fejl import DataFejl, KonfliktFejl, SessionUdloebetFejl, ValideringsFejl
 from app.repositories.supabase import mapping
 from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRepository
 from app.repositories.supabase.konto_repository import SupabaseKontoRepository
+from app.repositories.supabase.opdatering_repository import SupabaseOpdateringRepository
 from app.repositories.supabase.opsaetning_repository import (
     SupabaseIndstillingRepository,
     SupabasePraeferenceRepository,
@@ -97,8 +100,9 @@ class Bruger:
 
 
 def s_skabelon(bruger):
+    """Standardskabelonen med arbejdsspor (migrering 018)."""
     return next(s for s in bruger.skabeloner.sagsskabeloner("onboarding", "DM")
-                if "arbejdsspor" in s["navn"])
+                if s["navn"] == "Onboarding")
 
 
 @unittest.skipUnless(URL, "Lokal testdatabase kører ikke (se tools/lokal_testdatabase.py)")
@@ -165,8 +169,9 @@ class SupabaseLokalTest(unittest.TestCase):
         sag = s.opret(sag, self.anne.skabeloner.sagsskabeloner("onboarding", "FM")[0])
         hentet = self.bo.onboarding.hent(sag.id)
         self.assertEqual((hentet.stilling, hentet.omraade, hentet.loennr), ("FM", "Område Nord", ""))
-        self.assertEqual(hentet.status, OnboardingForloeb.STATUS_KANDIDAT)
-        self.assertEqual(hentet.skabelon["navn"], "Onboarding – arbejdsspor FM/DM")
+        # Standardskabelonen (migrering 018): HR's felter er udfyldt – kontrakten er første skridt.
+        self.assertEqual(hentet.status, OnboardingForloeb.STATUS_KONTRAKT)
+        self.assertEqual(hentet.skabelon["navn"], "Onboarding")
 
     def test_samtidige_uafhaengige_aendringer_flettes(self):
         sag = self.ny_offboarding(self.anne)
@@ -257,8 +262,9 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertEqual(hentet.behov.til_dict(), sag.behov.til_dict())
         efter = {o.noegle: o for o in hentet.opgaver}
         self.assertEqual(efter["oplaering_booket"].planlagt, "2026-12-01T08:00:00")
-        self.assertEqual((efter["telefon"].afhaenger_af, efter["telefon"].afdeling),
+        self.assertEqual((efter["udstyr"].afhaenger_af, efter["udstyr"].afdeling),
                          (["kontrakt"], "Administration"))
+        self.assertNotEqual(efter["udstyr"].status, "Undtaget", "polo og mobil er valgt")
         self.assertEqual(efter["firmabil"].status, "Undtaget")
 
     def test_bruger_ser_kun_egen_profil_men_navneliste(self):
@@ -270,6 +276,10 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertGreaterEqual(len(self.admin.konto.alle_profiler()), 3)
 
     def test_alle_aendrer_opsaetning_men_kun_administrator_data(self):
+        # Ny, tom database: en administrator gemmer indstillingerne første gang
+        # (kendt begrænsning, docs/ARKITEKTUR.md) – derefter kan alle gemme Organisation.
+        self.admin.aktiv()
+        self.admin.indstillinger.opdater()
         self.anne.aktiv()
         self.anne.indstillinger.opdater(stillestaaende_dage=14)
         self.anne.skabeloner.gem(sk.MAIL, sk.ny_skabelon(sk.MAIL))
@@ -484,6 +494,60 @@ class SupabaseLokalTest(unittest.TestCase):
             SupabaseIndmeldingRepository(klient(None)).hent_alle()
         self.admin.indmeldinger.repo.slet(ind.id)
         self.assertIsNone(self.bo.indmeldinger.hent(ind.id))
+
+    # ----- central opdatering og skemaversion (migrering 019) ---------------
+
+    def test_krav_kan_laeses_foer_log_paa(self):
+        krav = SupabaseOpdateringRepository(klient(jwt("anon"))).krav()
+        self.assertGreaterEqual(krav["schema_version"], KRAEVET_SKEMA)
+        self.assertEqual(krav["min_client_version"], "0.0.0")
+
+    def test_signatur_skelner_aktive_og_arkiv(self):
+        repo = self.anne.offboarding.repo
+        foer = repo.signatur()
+        sag = self.ny_offboarding(self.anne)
+        efter_opret = repo.signatur()
+        self.assertNotEqual(efter_opret[0], foer[0])
+        self.assertEqual(efter_opret[1], foer[1], "arkivet er uændret")
+        self.anne.offboarding.arkiver(sag)
+        self.assertNotEqual(repo.signatur()[1], efter_opret[1])
+
+    def test_udgivelser_pilotkanal_og_kun_administratorer_udgiver(self):
+        n = uuid.uuid4().int % 10**6
+        stabil = Udgivelse(f"9.{n}.0", op.STABIL, f"stabil-{n}.exe", "a" * 64, 10)
+        pilot = Udgivelse(f"9.{n}.1", op.PILOT, f"pilot-{n}.exe", "b" * 64, 10)
+        admin = SupabaseOpdateringRepository(self.admin.klient)
+        anne = SupabaseOpdateringRepository(self.anne.klient)
+        admin.opret(stabil)
+        admin.opret(pilot)
+        try:
+            synlige = {u.version for u in anne.udgivelser()}
+            self.assertIn(stabil.version, synlige)
+            self.assertNotIn(pilot.version, synlige, "pilot kun med pilotkanal")
+            with self.assertRaises(DataFejl):
+                anne.opret(Udgivelse(f"9.{n}.2", op.STABIL, "x.exe", "c" * 64, 10))
+            with self.assertRaises(DataFejl):
+                anne.opdater(stabil.version, trukket_tilbage=True)
+            with self.assertRaises(DataFejl):
+                self.anne.konto.saet_opdateringskanal(self.anne.id, op.PILOT)
+            self.admin.konto.saet_opdateringskanal(self.anne.id, op.PILOT)
+            self.assertIn(pilot.version, {u.version for u in anne.udgivelser()})
+            admin.opdater(pilot.version, trukket_tilbage=True)
+            self.assertTrue(next(u for u in anne.udgivelser()
+                                 if u.version == pilot.version).trukket_tilbage)
+        finally:
+            self.admin.konto.saet_opdateringskanal(self.anne.id, op.STABIL)
+            for u in (stabil, pilot):
+                admin.slet(u.version)
+
+    def test_klientversion_meldes_paa_egen_profil(self):
+        repo = SupabaseOpdateringRepository(self.bo.klient)
+        repo.rapporter("0.10.0")
+        profil = self.bo.konto.profil(self.bo.id)
+        self.assertEqual((profil["klient_version"], profil["kanal"]), ("0.10.0", op.STABIL))
+        self.assertTrue(profil["klient_set"])
+        with self.assertRaises(ValideringsFejl):
+            repo.rapporter("ikke-en-version")
 
 
 if __name__ == "__main__":

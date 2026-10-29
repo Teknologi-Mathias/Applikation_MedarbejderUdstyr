@@ -67,6 +67,18 @@ class InstallerTest(unittest.TestCase):
         self.assertIn('Source: "{#SourceDir}\\*"', ISS)
         self.assertIn("recursesubdirs", ISS)
 
+    def test_central_opdatering_genstarter_og_ser_koerende_app(self):
+        from app.infrastructure import opdatering
+        from app.ui.enkelt_instans import MUTEX
+        self.assertIn(f"AppMutex={MUTEX}", ISS)
+        genstart = [linje for linje in ISS.splitlines() if "Check: ErOpdatering" in linje]
+        self.assertEqual(len(genstart), 1)
+        self.assertNotIn("skipifsilent", genstart[0], "skal også køre ved /VERYSILENT")
+        self.assertIn("{param:OPDATERING|0}", ISS)
+        kilde = Path(opdatering.__file__).read_text(encoding="utf-8")
+        for parameter in ("/VERYSILENT", "/CLOSEAPPLICATIONS", "/OPDATERING=1"):
+            self.assertIn(parameter, kilde)
+
 
 class BuildTest(unittest.TestCase):
     def test_spec_pakker_kun_assets_og_ingen_hemmeligheder(self):
@@ -80,6 +92,19 @@ class BuildTest(unittest.TestCase):
     def test_script_sletter_ikke_release_og_publicerer_ikke(self):
         self.assertNotRegex(SCRIPT, r"Remove-Item[^\n]*ReleaseMappe")
         self.assertNotRegex(SCRIPT, r"(?i)\bgit\s+(commit|push|tag)|gh\s+release")
+        # Udgivelse kun bevidst (-Udgiv) og kun til pilotkanalen via udgiv_version.py.
+        self.assertIn("if ($Udgiv)", SCRIPT)
+        self.assertIn("udgiv_version.py') udgiv $Installer", SCRIPT)
+
+    def test_script_kraever_ren_arbejdskopi_og_hele_testpakken(self):
+        self.assertIn("git -C $Rod status --porcelain", SCRIPT)
+        self.assertIn("-m unittest discover -s tests -t .", SCRIPT)
+        self.assertIn("$MaksInstaller = 50MB", SCRIPT)
+
+    def test_spec_udelader_ubrugte_qt_dele(self):
+        for del_ in ("qtvirtualkeyboard", "qt6quick", "qt6qml", "qpdf", "opengl32sw"):
+            self.assertIn(f"'{del_}'", SPEC)
+        self.assertIn("/pyside6/translations/", SPEC)
 
     def test_frossen_app_skriver_i_brugeromraader(self):
         self.assertTrue(str(stier.KONFIG_FIL).endswith(str(Path("IN-BASE") / ".env")))

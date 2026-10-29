@@ -176,6 +176,26 @@ class _MdmListeSide(SagListeSide):
             "2. Indtast supportkoden og vælg \"Vis Chrome\".\n"
             "3. Når fejlen er løst: samme sted, vælg \"Skjul Chrome\".")
 
+    def vis_skaermlaaskode(self, enhed) -> None:
+        kode = md.aendringskode(enhed.nulstillingskode or self.service.reservekode(),
+                                md.SKAERMLAAS)
+        if not kode:
+            QMessageBox.information(self, "Skærmlås",
+                                    f"{enhed.navn} har ingen nulstillingskode – klargør den igen.")
+            return
+        QMessageBox.information(
+            self, "Skærmlås",
+            f"{enhed.navn}: skærmlåskode {kode}\n\n"
+            "Telefonen kræver altid en skærmlås, men Android kan ikke forhindre, at "
+            "medarbejderen ændrer mønsteret. Ændringer uden kode registreres og vises øverst "
+            "i telefonens administrator-menu.\n\n"
+            "Sæt standardmønsteret igen (godkendt):\n"
+            "1. Åbn \"IN-BASE indstillinger\" (eller tast *#*#46227#*#*).\n"
+            "2. Indtast koden og vælg \"Skift skærmlås (godkendt)\".\n"
+            "3. Tegn standardmønsteret – advarslen nulstilles.\n\n"
+            "Er låsen glemt, og telefonen er låst: fabriksnulstil og klargør den igen. "
+            "Kræver IN-BASE Klargøring 6.0 eller nyere på telefonen.")
+
 
 class MdmSide(_MdmListeSide):
     def __init__(self, service, parent=None):
@@ -201,6 +221,7 @@ class MdmSide(_MdmListeSide):
         self._tilfoej_menu((("Ret oplysninger…", self.rediger),
                             ("Vis nulstillingskode…", self.vis_kode),
                             ("Vis supportkode (Chrome)…", self.vis_supportkode),
+                            ("Vis skærmlåskode…", self.vis_skaermlaaskode),
                             (None, None),
                             ("Slå firma-mail til…", lambda e: self.skift_mail(e, True)),
                             ("Slå firma-mail fra…", lambda e: self.skift_mail(e, False)),

@@ -57,6 +57,10 @@ Regler:
 | Online-krav / offline (kun JSON) | `app/services/lagring_service.py` |
 | Slettepolitik (backup kun JSON) | `app/services/backup_service.py` |
 | Tema | `app/ui/theme.py` |
+| Central opdatering, skemavagt | `app/domain/opdatering.py`, `app/services/opdatering_service.py`, `app/infrastructure/opdatering.py`, `tools/udgiv_version.py` |
+| Baggrundskald (UI fryser ikke) | `app/ui/baggrund.py` |
+| Én instans pr. bruger | `app/ui/enkelt_instans.py` |
+| Backup + gendannelsestest | `scripts/backup_supabase.ps1` |
 | Database | `app/infrastructure/database/`, `app/repositories/supabase/` |
 | Opsætning og drift | `docs/SUPABASE_OPSAETNING.md` |
 
@@ -256,8 +260,37 @@ uden server. Drift: [MDM_OPSAETNING.md](MDM_OPSAETNING.md).
   Versionen tjekkes i databasen; afviger den → `KonfliktFejl`.
 * Repositoryet husker rækkerne fra sidste hentning og sender kun forskellen.
   Skrivninger gentages aldrig automatisk (ingen dubletter ved netværksfejl).
-* Hovedvinduet tjekker hvert minut en let signatur (antal + seneste
-  `updated_at` pr. proces) og genindlæser kun ved ændringer.
+* Hovedvinduet tjekker hvert minut – **i baggrunden** (`app/ui/baggrund.py`) – en let
+  signatur pr. proces med en halvdel for aktive og en for arkiverede sager (RPC
+  `inbase_case_signature`, migrering 019) og henter kun den halvdel, der er ændret.
+  Arkivet hentes derfor næsten aldrig igen. Sessionstjek og påmindelsesskabeloner
+  hentes i samme baggrundskald; vinduet fryser ikke ved langsomt netværk.
+* Efter en handling lægges den gemte sag direkte ind i visningen
+  (`MainWindow.sag_gemt`, via `ModulController._udfoer`) – intet hentes igen. Et
+  minut-tjek, der var i gang, kasseres (det er ældre end ændringen); næste tjek henter
+  den ændrede liste én gang. Konflikt eller sletning genindlæser som før.
+  Forgrundskald viser ventecursor (`ui/fejl.udfoer`).
+
+## Central opdatering og skemavagt
+
+* **Skemavagt:** `schema_migrations` (migrering 019) og `KRAEVET_SKEMA` i
+  `app/__init__.py`. `bootstrap.klargoer` kalder `inbase_client_requirements()` før log
+  på; er databasen ældre, stopper programmet (`KompatibilitetsFejl`) – ellers ville
+  `inbase_columns` (003) lydløst droppe nye felter. `min_client_version` tvinger
+  gamle klienter til at opdatere, før de skriver.
+* **Udgivelse:** `tools/udgiv_version.py` (administrator-login) uploader installeren til
+  den private Storage-bucket `releases` og registrerer den i `app_releases` som
+  *pilot*; `frigiv` gør den *stabil* (evt. gradvis, `rollout_percent`), `tilbagetraek`
+  stopper den. Regler for valg, udrulning, rollback og tvang: `app/domain/opdatering.py`.
+* **Klient:** tjek ved log på og hver 4. time i baggrunden; en frivillig opdatering
+  hentes med det samme (SHA-256 kontrolleres, `.part` + rename) og vises som knap i
+  menuen; tvungen opdatering vises som blokerende dialog. "Opdater og genstart" frigiver
+  instanslåsen, starter Inno-installeren stille (`/OPDATERING=1`) og lukker. Installeren
+  har `AppMutex=IN-BASE-Instans` og starter programmet igen.
+* **Pilotkanal** pr. bruger (`user_profiles.update_channel`, sættes af administratorer);
+  klientens version meldes efter log på (`inbase_report_client`) og vises under
+  Indstillinger → Brugere.
+* Kun Supabase-tilstand; i JSON-tilstand er `Tjenester.opdatering` `None`.
 * RLS: alle medlemmer (brugere med aktiv profil) deler sager og ændrer
   skabeloner (i deres moduler), påmindelser og Organisation (migrering 011);
   brugere, backup/slettepolitik og permanent sletning kun for administratorer;
@@ -281,6 +314,9 @@ uden server. Drift: [MDM_OPSAETNING.md](MDM_OPSAETNING.md).
   administrator har gemt indstillingerne én gang (repositoriet sender også
   standardværdier for backup-nøgler, som kun administratorer må skrive).
 * Ingen offline i Supabase-tilstand: uden forbindelse vises en fejl.
+* Den centrale opdatering bruger SHA-256 fra `app_releases` (kun administratorer kan
+  skrive) – installeren er ikke kodesigneret endnu. En administratorkonto kan derfor
+  udgive til alle; beskyt administratorkonti godt.
 * Domænet bruger lokal tid uden tidszone; den konverteres til/fra timestamptz
   i `mapping.py` (forudsætter samme tidszone på pc'erne).
 * JSON-tilstandens login er BETA (brugerfil uden beskyttelse) – kun til

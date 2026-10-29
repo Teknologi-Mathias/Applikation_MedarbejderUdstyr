@@ -15,7 +15,6 @@ ryd:  sletter android/signering/ igen, så nøglen ikke bliver liggende på pc'e
 """
 import argparse
 import base64
-import getpass
 import secrets
 import shutil
 import subprocess
@@ -23,8 +22,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+import admin_login                       # tools/admin_login.py (samme mappe)
+from admin_login import Stop
+
 ROD = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROD))
 
 ANDROID = ROD / "android"
 SIGNERING = ANDROID / "signering"
@@ -34,26 +35,8 @@ ALIAS = "inbase"
 TABEL = "mdm_signing_key"
 
 
-class Stop(Exception):
-    """Fejl, der vises for brugeren uden traceback."""
-
-
 def log_ind():
-    from app.infrastructure.database.connection import opret_klient
-    from app.repositories.fejl import ForkertLoginFejl
-    from app.repositories.supabase.konto_repository import SupabaseKontoRepository
-
-    klient = opret_klient()
-    print("Log på med din IN-BASE-administratorkonto.")
-    brugernavn = input("Brugernavn: ").strip()
-    kode = getpass.getpass("Adgangskode: ")
-    try:
-        SupabaseKontoRepository(klient).log_ind(brugernavn, kode)
-    except ForkertLoginFejl as fejl:
-        raise Stop("Forkert brugernavn eller adgangskode.") from fejl
-    if not klient.rpc("inbase_is_admin").execute().data:
-        raise Stop("Kun administratorer kan bygge styrings-appen.")
-    return klient
+    return admin_login.log_ind("bygge styrings-appen")
 
 
 def ny_noegle(keytool: str) -> dict:

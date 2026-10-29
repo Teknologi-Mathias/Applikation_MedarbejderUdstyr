@@ -14,6 +14,7 @@ Supabase er IN-BASE's fælles datakilde. Opsætning og drift:
 | `migrations/006` | Ønsker & Udvikling: indmeldinger, kommentarer, historik, RLS og RPC'er. |
 | `migrations/014` | Arbejdsspor på opgaver, HR's behov på sager, afdelinger (roller) på brugere. |
 | `migrations/015` | Standarder (genereres af `tools/generer_standard_seed.py`; 004 ændres ikke længere). |
+| `migrations/019` | Skemaversion (`schema_migrations`), krav til klienten, delt signatur, central opdatering (`app_releases` + Storage `releases`), opdateringskanal pr. bruger. |
 | `reset/nulstil_forretningsdata.sql` | Engangs-tømning af forretningsdata (kræver bekræftelse). |
 | `../../repositories/supabase/` | ALLE kald til tabeller, RPC, Auth og Edge Functions. |
 | `../../repositories/supabase/mapping.py` | Den ENESTE oversættelse domæne ↔ kolonner (feltkort). |
@@ -56,7 +57,11 @@ user_profiles ──< development_requests ──< development_request_comments
 
 ## Nyt felt – uden at duplikere databasekode
 
-1. Ny migrering `00N_<navn>.sql`: `alter table public.<tabel> add column ...;`
+1. Ny migrering `0NN_<navn>.sql`: `alter table public.<tabel> add column ...;` – og til
+   sidst `insert into public.schema_migrations (version, name) values (NN, '0NN_<navn>')
+   on conflict do nothing;`. Hæv `KRAEVET_SKEMA` i `app/__init__.py` til NN, så en
+   klient aldrig kører mod en database, hvor kolonnen mangler (den ville ellers blive
+   droppet lydløst af `inbase_columns`).
 2. Én linje i det relevante feltkort i `repositories/supabase/mapping.py`,
    fx `("telefon", "phone", TEKST)` i `PERSON_FELTER`.
 3. Feltet i domænets `til_dict()`/`fra_dict()` (som for JSON).

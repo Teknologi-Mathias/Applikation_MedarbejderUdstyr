@@ -17,6 +17,10 @@ class SessionUdloebetFejl(DataFejl):
     """Sessionen er udløbet, eller brugerens adgang er lukket – brugeren skal logge på igen."""
 
 
+class KompatibilitetsFejl(DataFejl):
+    """Klienten og databasens skema passer ikke sammen (migrering mangler)."""
+
+
 class ValideringsFejl(ValueError):
     """Input overholder ikke forretningsreglerne (vises direkte for brugeren)."""
 

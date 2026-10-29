@@ -16,12 +16,14 @@ tidslinjens hash-kæde forbliver intakt (forudsætter samme tidszone på
 pc'erne – Danmark).
 """
 import uuid
+from dataclasses import asdict
 from datetime import datetime
 
 from app.domain import indmelding as im
 from app.domain import skabelon as sk
 from app.domain.indmelding import Aendring, Indmelding, Kommentar
 from app.domain.mdm_enhed import MdmEnhed
+from app.domain.opdatering import Udgivelse
 from app.domain.opgave import laes_iso_dato
 from app.repositories.fejl import ValideringsFejl
 
@@ -423,6 +425,10 @@ def bruger_fra_profil(profil: dict) -> dict:
                     if profil.get("module_access") is not None else None),
         # Afdelinger brugeren er medlem af (migrering 014).
         "roller": list(profil.get("roles") or []),
+        # Central opdatering (migrering 019): kanal og senest kørte klientversion.
+        "kanal": profil.get("update_channel") or "stabil",
+        "klient_version": profil.get("client_version") or "",
+        "klient_set": fra_tidspunkt(profil.get("client_seen_at")),
     }
 
 
@@ -542,3 +548,32 @@ def mdm_til_rpc(felter: dict) -> dict:
     """{"navn": "ISM589", "klargjort": "2026-..."} -> {"name": "ISM589", "provisioned_at": "...+01:00"}.
     Tomme tidspunkter sendes som null."""
     return {_MDM_KOLONNE[k][0]: _MDM_KOLONNE[k][1][0](v) for k, v in felter.items()}
+
+
+# ---------------------------------------------------------------------------
+# Udgivne versioner (app_releases, migrering 019)
+# ---------------------------------------------------------------------------
+
+UDGIVELSE_FELTER = (
+    ("version", "version", TEKST),
+    ("kanal", "channel", TEKST),
+    ("sti", "storage_path", TEKST),
+    ("sha256", "sha256", TEKST),
+    ("stoerrelse", "size_bytes", HELTAL),
+    ("min_skema", "min_schema", HELTAL),
+    ("tvungen", "mandatory", BOOL),
+    ("noter", "notes", TEKST),
+    ("udrulning", "rollout_percent", HELTAL),
+    ("trukket_tilbage", "withdrawn", BOOL),
+    ("commit", "commit_hash", TEKST),
+)
+
+
+def udgivelse_fra_raekke(raekke: dict) -> Udgivelse:
+    return Udgivelse(**_fra_raekke(raekke, UDGIVELSE_FELTER),
+                     oprettet=fra_tidspunkt(raekke.get("created_at")),
+                     oprettet_af=raekke.get("created_by") or "")
+
+
+def udgivelse_til_raekke(udgivelse: Udgivelse) -> dict:
+    return _til_raekke(asdict(udgivelse), UDGIVELSE_FELTER)

@@ -4,8 +4,10 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.admin.DevicePolicyManager;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.InputType;
 import android.widget.Button;
 import android.widget.EditText;
@@ -29,6 +31,8 @@ import javax.crypto.spec.PBEKeySpec;
  *                     Telefoner uden egen kode (klargjort med v1) bruger reservekoden
  *                     (assets/mdm/reservekode.txt).
  *   supportkode       må gives til brugeren: kan kun vise og skjule Chrome (uden Google-konto).
+ *   skærmlåskode      (v6+) godkender én ændring af skærmlåsen (ændringskode "skaermlaas").
+ *                     Ændringer uden kode registreres og vises øverst i menuen.
  *   ændringskode      én kode pr. telefon og handling, fx "slå firma-mail til". Telefonen
  *                     kan se på koden, hvilken handling den gælder.
  *   masterkode        (v5+) gælder som nulstillingskode på alle telefoner – også når telefonens
@@ -41,6 +45,7 @@ public class AdminActivity extends Activity {
     static final String KODE = "nulstillingskode";
     static final String MAIL_TIL = "mail:til";
     static final String MAIL_FRA = "mail:fra";
+    static final String SKAERMLAAS = "skaermlaas";
     private static final String GAMMEL = "Telefonen er klargjort med en ældre version af IN-BASE "
             + "Klargøring og kan ikke ændres herfra. Fabriksnulstil og klargør den igen fra IN-BASE.";
     private int forsoeg = 0;
@@ -60,6 +65,7 @@ public class AdminActivity extends Activity {
         tekst.setText("Indtast koden fra IN-BASE og vælg handlingen.\n"
                 + "Ændringskode: fx slå firma-mail til eller fra.\n"
                 + "Supportkode: vis eller skjul Chrome.\n"
+                + "Skærmlåskode: skift skærmlåsen godkendt (nulstiller advarslen).\n"
                 + "Nulstillingskode: alt – også opdatering og fabriksnulstilling.");
         EditText kode = new EditText(this);
         kode.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
@@ -76,6 +82,7 @@ public class AdminActivity extends Activity {
         knap(rod, "Brug ændringskode", () -> aendring(kode.getText().toString().trim()));
         knap(rod, "Vis Chrome", () -> chrome(kode.getText().toString().trim(), true));
         knap(rod, "Skjul Chrome", () -> chrome(kode.getText().toString().trim(), false));
+        knap(rod, "Skift skærmlås (godkendt)", () -> skaermlaas(kode.getText().toString().trim()));
         knap(rod, "Anvend regler igen", this::anvendIgen);
         rod.addView(server);
         knap(rod, "Opdater appen fra IN-BASE", () -> opdater(kode.getText().toString().trim(),
@@ -85,7 +92,11 @@ public class AdminActivity extends Activity {
         ScrollView rul = new ScrollView(this);
         rul.addView(rod);
         setContentView(rul);
-        if (politik == null) tekst.setText(GAMMEL);
+        if (politik == null) {
+            tekst.setText(GAMMEL);
+        } else if (!politik.skaermlaasAendringer().isEmpty()) {
+            tekst.setText(politik.skaermlaasAendringer() + "\n\n" + tekst.getText());
+        }
     }
 
     private void knap(LinearLayout rod, String titel, Runnable handling) {
@@ -180,6 +191,27 @@ public class AdminActivity extends Activity {
             return;
         }
         aendr("chrome", vis, vis ? "Chrome er nu synlig på startskærmen." : "Chrome er skjult igen.");
+    }
+
+    /**
+     * Android kan ikke spærre for ændring af skærmlåsen, men en ændring uden kode registreres
+     * (AdminReceiver). Skærmlåskoden (eller nulstillings-/masterkoden) godkender den næste
+     * ændring – fx når standardmønsteret sættes igen – og nulstiller registreringen.
+     */
+    private void skaermlaas(String indtastet) {
+        String rigtig = nulstillingskode();
+        if (indtastet.isEmpty() || !(indtastet.equals(aendringskode(rigtig, SKAERMLAAS))
+                || erNulstillingskode(indtastet))) {
+            forkert();
+            return;
+        }
+        aendr(Politik.SKAERMLAAS_AABEN, true, "Skift skærmlåsen nu, og tegn standardmønsteret. "
+                + "Ændringen registreres som godkendt.");
+        try {
+            startActivity(new Intent(DevicePolicyManager.ACTION_SET_NEW_PASSWORD));
+        } catch (Exception ex) {
+            startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS));
+        }
     }
 
     private void anvendIgen() {

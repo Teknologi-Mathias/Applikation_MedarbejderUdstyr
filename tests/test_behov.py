@@ -1,6 +1,7 @@
 """HR's behovsregistrering: validering, betingede opgaver og oplæringsvagt."""
 import unittest
 
+from app.domain import statusprik as prik
 from app.domain.behov import Behov, Toej
 from app.domain.onboarding import OnboardingForloeb as OB
 from app.domain.opgave import Opgave
@@ -32,8 +33,10 @@ class BehovValideringTest(unittest.TestCase):
         self.assertTrue(Behov(mobil=True, abonnement="Tale og data").valider("Ad Hoc"))
         self.assertTrue(Behov(mobil=True).valider("FM"))
         self.assertEqual(Behov(mobil=False, abonnement="Kun data").til_dict()["abonnement"], "")
-        self.assertEqual(Behov(email=True, firmabil=True).valider("DM"), [])
-        self.assertEqual(len(Behov(email=True, firmabil=True).valider("Ad Hoc")), 2)
+        med_telefon = {"mobil": True, "abonnement": "Kun data"}
+        self.assertEqual(Behov(email=True, firmabil=True, **med_telefon).valider("DM"), [])
+        self.assertEqual(len(Behov(email=True, firmabil=True, **med_telefon).valider("Ad Hoc")), 2)
+        self.assertEqual(Behov(email=True).valider("DM"), ["E-mailkonto kræver mobiltelefon."])
 
 
 class BetingedeOpgaverTest(TjenesteTest):
@@ -128,6 +131,31 @@ class KandidatoprettelseTest(TjenesteTest):
         sag = self.kandidat(behov=profiler["FM"].til_dict())
         self.assertEqual({opgave_med_noegle(sag, n).status for n in ("udstyr", "firmabil")},
                          {Opgave.IKKE_STARTET})
+
+
+    def test_statusprikker_opdaterer_med_et_klik(self):
+        behov = {"polo": {"valgt": True, "stoerrelse": "M", "antal": 1},
+                 "mobil": True, "abonnement": "Kun data"}
+        sag = self.kandidat(behov=behov)
+        s = self.t.onboarding
+        self.assertEqual((prik.kontrakt(sag).tone, prik.udstyr(sag).tone), (prik.ROED, prik.ROED))
+        # Kontrakten sendes med de manglende felter udfyldt i samme gem.
+        self.assertEqual(s.mangler_til_kontrakt(sag), ["loennr", "ansaettelsesdato"])
+        sag = s.saet_kontrakt(sag, Opgave.AFVENTER, "4712", "2026-12-01")
+        self.assertEqual((sag.loennr, sag.ansaettelsesdato), ("4712", "2026-12-01"))
+        sag = s.saet_kontrakt(sag, Opgave.UDFOERT)
+        self.assertEqual(prik.kontrakt(sag).tone, prik.GROEN)
+        # Delvist sendt = gul og I gang; alt sendt = grøn og Udført.
+        sag = s.marker_udstyr_sendt(sag, ["telefon"])
+        udstyr = opgave_med_noegle(sag, "udstyr")
+        self.assertEqual((prik.udstyr(sag).tone, udstyr.status), (prik.GUL, Opgave.I_GANG))
+        self.assertEqual(udstyr.naeste_handling, "Send: Polo M × 1")
+        sag = s.marker_udstyr_sendt(sag, ["telefon", "polo"])
+        self.assertEqual((prik.udstyr(sag).tone, opgave_med_noegle(sag, "udstyr").status),
+                         (prik.GROEN, Opgave.UDFOERT))
+        sag = s.fastlaeg_oplaering(sag, "Booket og bekræftet", "2026-12-02T08:00")
+        self.assertEqual(prik.oplaering(sag).tone, prik.GROEN)
+        self.assertEqual(self.t.onboarding.hent(sag.id).behov.sendt, ["telefon", "polo"])
 
 
 class SkabelonSletningTest(TjenesteTest):

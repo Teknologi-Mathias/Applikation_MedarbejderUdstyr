@@ -16,6 +16,11 @@ HR's behov (app/domain/behov.py) gør betingede opgaver relevante eller ej
 over det valgte udstyr som næste handling. Oplæringsdagens tidspunkt og booking
 ligger på opgaven OPLAERING_BOOKET: tidspunktet er "planlagt", bookingen er
 opgavens status – så et tidspunkt aldrig afslutter noget af sig selv.
+
+Statusprikkerne i tabellen (app/domain/statusprik.py) opdaterer med ét klik:
+saet_kontrakt, marker_udstyr_sendt og fastlaeg_oplaering. Sendt udstyr krydses
+af pr. post i behovet; "Udstyr sendt" følger af sig selv (noget = I gang, alt =
+Udført).
 """
 from datetime import datetime
 
@@ -23,6 +28,7 @@ from app.domain import skabelon as sk
 from app.domain.behov import BEKLAEDNING, Behov
 from app.domain.onboarding import OnboardingForloeb
 from app.domain.opgave import Opgave, laes_iso_dato
+from app.domain.statusprik import KONTRAKT
 from app.repositories.fejl import ValideringsFejl
 from app.services import workflow
 from app.services.sag_service import SagService
@@ -60,10 +66,12 @@ def toej_fastlagt(sag: OnboardingForloeb) -> bool:
 
 
 def synkroniser_udstyr(sag: OnboardingForloeb) -> None:
-    """"Udstyr sendt" viser, hvad der skal sendes – altid efter det aktuelle behov."""
+    """"Udstyr sendt" viser, hvad der mangler at blive sendt – altid efter det
+    aktuelle behov."""
     opgave = opgave_med_noegle(sag, UDSTYR)
     if opgave is not None and not opgave.afsluttet:
-        liste = sag.behov.udstyrsliste()
+        sendt = set(sag.behov.sendte_poster())
+        liste = [tekst for n, tekst in sag.behov.udstyrsposter() if n not in sendt]
         opgave.naeste_handling = "Send: " + ", ".join(liste) if liste else ""
 
 
@@ -144,6 +152,64 @@ class OnboardingService(SagService):
             self._udfyld_frister(ny)
         self.forbered_opgaver(ny, data)
         return self.gem_aendret(gammel, ny)
+
+    ### ----- hurtige opdateringer fra statusprikkerne -----------------------
+
+    def mangler_til_kontrakt(self, sag: OnboardingForloeb) -> list[str]:
+        """Felter, der står på kontrakten og mangler: "loennr", "ansaettelsesdato"."""
+        return [felt for felt in ("loennr", "ansaettelsesdato") if not getattr(sag, felt)]
+
+    def udfyld_kontraktfelter(self, sag: OnboardingForloeb, loennr: str = "",
+                              ansaettelsesdato: str = "") -> None:
+        """Udfylder (kun) manglende lønnr./ansættelsesdato på sagen – på stedet, når
+        kontrakten sendes. En ny ansættelsesdato giver opgaverne deres frister."""
+        if loennr and not sag.loennr:
+            sag.loennr = loennr.strip()
+        if ansaettelsesdato and not sag.ansaettelsesdato:
+            sag.ansaettelsesdato = ansaettelsesdato
+            self._udfyld_frister(sag)
+
+    def saet_kontrakt(self, sag: OnboardingForloeb, status: str, loennr: str = "",
+                      ansaettelsesdato: str = "") -> OnboardingForloeb:
+        """Kontraktens status (Ikke startet / Afventer = sendt / Udført = underskrevet).
+        Manglende lønnr. og ansættelsesdato kan udfyldes i samme gem."""
+        if opgave_med_noegle(sag, KONTRAKT) is None:
+            raise ValideringsFejl("Forløbet har ingen kontraktopgave.")
+        ny = sag.kopi()
+        self.udfyld_kontraktfelter(ny, loennr, ansaettelsesdato)
+        opgave_med_noegle(ny, KONTRAKT).saet_status(status)
+        self.forbered_opgaver(ny)
+        return self.gem_aendret(sag, ny)
+
+    def marker_udstyr_sendt(self, sag: OnboardingForloeb, sendt) -> OnboardingForloeb:
+        """sendt: nøglerne på de sendte poster. "Udstyr sendt" følger med: intet =
+        Ikke startet, noget = I gang, alt = Udført."""
+        ny = sag.kopi()
+        ny.behov.sendt = [n for n, _ in ny.behov.udstyrsposter() if n in set(sendt)]
+        opgave = opgave_med_noegle(ny, UDSTYR)
+        if opgave is not None and opgave.status != Opgave.UNDTAGET:
+            alle = len(ny.behov.sendt) == len(ny.behov.udstyrsposter())
+            if not ny.behov.sendt:
+                maal = Opgave.IKKE_STARTET
+            else:
+                maal = Opgave.UDFOERT if alle else Opgave.I_GANG
+            if maal != Opgave.IKKE_STARTET and ny.er_blokeret(opgave):
+                raise ValideringsFejl(f"Udstyret kan ikke sendes endnu. "
+                                      f"{ny.blokeringsaarsag(opgave)}.")
+            if maal != opgave.status:
+                opgave.saet_status(maal)
+        self.forbered_opgaver(ny)
+        return self.gem_aendret(sag, ny)
+
+    def fastlaeg_oplaering(self, sag: OnboardingForloeb, booking: str,
+                           tidspunkt: str | None = None) -> OnboardingForloeb:
+        """Oplæringsdagens booking (BOOKING-tekst) og evt. tidspunkt (ISO)."""
+        ny = sag.kopi()
+        data = {"oplaering_booking": booking}
+        if tidspunkt is not None:
+            data["oplaering_planlagt"] = tidspunkt
+        self.forbered_opgaver(ny, data)
+        return self.gem_aendret(sag, ny)
 
     def _udfyld_frister(self, sag: OnboardingForloeb) -> None:
         """Ansættelsesdatoen er netop fastlagt: åbne opgaver uden frist får fristen

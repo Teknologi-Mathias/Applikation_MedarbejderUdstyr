@@ -303,6 +303,10 @@ class UdstyrsprofilKort(QWidget):
                 felt.setEnabled(udvidet)
                 if not udvidet:
                     felt.setToolTip("Kun for " + ", ".join(bh.UDVIDET_UDSTYR))
+            # E-mailen ligger på telefonen: kan kun vælges sammen med en telefon.
+            telefon.currentIndexChanged.connect(
+                lambda _i, t=telefon, m=mail, u=udvidet: self._telefon_valgt(t, m, u))
+            self._telefon_valgt(telefon, mail, udvidet)
             gitter.addWidget(QLabel(stilling), r, 0)
             gitter.addWidget(telefon, r, 3)
             gitter.addWidget(mail, r, 4)
@@ -313,6 +317,13 @@ class UdstyrsprofilKort(QWidget):
         gem.clicked.connect(self._gem)
         lag.addWidget(gem, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(kort)
+
+    @staticmethod
+    def _telefon_valgt(telefon, mail, udvidet):
+        med_telefon = bool(telefon.currentData())
+        if not med_telefon:
+            mail.setChecked(False)
+        mail.setEnabled(udvidet and med_telefon)
 
     def opdater(self):
         profiler = self.t.indstillinger.udstyrsprofiler()

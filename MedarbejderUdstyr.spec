@@ -66,6 +66,22 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# Kun QtCore, QtGui, QtNetwork og QtWidgets bruges. Qt-plugins trækker ellers
+# Qt Quick/QML (virtuelt tastatur), PDF og software-OpenGL med (~40 MB), og
+# Qt's oversættelser bruges ikke. Mindre installer = hurtigere central opdatering
+# og under Supabase Free's grænse på 50 MB pr. fil (se docs/RELEASE.md).
+UDELADT = ('qtvirtualkeyboard', 'qt6virtualkeyboard', 'qt6quick', 'qt6qml', 'qpdf', 'qt6pdf',
+           'opengl32sw', 'qt6opengl')
+
+
+def _medtag(post):
+    navn = post[0].replace('\\', '/').lower()
+    return not (any(x in navn for x in UDELADT) or '/pyside6/translations/' in f'/{navn}')
+
+
+a.binaries = [b for b in a.binaries if _medtag(b)]
+a.datas = [d for d in a.datas if _medtag(d)]
 pyz = PYZ(a.pure)
 
 exe = EXE(

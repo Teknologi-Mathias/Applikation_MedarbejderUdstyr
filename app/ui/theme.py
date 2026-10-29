@@ -164,6 +164,11 @@ def prioritet_stil(prioritet: str) -> dict:
     return PRIORITET_STIL.get(prioritet, INTET_STIL)
 
 
+def prik_stil(tone: str) -> dict:
+    """Farve til statusprikkerne (app/domain/statusprik.py) – tonen er et tonenavn."""
+    return TONER.get(tone, INTET_STIL)
+
+
 def opgaver_stil(afsluttede, total, forsinket):
     """Farve til opgave-pillen i tabellen: rød = forsinket, grøn = alt klaret."""
     if total == 0:

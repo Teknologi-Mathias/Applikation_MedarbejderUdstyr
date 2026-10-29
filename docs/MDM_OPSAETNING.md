@@ -34,6 +34,8 @@ nulstilling (se "Ændringer på en klargjort telefon").
 | Internet | Flytilstand, mobildata/APN og privat DNS kan ikke ændres. Wi-Fi kan skiftes frit, og netværksindstillinger kan nulstilles. |
 | Låst | Fabriksnulstilling, flere brugere, konti, nødstart (safe boot), udviklerindstillinger/USB-fejlfinding, USB-filoverførsel, SD-kort, certifikater, afinstallation og ændring af apps, baggrundsbillede |
 | Låseskærm | Viser enhedsnavnet, fx ISM589 |
+| Skærmlås | Kræves altid og kan ikke fjernes (v6+). Standardmønsteret tegnes ved klargøringen. Android kan ikke forhindre, at mønsteret ændres – ændringer uden skærmlåskode registreres og vises øverst i administrator-menuen. |
+| PDF-læser | Telefonens egen PDF-læser skjules aldrig (v6+), så briefs fra Gmail og FL-TMS kan åbnes. Findes der ingen, melder klargøringen det som fejl. |
 | FL-UPDATE | Installeres automatisk og kan ikke afinstalleres. |
 | Firma-mail (valgfrit) | Gmail-appen bliver synlig, og der kan tilføjes en IMAP-konto. Google-konti er stadig spærret. |
 
@@ -89,7 +91,10 @@ Uden nøglen nægter Gradle at bygge.
 5. Lad vinduet være åbent. Telefonen klargør sig selv og viser fremdriften. Når den er
    færdig, viser IN-BASE "✔ ISM589 er klargjort" med model, serienummer og IMEI.
 6. Åbn FL-UPDATE på telefonen, og tillad den at **installere apps**. Så henter den FL-TMS.
-   Det er det eneste trin i hånden, fordi Android ikke tillader, at det automatiseres.
+   Det kan Android ikke automatisere.
+7. Sæt **standardmønsteret** som skærmlås (U: start øverst til venstre → ned → højre → op).
+   Telefonen beder selv om en skærmlås. Den første lås registreres som standarden; en
+   app kan ikke tegne mønsteret, så det er også et trin i hånden.
 
 En telefon klargøres igen ved at fabriksnulstille den og vælge **Klargør (QR-kode)…**.
 
@@ -103,6 +108,7 @@ klargøres igen én gang. Menuen kræver altid en kode fra IN-BASE:
 |---|---|---|
 | Ændringskode (fx *Slå firma-mail til…*) | kun den ene handling på den ene telefon | ja |
 | Supportkode (Chrome) | vise og skjule Chrome | ja |
+| Skærmlåskode (*Vis skærmlåskode…*, v6+) | skifte skærmlåsen godkendt og nulstille advarslen om ændringer | kun ved support |
 | Nulstillingskode | alt, også opdatering og fabriksnulstilling | nej |
 
 **Firma-mail ved forfremmelse.**
@@ -116,6 +122,10 @@ klargøres igen én gang. Menuen kræver altid en kode fra IN-BASE:
 *Slå firma-mail fra…* skjuler Gmail igen og spærrer konti. Den IMAP-konto, der allerede er
 tilføjet, kan telefonen ikke slette selv. Den bliver bare usynlig. Skal den helt væk, så
 nulstil telefonen og klargør den igen.
+
+**Skærmlåsen ændret.** Står der øverst i menuen, at skærmlåsen er ændret uden kode, så
+gælder standardmønsteret måske ikke længere. Sæt det igen med skærmlåskoden: **Skift
+skærmlås (godkendt)** → tegn standardmønsteret. Advarslen nulstilles.
 
 **Anvend regler igen** i menuen lægger reglerne på med det samme. Det sker også automatisk,
 når telefonen genstarter.
@@ -183,6 +193,9 @@ Den virker kun på telefoner uden egen kode.
   der stadig. *Slå firma-mail fra* skjuler den igen.
 - [ ] **Opdater telefoner** med en ny build (højere `versionCode`): telefonen opdateres, og
   FL-UPDATE og FL-TMS er stadig synlige.
+- [ ] Skærmlåsen kan ikke sættes til *Ingen* eller *Stryg*. Ændres mønsteret i
+  Indstillinger, viser administrator-menuen advarslen; *Skift skærmlås (godkendt)* nulstiller den.
+- [ ] En PDF åbnes fra Gmail og fra FL-TMS. Notér PDF-læserens pakkenavn.
 
   Skjules en app, der skal bruges, så skriv pakkenavnet under **Ekstra apps** og klargør igen.
 
@@ -194,5 +207,7 @@ Den virker kun på telefoner uden egen kode.
   nulstilles og klargøres igen én gang.
 - Skjulte Google-apps (fx Play-butikken) opdateres ikke længere automatisk. Android-
   systemopdateringer kommer stadig.
+- Skærmlåsen kan ikke spærres for ændring (Android har ingen regel til det) og kan ikke
+  sættes af appen. Ændringer registreres kun på telefonen – IN-BASE får ikke besked.
 - Låsen fjernes kun ved at nulstille med nulstillingskoden (`*#*#46227#*#*`). Koden ligger kun
   i IN-BASE og kan kun ses af administratorer.

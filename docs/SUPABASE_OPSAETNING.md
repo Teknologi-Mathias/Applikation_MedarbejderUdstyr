@@ -6,7 +6,8 @@ sig selv – alt herunder er bevidste, manuelle handlinger.
 
 | Del | Hvor |
 |---|---|
-| SQL-migreringer | `app/infrastructure/database/migrations/001`–`006` |
+| SQL-migreringer | `app/infrastructure/database/migrations/001`–`019` |
+| Backup + gendannelsestest | `scripts/backup_supabase.ps1` (afsnit 13) |
 | Engangs-nulstilling | `app/infrastructure/database/reset/nulstil_forretningsdata.sql` |
 | Edge Functions | `supabase/functions/admin-create-user`, `admin-manage-user` |
 | Klientkonfiguration | `%APPDATA%\IN-BASE\.env` på hver pc |
@@ -95,8 +96,20 @@ i denne rækkefølge, og tjek at hver giver "Success":
     ikke). Sletning af skabeloner: RPC `inbase_delete_workflow_template` (modultjek)
     og delete for mails og påmindelser. Sager påvirkes ikke. Kan køres igen.
 
+19. `019_opdatering_og_skemaversion.sql` – skemaversion (`schema_migrations`, registrerer
+    001–019 som kørt – **kør derfor 001–018 først**), krav til klienten
+    (`inbase_client_requirements`, også før log på), delt signatur for aktive/arkiv,
+    central opdatering (`app_releases`, privat Storage-bucket `releases`, højst 50 MB pr.
+    fil) og opdateringskanal + klientversion på brugerne. Kun tilføjelser; kan køres
+    igen. Krævet af IN-BASE 0.10 og nyere – en nyere klient mod en ældre database
+    stopper med en besked.
+
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004, 015, 016, 017 og 018). Fremtidige ændringer kommer som nye filer `019_...`.
+fra 004, 015, 016, 017, 018 og 019). Fremtidige ændringer kommer som nye filer `020_...`,
+og **hver ny migrering slutter med**
+`insert into public.schema_migrations (version, name) values (20, '020_...') on conflict do nothing;`.
+Afhænger klienten af migreringen, hæves `KRAEVET_SKEMA` i `app/__init__.py` (se
+docs/RELEASE.md, "Central opdatering"). Tag en backup før hver migrering (afsnit 13).
 
 ### Fra e-mail- til brugernavnslogin (hvis 001-004 allerede er kørt)
 
@@ -326,11 +339,49 @@ Supabase-projektet. E2E-testen opretter og sletter konti og kører kun med
 `INBASE_E2E_OPRET_BRUGERE=1`. Brug den mod en lokal `supabase start` eller et
 separat testprojekt – aldrig mod produktionsdata.
 
+## 13. Backup og gendannelse (Supabase Free har ingen automatisk backup)
+
+`scripts\backup_supabase.ps1` (kun projektets ejer; kræver Supabase CLI og Docker
+Desktop) laver en fuld kopi **og beviser, at den kan gendannes**:
+
+```powershell
+$env:INBASE_BACKUP_MAPPE = "D:\IN-BASE-backup"     # et sted med begrænset adgang
+.\scripts\backup_supabase.ps1                       # eller VS Code-tasken "Backup: Supabase"
+```
+
+* Forbindelsesstrengen: Dashboard → **Connect** → *Session pooler* (indeholder
+  databasens adgangskode). Den indtastes skjult, når scriptet spørger (eller sættes i
+  `$env:INBASE_BACKUP_DB_URL` for den ene PowerShell-session) og skrives aldrig til disk.
+* Pr. kørsel en mappe `yyyy-MM-dd_HHmm` med `roles.sql`, `schema.sql`,
+  `data_public.sql` (alle IN-BASE-data – også MDM-signeringsnøglen og
+  nulstillingskoderne), `data_auth.sql` (konti inkl. kode-hashes – følsom) og
+  `manifest.json` (kontrolsummer, rækker pr. tabel, testresultat). De 12 nyeste
+  beholdes (`-Behold`).
+* **Gendannelsestest:** en midlertidig container (samme PostgreSQL-hovedversion)
+  får stubben + alle migreringer, `data_public.sql` indlæses, og rækkerne
+  sammenlignes tabel for tabel. Fejler indlæsningen, afviger produktionens skema fra
+  migreringerne – ret det, før næste migrering køres. En mappe **uden**
+  `manifest.json` er ikke verificeret. Udviklingsdatabasen (docker compose) røres ikke.
+* **Hvornår:** mindst ugentligt og altid før en migrering. Gem gerne en kopi uden for
+  pc'en (krypteret). Gratis projekter pauses efter 7 dage uden aktivitet.
+
+**Gendannelse** (fx til et nyt projekt efter et nedbrud – tjek, at du er i det rigtige
+projekt): kør `roles.sql`, `schema.sql` og data i én transaktion med psql:
+
+```
+psql --single-transaction --variable ON_ERROR_STOP=1 --file roles.sql --file schema.sql ^
+     --command "SET session_replication_role = replica" --file data_public.sql ^
+     --file data_auth.sql --dbname "<forbindelsesstreng til det nye projekt>"
+```
+
+Deploy derefter Edge Functions (afsnit 4), og ret `%APPDATA%\IN-BASE\.env` på pc'erne,
+hvis projektets URL er ændret.
+
 ## Kendte begrænsninger
 
 * **Ingen offline:** uden forbindelse vises en fejl; intet gemmes lokalt.
-* **Backup** tages af Supabase (afhænger af abonnement; gratis projekter har
-  ingen automatisk backup og sættes på pause efter en uge uden aktivitet).
+* **Backup** tages ikke af Supabase Free (og projektet sættes på pause efter en uge
+  uden aktivitet) – brug `scripts\backup_supabase.ps1` (afsnit 13).
 * **Tidszone:** tidspunkter vises i pc'ens lokale tid (forudsætter dansk tid).
 * **Ingen selvbetjent "glemt kode":** en administrator nulstiller koden.
 * **Login-aliasset** er afprøvet med en lokal stub, ikke mod Supabase Auth

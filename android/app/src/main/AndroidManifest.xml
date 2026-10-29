@@ -27,6 +27,8 @@
             <intent-filter>
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
+                <!-- Skærmlåsen er sat/ændret: indstillingen låses (AdminReceiver). -->
+                <action android:name="android.app.action.ACTION_PASSWORD_CHANGED" />
             </intent-filter>
         </receiver>
 

@@ -171,8 +171,9 @@ class AendringskodeTest(unittest.TestCase):
         # Samme værdi som før ændringskoderne – telefoner med v3 bruger den stadig.
         self.assertEqual(md.supportkode("12345678"), "483606")
         self.assertEqual(md.aendringskode("12345678", md.CHROME), "483606")
-        koder = {md.aendringskode("12345678", h) for h in (md.CHROME, md.MAIL_TIL, md.MAIL_FRA)}
-        self.assertEqual(len(koder), 3)
+        koder = {md.aendringskode("12345678", h)
+                 for h in (md.CHROME, md.MAIL_TIL, md.MAIL_FRA, md.SKAERMLAAS)}
+        self.assertEqual(len(koder), 4)
         self.assertNotEqual(md.aendringskode("87654321", md.MAIL_TIL),
                             md.aendringskode("12345678", md.MAIL_TIL), "koden gælder én telefon")
         self.assertEqual(md.aendringskode("", md.MAIL_TIL), "")

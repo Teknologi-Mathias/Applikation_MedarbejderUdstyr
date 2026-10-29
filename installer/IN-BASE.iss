@@ -16,6 +16,10 @@
 ;   ikke ved afinstallation. Den indlejres ikke i IN-BASE.exe.
 ; - Lokale data (%LOCALAPPDATA%\IN-BASE) røres aldrig. Installeren ændrer intet
 ;   i Supabase-databasen.
+; - Central opdatering: IN-BASE henter selv en ny installer og kører den med
+;   /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /OPDATERING=1
+;   (app/infrastructure/opdatering.py). /OPDATERING=1 starter IN-BASE igen bagefter.
+;   AppMutex = MUTEX i app/ui/enkelt_instans.py.
 
 #ifndef AppVersion
   #error "AppVersion mangler. Byg med scripts\build_windows.ps1."
@@ -61,6 +65,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; IN-BASE kan køre i baggrunden ved uret – luk den før filer udskiftes.
 CloseApplications=yes
 RestartApplications=no
+AppMutex=IN-BASE-Instans
 
 [Languages]
 Name: "danish"; MessagesFile: "compiler:Languages\Danish.isl"
@@ -84,6 +89,15 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Efter en stille opdatering fra IN-BASE selv: start programmet igen.
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: ErOpdatering
 
 ; Ingen [UninstallDelete]: afinstallation fjerner kun programfilerne.
 ; Konfiguration og lokale data slettes kun manuelt (se docs\RELEASE.md).
+
+[Code]
+// /OPDATERING=1: installeren er startet af IN-BASE's centrale opdatering.
+function ErOpdatering: Boolean;
+begin
+  Result := ExpandConstant('{param:OPDATERING|0}') = '1';
+end;
