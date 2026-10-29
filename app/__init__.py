@@ -7,7 +7,7 @@ import re
 # (installer/IN-BASE.iss via scripts/build_windows.ps1) og buildrapporten.
 ### Skriv: ( .\scripts\build_windows.ps1  )
 
-__version__ = "0.9.4"
+__version__ = "0.9.4.2"
 
 VERSION = f"V{__version__}"   # visning i programmet, fx "V0.7.1"
 
