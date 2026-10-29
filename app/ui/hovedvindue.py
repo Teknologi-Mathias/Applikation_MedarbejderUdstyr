@@ -38,10 +38,8 @@ from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
 from app.repositories.fejl import DataFejl, KompatibilitetsFejl, SessionUdloebetFejl
 from app.services import action_center
-from app.services import kontrolrum
 from app.ui import fejl as ui_fejl
 from app.ui.action_liste import ANSVARLIG
-from app.ui.arbejdsbakke_side import ArbejdsbakkeSide
 from app.ui.baggrund import koer_i_baggrund
 from app.ui.dashboard_side import DashboardSide
 from app.ui.fejl import FEJL, udfoer
@@ -75,7 +73,6 @@ LAAS = "  🔒"
 # (nøgle, menutekst, ikon, [(side, fanetekst), ...])
 OMRAADER = [
     ("overblik", "Arbejdsoverblik", "overblik", [("dashboard", "Arbejdsoverblik")]),
-    ("arbejdsbakke", "Arbejdsbakke", "bakke", [("arbejdsbakke", "Arbejdsbakke")]),
     ("onboarding", "Onboarding - MERCH", "onboarding", [
         ("on_team", "Teamoverblik"),
         ("on_oversigt", "Oversigt"),
@@ -97,6 +94,11 @@ OMRAADER = [
     ]),
     ("oensker", "Ønsker & Udvikling", "oensker", [("oensker", "Ønsker & Udvikling")]),
 ]
+# Udkast i menuen: vises, men har endnu ingen side – et klik giver blot en besked.
+UDKAST = [
+    ("kalender", "Kalender", "kalender", []),
+]
+UDKAST_BESKED = "Under udvikling, afvent adgang."
 # Side -> område (Indstillinger hører ikke til et område).
 OMRAADE_FOR_SIDE = {side: noegle for noegle, _, _, sider in OMRAADER for side, _ in sider}
 ALLE_SIDER = [side for _, _, _, sider in OMRAADER for side, _ in sider] + [INDSTILLINGER]
@@ -182,7 +184,7 @@ class MainWindow(QMainWindow):
         rod.setContentsMargins(0, 0, 0, 0)
         rod.setSpacing(0)
 
-        self.sidebar = Sidebar(OMRAADER)
+        self.sidebar = Sidebar(OMRAADER + UDKAST)
         self.sidebar.omraade_valgt.connect(self.vis_omraade)
         self.sidebar.log_ud.connect(self.log_ud)
         self.sidebar.opdatering_valgt.connect(self.vis_opdatering)
@@ -214,9 +216,6 @@ class MainWindow(QMainWindow):
         self._forbind_action(*self.dashboard.handlingslister())
         self.dashboard.vis_liste.connect(self._vis_filtreret)
         self._tilfoej("dashboard", self.dashboard)
-        self.arbejdsbakke = ArbejdsbakkeSide()
-        self._forbind_action(self.arbejdsbakke)
-        self._tilfoej("arbejdsbakke", self.arbejdsbakke)
         self.teamoverblik = TeamoverblikSide()
         self.teamoverblik.aabn_sag.connect(self.aabn_sag)
         self._tilfoej("on_team", self.teamoverblik)
@@ -322,7 +321,7 @@ class MainWindow(QMainWindow):
         return slet
 
     def _opbyg_onboarding(self):
-        modul = onboarding_modul(self._omraader, self._ansvarlige)
+        modul = onboarding_modul(self._omraader)
         ctrl = self.ctrl[ON]
         self.on_slet = self._modul_sider(
             "on", modul, ctrl, "Opgaver og milepæle", "milepael",
@@ -360,9 +359,6 @@ class MainWindow(QMainWindow):
     def _omraader(self):
         ind = udfoer(self, self.t.indstillinger.hent)
         return [] if ind is FEJL else ind["omraader"]
-
-    def _ansvarlige(self):
-        return sorted({s.ansvarlig for s in self.data[ON][0] + self.data[ON][1] if s.ansvarlig})
 
     def _aktive_brugernavne(self):
         brugere = udfoer(self, self.t.auth.brugere)
@@ -470,7 +466,6 @@ class MainWindow(QMainWindow):
         self.dashboard.opdater({ON: self.data[ON][0] + self.data[ON][1],
                                 OFF: self.data[OFF][0] + self.data[OFF][1]}, alarmer, dagens,
                                regler)
-        self.arbejdsbakke.opdater(aktive)
         self.teamoverblik.opdater(self.data[ON][0], regler.naermer_sig_dage)
         for proces, prefix in ((ON, "on"), (OFF, "off")):
             aktive_sager, arkiv = self.data[proces]
@@ -574,6 +569,11 @@ class MainWindow(QMainWindow):
         """Menuknap: områdets senest viste underside (ellers den første)."""
         if omraade == INDSTILLINGER:
             return self.vis_side(INDSTILLINGER)
+        navn = next((tekst for noegle, tekst, _, _ in UDKAST if noegle == omraade), None)
+        if navn is not None:
+            QMessageBox.information(self, navn, UDKAST_BESKED)
+            self.sidebar.marker(self._omraade or INDSTILLINGER)   # bliv, hvor du var
+            return
         sider = self._sider_i(omraade)
         self.vis_side(self._sidste_side.get(omraade, sider[0][0]))
 
@@ -602,14 +602,11 @@ class MainWindow(QMainWindow):
         if 0 <= index < len(sider):
             self.vis_side(sider[index][0])
 
-    def _vis_filtreret(self, maal, filter_):
-        """Et overblikskort på dashboardet: åbn den liste, tallet er talt ud fra."""
-        if maal == kontrolrum.ARBEJDSBAKKE:
-            self.arbejdsbakke.vaelg(filter_)
-            self.vis_side("arbejdsbakke")
-        else:
-            self.teamoverblik.vaelg_filter(filter_)
-            self.vis_side("on_team")
+    def _vis_filtreret(self, _maal, filter_):
+        """Et overblikskort på dashboardet: åbn Teamoverblikket med det filter,
+        tallet er talt ud fra (kontrolrum.TEAM)."""
+        self.teamoverblik.vaelg_filter(filter_)
+        self.vis_side("on_team")
 
     def vis_side(self, noegle):
         side = self.sider[noegle]
@@ -770,7 +767,6 @@ class MainWindow(QMainWindow):
         for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
                 + [self.oensker, self.telefoner, self.telefoner_arkiv]:
             side.ryd()
-        self.arbejdsbakke.opdater([])
         self.teamoverblik.opdater([])
 
     def _session_udloebet(self, fejl):

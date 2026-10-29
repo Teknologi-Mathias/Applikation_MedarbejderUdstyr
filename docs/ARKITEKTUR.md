@@ -41,7 +41,8 @@ Regler:
 | Statusberegning og milepæle | `app/domain/onboarding.py`, `offboarding.py`, `sag.py` |
 | Arbejdsspor, afhængigheder, klarhed | `app/domain/arbejdsspor.py`, `afhaengighed.py` |
 | HR's behov (tøj, mobil, mail, bil) | `app/domain/behov.py`, `app/ui/onboarding_dialog.py` |
-| Arbejdsbakker, teamfiltre, nøgletal | `app/services/arbejdsbakke.py`, `app/ui/arbejdsbakke_side.py`, `teamoverblik_side.py` |
+| Teamfiltre, nøgletal | `app/services/teamoverblik.py`, `app/ui/teamoverblik_side.py` |
+| Statusfelter i "Aktive forløb" (drop down) | `app/domain/statusprik.py`, `app/ui/moduler.py`, `modul_controller.hurtig_status` |
 | Samtidige ændringer (fletning) | `app/services/workflow.py` (`flet`), `sag_service.gem_aendret` |
 | Action Center | `app/services/action_center.py` |
 | Arbejdsoverblik (kontrolrum: kort, køer, Haster nu) | `app/services/kontrolrum.py`, `app/ui/dashboard_side.py` |
@@ -93,7 +94,7 @@ Onboarding og offboarding er to moduler oven på samme motor:
   og sag (`afhaengighed.find_fejl`).
 * **Visningsstatus** (Klar, I gang, Afventer, Blokeret, Forsinket, Færdig, Ikke
   relevant) beregnes – de gemte statusser er uændrede. Samme beregning bruges af
-  Teamoverblik, arbejdsbakker, sagsvinduet, Action Center og rapporter.
+  Teamoverblik, Arbejdsoverblik, sagsvinduet, Action Center og rapporter.
 * **Tre dimensioner**: `arbejdstilstand` (Klar … Blokeret), `tidsrisiko` (Til
   tiden, Frist nærmer sig, Forsinket) og `ansvar` (bruger, afdelingskø, ikke
   tildelt). En blokeret opgave over fristen er stadig forsinket: den tæller i
@@ -137,13 +138,30 @@ Onboarding og offboarding er to moduler oven på samme motor:
 * En onboarding er først afsluttet, når status er Aktiv OG alle obligatoriske
   opgaver er lukket.
 
+## Aktive forløb: statusfelter med drop down
+
+Tabellerne under *Aktive forløb* viser kun de skridt, der følges op på – hvert som et
+farvefelt (`app/domain/statusprik.py`), der ændres med en drop down-menu lige under
+cellen (`SagListeSide.celle_klik` → `ModulController.hurtig_status`). Valget gemmes
+straks og vises uden genindlæsning (`MainWindow.sag_gemt`).
+
+* **Onboarding:** Kontrakt (Ikke sendt / Sendt = rød, Modtaget retur = grøn), Udstyr
+  (afkrydsning pr. post: intet = rød, delvist = gul, alt = grøn), Opfølgning (Ikke
+  afholdt / Afholdt; venter på kontrakten). Status, ansvarlig og opgaver ses i sagen.
+* **Offboarding:** Tankkort spærret (Ikke relevant = grå, Ikke behandlet, Behandlet),
+  Tøj og udstyr (afkrydsning pr. ting), Telefon & SIM-kort, Lukket i NAV? (Nej/Ja) +
+  Opgaver. Offboardingens opgaver findes på udstyrsfeltet (skabelonerne har ingen
+  nøgler); "Ikke relevant" undtager tankkortopgaven med en fast begrundelse.
+* Mangler opgaven i forløbet (egen skabelon), vises feltet som "–".
+
 ## Arbejdsoverblik (kontrolrum) og navigation
 
 * `kontrolrum.py` beregner fire overblikskort (forsinkede opgaver, starter snart,
   opgaver uden ansvarlig, opstart i risiko), seks køer (kontrakt, telefon og tøj,
   oplæring og jobs, afventer andre, offboarding-udstyr, klar til afslutning) og
-  "Haster nu". Alt bygger på arbejdsspor, arbejdsbakke og Action Center; kortene
-  tæller med samme funktion som den liste, de åbner (arbejdsbakke/Teamoverblik).
+  "Haster nu". Alt bygger på arbejdsspor, Teamoverblik og Action Center; kortene
+  tæller med samme funktion som den liste, de åbner (Teamoverblikket med et filter).
+  Arbejdsbakke-modulet er fjernet – det gentog Arbejdsoverblik og Teamoverblik.
   Køerne genbruger `Alarm` og `ActionListe` (klik og hurtige handlinger).
 * Betingede behov giver kun køelementer, når HR har registreret behovet.
   "Afventer andre" viser sidste opfølgning (tidslinjen) og næste opfølgning
@@ -156,7 +174,7 @@ Onboarding og offboarding er to moduler oven på samme motor:
 
 * `user_profiles.roles` (migrering 014): en bruger kan være i flere afdelinger.
   Kun administratorer sætter dem (`inbase_set_roles`, Indstillinger → Brugere →
-  Afdelinger). De styrer "Min afdeling" i arbejdsbakken og Teamoverblikket.
+  Afdelinger). De styrer "Min afdeling" i Teamoverblikket.
 * Bevidst forretningsregel: alle medlemmer må behandle alle sager (lille
   virksomhed). Afdelinger er derfor ikke en adgangslås. Administrator (kolonnen
   `role`) beskytter fortsat brugeradministration, data & sikkerhed og sletning.
@@ -278,10 +296,14 @@ uden server. Drift: [MDM_OPSAETNING.md](MDM_OPSAETNING.md).
   på; er databasen ældre, stopper programmet (`KompatibilitetsFejl`) – ellers ville
   `inbase_columns` (003) lydløst droppe nye felter. `min_client_version` tvinger
   gamle klienter til at opdatere, før de skriver.
-* **Udgivelse:** `tools/udgiv_version.py` (administrator-login) uploader installeren til
-  den private Storage-bucket `releases` og registrerer den i `app_releases` som
-  *pilot*; `frigiv` gør den *stabil* (evt. gradvis, `rollout_percent`), `tilbagetraek`
-  stopper den. Regler for valg, udrulning, rollback og tvang: `app/domain/opdatering.py`.
+* **Udgivelse:** administratorsiden *Indstillinger → Opdateringer*
+  (`app/ui/opdatering_side.py`): træk installeren ind → `OpdateringService.kontroller_pakke`
+  (filnavn, version i exe-filen, størrelse, kontrolsum, følgefil `.json` med skemakrav og
+  commit, nyere end alt udgivet, databasen har skemaet) → `udgiv` uploader i baggrunden til
+  den private Storage-bucket `releases` og registrerer den i `app_releases` som *pilot*;
+  `frigiv` gør den *stabil* (evt. gradvis, `rollout_percent`), `tilbagetraek` stopper den.
+  `tools/udgiv_version.py` er reserven med samme service. Regler for valg, udrulning,
+  rollback og tvang: `app/domain/opdatering.py`.
 * **Klient:** tjek ved log på og hver 4. time i baggrunden; en frivillig opdatering
   hentes med det samme (SHA-256 kontrolleres, `.part` + rename) og vises som knap i
   menuen; tvungen opdatering vises som blokerende dialog. "Opdater og genstart" frigiver

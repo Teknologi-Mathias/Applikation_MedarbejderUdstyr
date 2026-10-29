@@ -1,4 +1,4 @@
-"""Venstremenuen: hovedområderne (Arbejdsoverblik, Arbejdsbakke, Onboarding,
+"""Venstremenuen: hovedområderne (Arbejdsoverblik, Onboarding,
 Offboarding, Telefoner, Ønsker & Udvikling) med ikon og tekst.
 
 Et områdes undersider vises som faner øverst i arbejdsområdet (hovedvinduet),

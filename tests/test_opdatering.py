@@ -1,16 +1,20 @@
 """Central opdatering: valg af version (domæne), skemavagt (service) og download
 med kontrolsum (infrastruktur, mod en lokal http-server – intet netværk)."""
 import hashlib
+import json
+import os
 import shutil
 import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from app.domain import opdatering as op
 from app.infrastructure import opdatering as filer
-from app.repositories.fejl import DataFejl, KompatibilitetsFejl
+from app.repositories.fejl import DataFejl, KompatibilitetsFejl, ValideringsFejl
 from app.services.opdatering_service import OpdateringService
 
 BRUGER = "11111111-2222-3333-4444-555555555555"
@@ -73,6 +77,27 @@ class FalskRepo:
 
     def rapporter(self, version):
         raise DataFejl("ingen forbindelse")
+
+    # Udgivelse (registrerer kaldene).
+    def upload(self, sti, data):
+        self.uploadet = (sti, len(data))
+
+    def opret(self, udgivelse):
+        if getattr(self, "opret_fejler", False):
+            raise DataFejl("Du har ikke rettighed til at registrere versionen.")
+        self._udgivelser.append(udgivelse)
+
+    def slet_fil(self, sti):
+        self.slettede_filer = getattr(self, "slettede_filer", []) + [sti]
+
+    def slet(self, version):
+        self._udgivelser = [u for u in self._udgivelser if u.version != version]
+
+    def opdater(self, version, **felter):
+        self.opdateret = (version, felter)
+
+    def saet_minimum(self, version):
+        self.minimum = version
 
 
 class Server:
@@ -153,6 +178,113 @@ class ServiceOgDownloadTest(unittest.TestCase):
         filer.ryd_gamle(self.mappe, {"IN-BASE-Setup-v0.10.0.exe"})
         self.assertEqual(sorted(p.name for p in self.mappe.iterdir()),
                          ["IN-BASE-Setup-v0.10.0.exe", "installer.log"])
+
+
+class UdgivelseTest(unittest.TestCase):
+    """Indstillinger → Opdateringer / tools/udgiv_version.py: kontrol og udgivelse."""
+
+    def setUp(self):
+        self.mappe = Path(tempfile.mkdtemp(prefix="inbase-udgiv-"))
+        self.repo = FalskRepo(udgivelser=[udgivelse("0.9.5")])
+        self.service = OpdateringService(self.repo, self.mappe / "hentet", version="0.9.5",
+                                         kraevet_skema=19, kan_installere=False)
+
+    def tearDown(self):
+        shutil.rmtree(self.mappe, ignore_errors=True)
+
+    def pakke(self, navn="IN-BASE-Setup-v0.10.0.exe", data=b"installer", info=None):
+        fil = self.mappe / navn
+        fil.write_bytes(data)
+        if info is not None:
+            fil.with_name(navn + ".json").write_text(json.dumps(info), encoding="utf-8")
+        return fil
+
+    def afvist(self, fil, tekst):
+        with self.assertRaises(ValideringsFejl) as fejl:
+            self.service.kontroller_pakke(fil)
+        self.assertIn(tekst, str(fejl.exception))
+
+    def test_gyldig_pakke_med_foelgefil_fra_buildet(self):
+        sha = hashlib.sha256(b"installer").hexdigest()
+        fil = self.pakke(info={"version": "0.10.0", "kraevet_skema": 19, "commit": "abc1234",
+                               "sha256": sha})
+        pakke = self.service.kontroller_pakke(fil)
+        self.assertEqual((pakke.version, pakke.sha256, pakke.commit, pakke.advarsler),
+                         ("0.10.0", sha, "abc1234", ()))
+        udgivet = self.service.udgiv(pakke, " Nyt ", tvungen=True)
+        self.assertEqual((udgivet.kanal, udgivet.noter, udgivet.tvungen, udgivet.min_skema),
+                         (op.PILOT, "Nyt", True, 19))
+        self.assertEqual(self.repo.uploadet, ("IN-BASE-Setup-v0.10.0.exe", 9))
+
+    def test_uden_foelgefil_advares_der(self):
+        pakke = self.service.kontroller_pakke(self.pakke())
+        self.assertEqual(len(pakke.advarsler), 2)        # ingen .json + intet rent commit
+
+    def test_afviser_forkerte_pakker(self):
+        self.afvist(self.pakke("IN-BASE.exe"), "ikke en IN-BASE-installer")
+        self.afvist(self.pakke("IN-BASE-Setup-v0.9.5.exe"), "allerede udgivet")
+        self.afvist(self.pakke("IN-BASE-Setup-v0.9.4.exe"), "ikke nyere")
+        self.afvist(self.pakke(info={"version": "0.10.0", "kraevet_skema": 20}), "skema 20")
+        self.afvist(self.pakke(info={"version": "0.10.1"}), "hører ikke til")
+        fil = self.pakke()
+        fil.with_name(fil.name + ".sha256").write_text("0" * 64, encoding="utf-8")
+        self.afvist(fil, "Kontrolsummen")
+
+    def test_afviser_forkert_version_i_exe_filen_og_for_stor_pakke(self):
+        fil = self.pakke()
+        with mock.patch("app.infrastructure.opdatering.exe_version", return_value="0.9.9"):
+            self.afvist(fil, "bygget som 0.9.9")
+        with open(fil, "wb") as stor:
+            stor.truncate(50 * 1024 * 1024 + 1)
+        self.afvist(fil, "50 MB")
+
+    def test_ingen_fil_uden_registrering(self):
+        self.repo.opret_fejler = True
+        with self.assertRaises(DataFejl):
+            self.service.udgiv(self.service.kontroller_pakke(self.pakke()))
+        self.assertEqual(self.repo.slettede_filer, ["IN-BASE-Setup-v0.10.0.exe"])
+
+    def test_frigiv_minimum_og_ryd(self):
+        self.service.frigiv("0.9.5", 50)
+        self.assertEqual(self.repo.opdateret, ("0.9.5", {"kanal": op.STABIL, "udrulning": 50}))
+        with self.assertRaises(ValideringsFejl):
+            self.service.frigiv("0.9.5", 0)
+        with self.assertRaises(ValideringsFejl):
+            self.service.saet_minimum("1.0")
+        self.repo._udgivelser = [udgivelse(f"0.9.{n}") for n in range(8)] + [
+            udgivelse("0.9.8", trukket_tilbage=True)]
+        resultat = self.service.ryd(behold=5)
+        self.assertEqual(len(resultat), 4)                  # 0.9.0-0.9.3
+        self.assertEqual({u.version for u in self.repo.udgivelser()},
+                         {"0.9.4", "0.9.5", "0.9.6", "0.9.7", "0.9.8"})
+
+
+class OpdateringPanelTest(unittest.TestCase):
+    """Siden i Indstillinger: træk en pakke ind, se den kontrolleret, og listen."""
+
+    def test_vaelg_fil_og_liste(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import QUrl
+        from PySide6.QtWidgets import QApplication
+        from app.ui import opdatering_side as side
+        QApplication.instance() or QApplication([])
+        mappe = Path(tempfile.mkdtemp(prefix="inbase-panel-"))
+        try:
+            repo = FalskRepo(udgivelser=[udgivelse("0.9.5", noter="Rettelser")])
+            service = OpdateringService(repo, mappe, version="0.9.5", kraevet_skema=19)
+            panel = side.OpdateringPanel(SimpleNamespace(opdatering=service))
+            panel.opdater()
+            self.assertEqual(panel.tabel.rowCount(), 1)
+            self.assertIn("skema 19", panel.krav_label.text())
+            fil = mappe / "IN-BASE-Setup-v0.10.0.exe"
+            fil.write_bytes(b"installer")
+            panel.vaelg_fil(str(fil))
+            self.assertTrue(panel.udgiv_knap.isEnabled())
+            self.assertIn("version 0.10.0", panel.pakke_label.text())
+            self.assertEqual(side._installer([QUrl.fromLocalFile("x.txt"),
+                                              QUrl.fromLocalFile(str(fil))]), str(fil).replace("\\", "/"))
+        finally:
+            shutil.rmtree(mappe, ignore_errors=True)
 
 
 if __name__ == "__main__":

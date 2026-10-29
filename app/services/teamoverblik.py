@@ -1,98 +1,21 @@
-"""Arbejdsbakker og teamoverblik: hvem skal gøre hvad – på tværs af sagerne.
+"""Teamoverblik: hvem skal gøre hvad – på tværs af onboardingforløbene.
 
 Ren logik uden brugerflade, bygget på app/domain/arbejdsspor.py, så
-Teamoverblikket, arbejdsbakkerne og nøgletallene bruger samme statusser,
-afhængigheder og klarhedsvurdering. Intet gemmes – alt beregnes ud fra
-sagernes aktuelle tilstand.
+Teamoverblikket, Arbejdsoverblikkets kort og nøgletallene bruger samme
+statusser, afhængigheder og klarhedsvurdering. Intet gemmes – alt beregnes ud
+fra sagernes aktuelle tilstand.
 """
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Iterable
 
 from app.domain import arbejdsspor as sp
 from app.domain.opgave import Opgave, laes_iso_dato
 
-# ----- arbejdsbakkens visninger (opgaver) -----------------------------------
-
-MINE = "mine"
-MIN_AFDELING = "afdeling"
-IKKE_TILDELT = "ikke_tildelt"
-AFVENTER_ANDRE = "afventer"
-FORSINKEDE = "forsinkede"
-NYLIGT_AFSLUTTET = "afsluttet"
-VISNINGER = (
-    (MINE, "Mine opgaver"),
-    (MIN_AFDELING, "Min afdeling"),
-    (IKKE_TILDELT, "Uden ejer"),
-    (AFVENTER_ANDRE, "Afventer andre"),
-    (FORSINKEDE, "Forsinkede"),
-    (NYLIGT_AFSLUTTET, "Nyligt afsluttet"),
-)
-NYLIG_DAGE = 14
-
-
-@dataclass
-class Post:
-    sag: object
-    opgave: Opgave
-    status: str          # visningsstatus (arbejdsspor)
-    aarsag: str          # blokeringsårsag (tom, hvis opgaven kan udføres)
-
-    @property
-    def blokeret(self) -> bool:
-        return self.status == sp.BLOKERET
-
 
 def _min(opgave: Opgave, brugernavn: str) -> bool:
     return bool(brugernavn) and opgave.ansvarlig.lower() == brugernavn.lower()
 
-
-def _afsluttet_for(opgave: Opgave, i_dag: date) -> int | None:
-    try:
-        return (i_dag - datetime.fromisoformat(opgave.afsluttet_tid).date()).days
-    except ValueError:
-        return None
-
-
-def poster(sager: Iterable, visning: str, i_dag: date, brugernavn: str = "",
-           afdelinger: Iterable[str] = ()) -> list[Post]:
-    """Opgaverne i én visning. Blokerede opgaver er med (adskilles i brugerfladen)."""
-    afdelinger = set(afdelinger)
-    resultat = []
-    for sag in sager:
-        if sag.arkiveret:
-            continue
-        for o in sag.opgaver:
-            status = sp.visningsstatus(sag, o, i_dag)
-            if visning == NYLIGT_AFSLUTTET:
-                dage = _afsluttet_for(o, i_dag) if o.status == Opgave.UDFOERT else None
-                med = dage is not None and dage <= NYLIG_DAGE
-            elif o.afsluttet:
-                med = False
-            elif visning == MINE:
-                med = _min(o, brugernavn)
-            elif visning == MIN_AFDELING:
-                med = o.afdeling in afdelinger
-            elif visning == IKKE_TILDELT:
-                # Afdelingen ejer opgaven: kun opgaver uden både person og afdeling.
-                med = sp.ansvar(o) == sp.IKKE_TILDELT
-            elif visning == AFVENTER_ANDRE:
-                med = o.status == Opgave.AFVENTER
-            elif visning == FORSINKEDE:
-                # Også blokerede: blokeringen fjerner ikke tidsrisikoen.
-                med = o.er_forsinket(i_dag)
-            else:
-                med = True
-            if med:
-                resultat.append(Post(sag, o, status, sag.blokeringsaarsag(o)))
-    if visning == NYLIGT_AFSLUTTET:
-        resultat.sort(key=lambda p: p.opgave.afsluttet_tid, reverse=True)
-    else:
-        resultat.sort(key=lambda p: (p.blokeret, p.opgave.frist or "9999", p.sag.navn))
-    return resultat
-
-
-# ----- teamoverblik (sager) ---------------------------------------------------
 
 ALLE = "alle"
 SAG_MIN_AFDELING = "min_afdeling"

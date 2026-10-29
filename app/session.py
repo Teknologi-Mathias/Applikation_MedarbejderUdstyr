@@ -31,7 +31,7 @@ def har_adgang(modul: Optional[str]) -> bool:
 
 
 def afdelinger() -> tuple:
-    """Den aktuelle brugers afdelinger (til "Min afdeling" i arbejdsbakkerne)."""
+    """Den aktuelle brugers afdelinger (til "Min afdeling" i Teamoverblikket)."""
     return adgang.afdelinger_for(_aktiv)
 
 

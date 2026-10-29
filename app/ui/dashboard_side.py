@@ -5,7 +5,7 @@ nu". Fane 2 "Action Center": alle afvigelser og dagsoversigten. Fane 3
 "Nøgletal": filtrerbare målepunkter og diagrammer.
 
 Siden beregner intet selv – tal, køer og prioritering kommer fra
-app/services/kontrolrum.py (bygget på arbejdsspor, arbejdsbakke og Action
+app/services/kontrolrum.py (bygget på arbejdsspor, Teamoverblik og Action
 Center). Klik åbner sagen på opgaven; højreklik giver de hurtige handlinger,
 som controlleren udfører.
 """
@@ -32,7 +32,7 @@ from app.services.action_center import MODUL_NAVN
 from app.ui import action_liste as al
 from app.ui import ikoner
 from app.ui.action_liste import ActionListe
-from app.ui.arbejdsbakke_side import opgave_menu
+from app.ui.action_liste import opgave_menu
 from app.ui.hjaelpere import dansk_dato, lav_kort, lav_sidehoved, scroll_side, vis_dato
 from app.ui.rapport_panel import RapportPanel
 from app.ui.teamoverblik_side import NoegletalKort
@@ -158,7 +158,7 @@ class HasterTabel(QWidget):
 
 
 class DashboardSide(QWidget):
-    vis_liste = Signal(str, str)        # (kontrolrum.ARBEJDSBAKKE/TEAM, visning eller filter)
+    vis_liste = Signal(str, str)        # (kontrolrum.TEAM, teamfilter)
 
     def __init__(self, rapporter, parent=None):
         super().__init__(parent)

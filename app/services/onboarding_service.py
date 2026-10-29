@@ -17,8 +17,9 @@ over det valgte udstyr som næste handling. Oplæringsdagens tidspunkt og bookin
 ligger på opgaven OPLAERING_BOOKET: tidspunktet er "planlagt", bookingen er
 opgavens status – så et tidspunkt aldrig afslutter noget af sig selv.
 
-Statusprikkerne i tabellen (app/domain/statusprik.py) opdaterer med ét klik:
-saet_kontrakt, marker_udstyr_sendt og fastlaeg_oplaering. Sendt udstyr krydses
+Statusfelterne i "Aktive forløb" (app/domain/statusprik.py) ændres med en drop
+down-menu: saet_kontrakt, marker_udstyr_sendt og (opfølgning) saet_opgave_status.
+Oplæringsdagen fastlægges i sagsvinduet (fastlaeg_oplaering). Sendt udstyr krydses
 af pr. post i behovet; "Udstyr sendt" følger af sig selv (noget = I gang, alt =
 Udført).
 """
@@ -153,7 +154,7 @@ class OnboardingService(SagService):
         self.forbered_opgaver(ny, data)
         return self.gem_aendret(gammel, ny)
 
-    ### ----- hurtige opdateringer fra statusprikkerne -----------------------
+    ### ----- hurtige opdateringer fra statusfelterne -----------------------
 
     def mangler_til_kontrakt(self, sag: OnboardingForloeb) -> list[str]:
         """Felter, der står på kontrakten og mangler: "loennr", "ansaettelsesdato"."""

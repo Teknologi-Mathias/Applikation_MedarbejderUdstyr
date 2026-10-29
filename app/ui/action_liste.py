@@ -1,4 +1,5 @@
-"""Genbrugelig Action Center-liste (dashboard, arbejdskøer og modulernes oversigt).
+"""Genbrugelig Action Center-liste (dashboard, arbejdskøer og modulernes oversigt)
++ opgave_menu (højreklik på en opgave i "Haster nu").
 
 Klik åbner sagen direkte på den relevante opgave. Højreklik giver hurtige
 handlinger: markér opgave udført, ændr frist, tildel ansvarlig og vis historik
@@ -91,3 +92,18 @@ class ActionListe(QObject):
             ))
         fyld_liste(self.liste, raekker, tom_tekst)
         self.antal.setText(str(len(par)))
+
+
+def opgave_menu(parent, proces, sag_id, opgave_id, aabn_sag, handling, pos_global):
+    """Højrekliksmenu for én opgave (Arbejdsoverblikkets "Haster nu").
+    aabn_sag/handling: signalerne fra ActionListe-formen (controlleren udfører)."""
+    menu = QMenu(parent)
+    menu.addAction("Åbn sag", lambda: aabn_sag.emit(proces, sag_id, opgave_id))
+    menu.addSeparator()
+    for navn, tekst in ((UDFOERT, "Markér som udført"), (I_GANG, "Sæt i gang"),
+                        (AFVENTER, "Afventer andre"), (FRIST, "Ændr frist…"),
+                        (ANSVARLIG, "Tildel ansvarlig…")):
+        menu.addAction(tekst, lambda n=navn: handling.emit(n, proces, sag_id, opgave_id))
+    menu.addSeparator()
+    menu.addAction("Vis historik", lambda: handling.emit(HISTORIK, proces, sag_id, ""))
+    menu.exec(pos_global)

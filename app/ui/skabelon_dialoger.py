@@ -395,6 +395,8 @@ _OFFBOARDING_KOLONNER = (
     ("frist_dage", "Frist (dage)", "tekst", 90), ("obligatorisk", "Obligatorisk", "flueben", 0),
 )
 POST_ROLE = Qt.ItemDataRole.UserRole + 10
+RAEKKE_HOEJDE = 42          # px – drop down-cellerne skal kunne ses helt
+COMBO_EKSTRA = 86           # px ud over teksten: cellens kant, padding, drop-pil og luft (theme.py)
 
 
 class SagSkabelonDialog(QDialog):
@@ -427,6 +429,7 @@ class SagSkabelonDialog(QDialog):
         self.stilling_felter = {}
         if self.onboarding:
             raekke = QHBoxLayout()
+            raekke.setSpacing(22)
             for stilling in OnboardingForloeb.STILLINGER:
                 felt = QCheckBox(stilling)
                 felt.setChecked(stilling in (self.skabelon.get("stillinger") or []))
@@ -455,6 +458,8 @@ class SagSkabelonDialog(QDialog):
         self.tabel = QTableWidget(0, len(self.felter))
         self.tabel.setHorizontalHeaderLabels([titel for _, titel, _, _ in self.felter])
         self.tabel.verticalHeader().setVisible(False)
+        # Plads til drop down-cellerne (Spor, Afdeling, Betingelse, Milepæl).
+        self.tabel.verticalHeader().setDefaultSectionSize(RAEKKE_HOEJDE)
         self.tabel.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabel.horizontalHeader().setStretchLastSection(True)
         for kolonne, (_, _, _, bredde) in enumerate(self.felter):
@@ -516,6 +521,14 @@ class SagSkabelonDialog(QDialog):
                     valg.addItem(tekst, data)
                 valg.setCurrentIndex(max(valg.findData(vaerdi or ""), 0))
                 self.tabel.setCellWidget(raekke, kolonne, valg)
+                # Kolonnen er mindst så bred som den længste valgmulighed (ingen afskåret
+                # tekst): teksten + temaets padding, drop-pil (28 px) og margen. Temaets
+                # skrift skal være lagt på, før der måles.
+                valg.ensurePolished()
+                laengst = max(valg.fontMetrics().horizontalAdvance(valg.itemText(i))
+                              for i in range(valg.count()))
+                self.tabel.setColumnWidth(kolonne, max(self.tabel.columnWidth(kolonne),
+                                                       laengst + COMBO_EKSTRA))
             else:
                 tekst = ", ".join(vaerdi) if slags == "liste" else str(vaerdi)
                 self.tabel.setItem(raekke, kolonne, QTableWidgetItem(tekst))

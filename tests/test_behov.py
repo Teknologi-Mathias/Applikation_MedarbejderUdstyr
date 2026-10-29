@@ -153,8 +153,11 @@ class KandidatoprettelseTest(TjenesteTest):
         sag = s.marker_udstyr_sendt(sag, ["telefon", "polo"])
         self.assertEqual((prik.udstyr(sag).tone, opgave_med_noegle(sag, "udstyr").status),
                          (prik.GROEN, Opgave.UDFOERT))
-        sag = s.fastlaeg_oplaering(sag, "Booket og bekræftet", "2026-12-02T08:00")
-        self.assertEqual(prik.oplaering(sag).tone, prik.GROEN)
+        self.assertEqual(prik.udstyr(sag).tekst, "Alt udstyr sendt")
+        # Opfølgningen (Merch) kan markeres, når kontrakten er retur.
+        sag = s.saet_opgave_status(sag, opgave_med_noegle(sag, "opfoelgning").id, Opgave.UDFOERT)
+        self.assertEqual((prik.opfoelgning(sag).tone, prik.opfoelgning(sag).tekst),
+                         (prik.GROEN, "Afholdt"))
         self.assertEqual(self.t.onboarding.hent(sag.id).behov.sendt, ["telefon", "polo"])
 
 

@@ -12,8 +12,6 @@ _FORMER = {
     "overblik": '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" '
                 'height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/>'
                 '<rect x="3" y="16" width="7" height="5" rx="1"/>',
-    "bakke": '<path d="M3 13h5l2 3h4l2-3h5"/><path d="M6 4h12l3 9v6a1 1 0 0 1-1 1H4a1 1 0 0 '
-             '1-1-1v-6z"/>',
     "onboarding": '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/>'
                   '<path d="M19 8v6M16 11h6"/>',
     "offboarding": '<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/>'

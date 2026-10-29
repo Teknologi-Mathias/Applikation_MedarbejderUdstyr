@@ -13,22 +13,7 @@ from app.domain.onboarding import OnboardingForloeb as OB
 from app.domain.opgave import laes_iso_dato
 from app.ui.hjaelpere import vis_dato
 from app.ui.sag_liste_side import Filtervalg, Kolonne
-from app.ui.theme import opgaver_stil, prik_stil, status_stil
-
-
-def status_tekst(sag) -> str:
-    return sag.status + (" (manuel)" if sag.status_manuel else "")
-
-
-def status_tooltip(sag) -> str:
-    if sag.status_manuel:
-        return f"Låst manuelt: {sag.status_begrundelse}"
-    return "Beregnet ud fra opgaverne og milepælene"
-
-
-def _status_sortering(sag):
-    statusser = list(type(sag).STATUSER)
-    return statusser.index(sag.status) if sag.status in statusser else 99
+from app.ui.theme import opgaver_stil, prik_stil
 
 
 def _opgaver_tooltip(sag) -> str:
@@ -63,9 +48,9 @@ def _opgave_kolonne(bredde: int = 0) -> Kolonne:
     return Kolonne("Opgaver", bredde, lambda s: s.opgave_tekst(), sortering, stil, _opgaver_tooltip)
 
 
-def _prik_kolonne(titel, prik_for: Callable, klik: str) -> Kolonne:
-    """Statusprik (app/domain/statusprik.py), der opdateres med ét klik."""
-    return Kolonne(titel, 112, lambda s: prik_for(s).tekst, lambda s: prik_for(s).sortering,
+def _prik_kolonne(titel, prik_for: Callable, klik: str, bredde: int = 150) -> Kolonne:
+    """Statusfelt (app/domain/statusprik.py), der ændres med en drop down-menu i tabellen."""
+    return Kolonne(titel, bredde, lambda s: prik_for(s).tekst, lambda s: prik_for(s).sortering,
                    lambda s: prik_stil(prik_for(s).tone),
                    lambda s: prik_for(s).tooltip, klik)
 
@@ -77,11 +62,6 @@ def _dato_kolonne(titel, felt) -> Kolonne:
 
 def _loennr_noegle(loennr):
     return (0, int(loennr), "") if str(loennr).isdigit() else (1, 0, str(loennr).lower())
-
-
-def _status_kolonne() -> Kolonne:
-    return Kolonne("Status", 220, status_tekst, _status_sortering,
-                   lambda s: status_stil(s.status), status_tooltip)
 
 
 @dataclass
@@ -104,46 +84,41 @@ def offboarding_modul() -> Modul:
         flertal="afviklingssager",
         statusser=Medarbejder.STATUSER,
         kolonner=[
-            Kolonne("Lønnr.", 110, lambda s: s.loennr, lambda s: _loennr_noegle(s.loennr)),
-            Kolonne("Medarbejdernavn", 230, lambda s: s.navn),
+            Kolonne("Lønnr.", 90, lambda s: s.loennr, lambda s: _loennr_noegle(s.loennr)),
+            Kolonne("Medarbejdernavn", 200, lambda s: s.navn),
             _dato_kolonne("Sidste arbejdsdag", lambda s: s.fratraedelsesdato),
-            _status_kolonne(),
-            _prik_kolonne("NAV", prik.nav, prik.NAV),
-            _prik_kolonne("Udstyr retur", prik.udstyr_retur, prik.UDSTYR),
-            _opgave_kolonne(150),
-            Kolonne("Kommentar", 0, lambda s: s.kommentar),
+            _prik_kolonne("Tankkort spærret", prik.tankkort, prik.TANKKORT),
+            _prik_kolonne("Tøj og udstyr", prik.toej, prik.TOEJ, 165),
+            _prik_kolonne("Telefon & SIM-kort", prik.telefon, prik.TELEFON),
+            _prik_kolonne("Lukket i NAV?", prik.nav, prik.NAV, 120),
+            _opgave_kolonne(),
         ],
-        filtre=[Filtervalg("Status", lambda: list(Medarbejder.STATUSER), lambda s: s.status)],
+        filtre=[],
         datofelt=lambda s: s.fratraedelsesdato,
         datotitel="Fratrædelser de næste 14 dage",
         opret_tekst="+ Opret fratrædelse",
     )
 
 
-def onboarding_modul(omraader: Callable, ansvarlige: Callable) -> Modul:
+def onboarding_modul(omraader: Callable) -> Modul:
     return Modul(
         proces=OB.PROCES,
         navn="Onboarding",
         flertal="onboardingforløb",
         statusser=OB.STATUSER,
         kolonner=[
-            Kolonne("Medarbejdernavn", 190, lambda s: s.navn),
+            Kolonne("Medarbejdernavn", 200, lambda s: s.navn),
             Kolonne("Lønnr.", 90, lambda s: s.loennr or "–", lambda s: _loennr_noegle(s.loennr)),
             Kolonne("Stilling", 80, lambda s: s.stilling),
-            Kolonne("Område", 120, lambda s: s.omraade or "–"),
-            _status_kolonne(),
-            Kolonne("Ansvarlig", 110, lambda s: s.ansvarlig or "–"),
+            Kolonne("Område", 130, lambda s: s.omraade or "–"),
             _dato_kolonne("Første arbejdsdag", lambda s: s.foerste_dag()),
             _prik_kolonne("Kontrakt", prik.kontrakt, prik.KONTRAKT),
-            _prik_kolonne("Udstyr", prik.udstyr, prik.UDSTYR),
-            _prik_kolonne("Oplæring", prik.oplaering, prik.OPLAERING),
-            _opgave_kolonne(),
+            _prik_kolonne("Udstyr", prik.udstyr, prik.UDSTYR, 165),
+            _prik_kolonne("Opfølgning", prik.opfoelgning, prik.OPFOELGNING, 0),
         ],
         filtre=[
-            Filtervalg("Status", lambda: list(OB.STATUSER), lambda s: s.status),
             Filtervalg("Stilling", lambda: list(OB.STILLINGER), lambda s: s.stilling),
             Filtervalg("Område", omraader, lambda s: s.omraade),
-            Filtervalg("Ansvarlig", ansvarlige, lambda s: s.ansvarlig),
         ],
         datofelt=lambda s: s.foerste_dag(),
         datotitel="Første arbejdsdage de næste 14 dage",

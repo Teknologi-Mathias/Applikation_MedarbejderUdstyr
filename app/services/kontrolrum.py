@@ -1,11 +1,11 @@
 """Kontrolrum: dashboardets overblikskort, arbejdskøer og "Haster nu".
 
-Ren logik uden brugerflade. Alt bygger på de fælles beregninger, så dashboard,
-arbejdsbakke og Teamoverblik altid er enige:
+Ren logik uden brugerflade. Alt bygger på de fælles beregninger, så dashboard
+og Teamoverblik altid er enige:
 
 - app/domain/arbejdsspor.py: arbejdstilstand, tidsrisiko, ansvar og klarhed.
-- app/services/arbejdsbakke.py: visninger og teamfiltre (kortenes klik åbner
-  netop de lister, tallene er talt ud fra).
+- app/services/teamoverblik.py: teamfiltrene (kortenes klik åbner Teamoverblikket
+  med netop det filter, tallene er talt ud fra).
 - app/services/action_center.py: regler (Indstillinger) og Alarm-modellen, så
   køerne vises med Action Centerets liste og hurtige handlinger.
 
@@ -22,11 +22,10 @@ from app.domain import arbejdsspor as sp
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
 from app.domain.opgave import Opgave, laes_iso_dato
-from app.services import arbejdsbakke as ab
+from app.services import teamoverblik as tov
 from app.services.action_center import ADVARSEL, KRITISK, PLANLAGT, Alarm, Regler
 
-# Hvor et overblikskort fører hen.
-ARBEJDSBAKKE = "arbejdsbakke"
+# Hvor et overblikskort fører hen (Teamoverblikket med et filter).
 TEAM = "team"
 
 
@@ -67,7 +66,7 @@ class Overblik:
     antal: int
     enhed: str            # hvad tallet tæller: "opgaver" eller "medarbejdere"
     forklaring: str
-    maal: tuple           # (ARBEJDSBAKKE, visning) eller (TEAM, teamfilter)
+    maal: tuple           # (TEAM, teamfilter)
 
 
 def overblik(sager: Iterable, i_dag: date, regler: Regler | None = None) -> list[Overblik]:
@@ -79,21 +78,21 @@ def overblik(sager: Iterable, i_dag: date, regler: Regler | None = None) -> list
     dage = regler.naermer_sig_dage
 
     def team(filter_):
-        return sum(ab.sag_matcher(s, filter_, i_dag, risiko_dage=dage) for s in onboarding)
+        return sum(tov.sag_matcher(s, filter_, i_dag, risiko_dage=dage) for s in onboarding)
 
     return [
-        Overblik(FORSINKEDE, "Forsinkede opgaver", len(ab.poster(sager, ab.FORSINKEDE, i_dag)),
-                 "opgaver", "Åbne opgaver over fristen – også dem, der venter på en forudsætning",
-                 (ARBEJDSBAKKE, ab.FORSINKEDE)),
-        Overblik(STARTER_SNART, "Starter snart", team(ab.KOMMENDE), "medarbejdere",
+        Overblik(FORSINKEDE, "Forsinkede opgaver", team(tov.SAG_FORSINKEDE), "medarbejdere",
+                 "Onboardingforløb med åbne opgaver over fristen – også dem, der venter på "
+                 "en forudsætning", (TEAM, tov.SAG_FORSINKEDE)),
+        Overblik(STARTER_SNART, "Starter snart", team(tov.KOMMENDE), "medarbejdere",
                  f"Første arbejdsdag inden for {_dage(dage)} (Indstillinger → Nærmer sig)",
-                 (TEAM, ab.KOMMENDE)),
-        Overblik(MANGLER_KONTRAKT, "Mangler kontrakt", team(ab.MANGLER_KONTRAKT),
+                 (TEAM, tov.KOMMENDE)),
+        Overblik(MANGLER_KONTRAKT, "Mangler kontrakt", team(tov.MANGLER_KONTRAKT),
                  "medarbejdere", "Kontrakten er ikke sendt eller ikke modtaget retur endnu",
-                 (TEAM, ab.MANGLER_KONTRAKT)),
-        Overblik(I_RISIKO, "Opstart i risiko", team(ab.RISIKO), "medarbejdere",
+                 (TEAM, tov.MANGLER_KONTRAKT)),
+        Overblik(I_RISIKO, "Opstart i risiko", team(tov.RISIKO), "medarbejdere",
                  "Forsinkede eller blokerede obligatoriske opgaver, eller tæt på start med "
-                 "åbne opgaver", (TEAM, ab.RISIKO)),
+                 "åbne opgaver", (TEAM, tov.RISIKO)),
     ]
 
 
@@ -222,7 +221,7 @@ def _afslutning_koe(sager, i_dag) -> list:
     er ikke kontrolleret og arkiveret."""
     poster = []
     for sag in sager:
-        if not ab.sag_matcher(sag, ab.KLAR_TIL_AFSLUTNING, i_dag):
+        if not tov.sag_matcher(sag, tov.KLAR_TIL_AFSLUTNING, i_dag):
             continue
         valgfrie = sum(not o.afsluttet for o in sag.opgaver)
         poster.append(Alarm(

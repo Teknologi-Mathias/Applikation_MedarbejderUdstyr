@@ -156,14 +156,26 @@ class SagService:
         return self.saet_opgave_status(sag, opgave_id, Opgave.UDFOERT)
 
     def saet_opgave_status(self, sag: Sag, opgave_id: str, status: str) -> Sag:
-        """Statusskift fra arbejdsbakken (ikke Undtaget – det kræver en begrundelse)."""
+        """Statusskift fra tabeller og hurtige handlinger (ikke Undtaget – det kræver en begrundelse)."""
         ny = sag.kopi()
         opgave = self._opgave(ny, opgave_id)
         if status != Opgave.IKKE_STARTET and ny.er_blokeret(opgave):
             raise ValideringsFejl(
                 f"'{opgave.navn}' kan ikke udføres endnu. {ny.blokeringsaarsag(opgave)}."
             )
+        if opgave.status == Opgave.UNDTAGET:
+            opgave.begrundelse = ""          # relevant igen
         opgave.saet_status(status)
+        return self.gem_aendret(sag, ny)
+
+    def undtag_opgave(self, sag: Sag, opgave_id: str, begrundelse: str) -> Sag:
+        """Opgaven er ikke relevant for forløbet (Undtaget kræver en begrundelse)."""
+        if not (begrundelse or "").strip():
+            raise ValideringsFejl("Skriv hvorfor opgaven ikke er relevant.")
+        ny = sag.kopi()
+        opgave = self._opgave(ny, opgave_id)
+        opgave.saet_status(Opgave.UNDTAGET)
+        opgave.begrundelse = begrundelse.strip()
         return self.gem_aendret(sag, ny)
 
     def aendr_frist(self, sag: Sag, opgave_id: str, ny_frist: str) -> Sag:

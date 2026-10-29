@@ -44,8 +44,10 @@ class Filtervalg:
 
 
 class SagListeSide(QWidget):
-    # (sag_id, Kolonne.klik): klik på en celle i en kolonne med en klik-handling.
-    celle_klik = Signal(str, str)
+    # (sag_id, Kolonne.klik, QPoint): klik på en celle i en kolonne med en klik-handling.
+    # Punktet er cellens nederste venstre hjørne (globalt), så drop down-menuen
+    # åbner lige under cellen.
+    celle_klik = Signal(str, str, object)
 
     def __init__(self, titel, undertitel, kolonner, knapper=(), handlinger=(),
                  filtre=(), sorter_efter=2, parent=None, soegning: Optional[Callable] = None):
@@ -151,7 +153,9 @@ class SagListeSide(QWidget):
         item = self.tabel.item(raekke, kolonne)
         handling = self.kolonner[kolonne].klik
         if item is not None and handling:
-            self.celle_klik.emit(item.data(ID_ROLE), handling)
+            hjoerne = self.tabel.visualItemRect(item).bottomLeft()
+            self.celle_klik.emit(item.data(ID_ROLE), handling,
+                                 self.tabel.viewport().mapToGlobal(hjoerne))
 
     ### ----- visning --------------------------------------------------------
 
@@ -202,14 +206,15 @@ class SagListeSide(QWidget):
     @staticmethod
     def _celle(sag, kolonne: Kolonne):
         tekst = str(kolonne.tekst(sag) or "")
-        item = SortItem(tekst)
+        # ▾: feltet ændres med en drop down-menu (kun hvor kolonnen har en klik-handling).
+        item = SortItem(f"{tekst}  ▾" if kolonne.klik else tekst)
         item.setData(SORT_ROLE, kolonne.sortering(sag) if kolonne.sortering else tekst.lower())
         item.setData(ID_ROLE, sag.id)
         if kolonne.stil:
             item.setData(STIL_ROLE, kolonne.stil(sag))
         tooltip = kolonne.tooltip(sag) if kolonne.tooltip else ""
         if kolonne.klik:
-            tooltip = f"{tooltip}\n\nKlik for at opdatere".strip()
+            tooltip = f"{tooltip}\n\nKlik for at ændre".strip()
         if tooltip:
             item.setToolTip(tooltip)
         return item

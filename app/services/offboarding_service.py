@@ -40,13 +40,17 @@ class OffboardingService(SagService):
         ny.status_begrundelse = data["status_begrundelse"]
         return self.gem_aendret(gammel, ny)
 
-    def marker_afleveret(self, sag: Medarbejder, opgave_ids) -> Medarbejder:
-        """Statusprikken "Udstyr retur": de valgte udstyrsopgaver er afleveret
-        (Udført), de øvrige ikke (Ikke startet) – i ét gem."""
+    def marker_afleveret(self, sag: Medarbejder, opgave_ids, gruppe=None) -> Medarbejder:
+        """Statusfelterne i tabellen: de valgte udstyrsopgaver er afleveret (Udført),
+        de øvrige ikke (Ikke startet) – i ét gem. gruppe: id'erne på de opgaver, feltet
+        dækker (fx "Tøj og udstyr"); andre opgaver røres ikke. None = alt udstyr."""
         ny = sag.kopi()
         afleveret = set(opgave_ids)
+        gruppe = None if gruppe is None else set(gruppe)
         for opgave in ny.opgaver:
             if not opgave.udstyr or opgave.status == Opgave.UNDTAGET:
+                continue
+            if gruppe is not None and opgave.id not in gruppe:
                 continue
             maal = Opgave.UDFOERT if opgave.id in afleveret else Opgave.IKKE_STARTET
             if maal != opgave.status and not (maal == Opgave.IKKE_STARTET and

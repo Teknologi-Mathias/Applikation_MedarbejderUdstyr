@@ -81,10 +81,10 @@ class UiTest(TjenesteTest):
     def test_dashboard_kort_aabner_den_filtrerede_liste(self):
         kort = self.vindue.dashboard.kort
         self.assertEqual(kort["starter_snart"].vaerdi.text(), "1")   # onboarding om 7 dage
-        self.assertGreater(int(kort["forsinkede"].vaerdi.text()), 0)  # offboarding -10 dage
-        kort["forsinkede"].klikket.emit("forsinkede")
-        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.arbejdsbakke)
-        self.assertEqual(self.vindue.arbejdsbakke.visning(), "forsinkede")
+        self.assertTrue(kort["forsinkede"].vaerdi.text().isdigit())
+        kort["forsinkede"].klikket.emit("forsinkede")                # forløb i Teamoverblikket
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.teamoverblik)
+        self.assertEqual(self.vindue.teamoverblik.filter_input.currentData(), "forsinkede")
         kort["i_risiko"].klikket.emit("i_risiko")
         self.assertIs(self.vindue.stak.currentWidget(), self.vindue.teamoverblik)
         self.assertEqual(self.vindue.teamoverblik.filter_input.currentData(), "risiko")
@@ -226,6 +226,14 @@ class UiTest(TjenesteTest):
         self.assertEqual(self.vindue.sider["off_aktive"].tabel.rowCount(), 0, "data er fjernet")
         afslut.assert_called_once()
 
+    def test_kalender_er_et_udkast_med_besked(self):
+        self.vindue.vis_side("dashboard")
+        with mock.patch.object(QMessageBox, "information") as besked:
+            self.vindue.sidebar.knapper["kalender"].click()
+        self.assertEqual(besked.call_args.args[1:], ("Kalender", "Under udvikling, afvent adgang."))
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.dashboard, "ingen side skiftes")
+        self.assertTrue(self.vindue.sidebar.knapper["overblik"].isChecked())
+
     def test_baggrundsopgave_leverer_resultat_og_fejl_paa_ui_traaden(self):
         from app.ui.baggrund import koer_i_baggrund
         resultater, fejl = [], []
@@ -248,6 +256,44 @@ class UiTest(TjenesteTest):
         self.assertEqual([s.id for s in arkiv], [self.off.id])
         self.assertEqual(arkiv[0].find_opgave(opgave.id).status, "Udført")
         self.assertEqual(self.vindue.sider["off_arkiv"].tabel.rowCount(), 1)
+
+    def test_drop_down_i_aktive_forloeb_gemmer_og_opdaterer_cellen(self):
+        from app.domain import statusprik as prik
+        menuer = []
+
+        def vaelg(noegle, proces, sag_id, tekst):
+            with mock.patch("app.ui.modul_controller._vis_menu",
+                            lambda menu, pos=None: menuer.append(menu)):
+                self.vindue.ctrl[proces].hurtig_status(sag_id, noegle)
+            next(a for a in menuer[-1].actions() if a.text() == tekst).trigger()
+
+        def celle(side, sag_id, titel):
+            side = self.vindue.sider[side]
+            side.vaelg(sag_id)
+            kolonne = [k.titel for k in side.kolonner].index(titel)
+            return side.tabel.item(side.tabel.currentRow(), kolonne).text()
+
+        self.vindue.opdater_alle()
+        off = self.off.id
+        for noegle, titel, tekst in ((prik.TANKKORT, "Tankkort spærret", "Ikke relevant"),
+                                     (prik.TOEJ, "Tøj og udstyr", "Alt afleveret"),
+                                     (prik.TELEFON, "Telefon & SIM-kort", "Alt afleveret"),
+                                     (prik.NAV, "Lukket i NAV?", "Ja")):
+            vaelg(noegle, "offboarding", off, tekst)
+            self.assertEqual(celle("off_aktive", off, titel), f"{tekst}  ▾", titel)
+        self.assertEqual(prik.tankkort_opgaver(self.t.offboarding.hent(off))[0].status,
+                         "Undtaget")
+
+        on = self.ny_onboarding(navn="Klar Kandidat", loennr="777")
+        self.vindue.opdater_alle()
+        vaelg(prik.KONTRAKT, "onboarding", on.id, "Modtaget retur")
+        vaelg(prik.OPFOELGNING, "onboarding", on.id, "Afholdt")
+        self.assertEqual(celle("on_aktive", on.id, "Kontrakt"), "Modtaget retur  ▾")
+        self.assertEqual(celle("on_aktive", on.id, "Opfølgning"), "Afholdt  ▾")
+        titler = [k.titel for k in self.vindue.sider["on_aktive"].kolonner]
+        for fjernet in ("Status", "Ansvarlig", "Opgaver", "Oplæring"):
+            self.assertNotIn(fjernet, titler)
+        self.assertNotIn("arbejdsbakke", self.vindue.sider)
 
     def test_onboardingdialog_vaelger_den_ene_skabelon_automatisk(self):
         skabeloner = self.t.skabeloner.sagsskabeloner(OB.PROCES)
@@ -304,12 +350,13 @@ class UiTest(TjenesteTest):
         kolonne = [k.titel for k in side.kolonner].index("Kontrakt")
         side.vaelg(sag.id)
         raekke = side.tabel.currentRow()
-        self.assertEqual(side.tabel.item(raekke, kolonne).text(), "Ikke sendt")
+        self.assertEqual(side.tabel.item(raekke, kolonne).text(), "Ikke sendt  ▾")
         with mock.patch.object(self.vindue.ctrl["onboarding"], "hurtig_status") as hurtig:
             side.celle_klik.disconnect()
             side.celle_klik.connect(hurtig)
             side.tabel.cellClicked.emit(raekke, kolonne)
-        hurtig.assert_called_once_with(sag.id, "kontrakt")
+        hurtig.assert_called_once()
+        self.assertEqual(hurtig.call_args.args[:2], (sag.id, "kontrakt"))   # + menuens position
 
         medarbejder = self.ny_offboarding(loennr="9123", navn="Aflevering Test")
         dialog = MedarbejderDialog(self.vindue, medarbejder)

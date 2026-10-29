@@ -1,7 +1,7 @@
 """Arbejdsspor: én sag, flere parallelle spor (HR, kontrakt, tøj, telefon …).
 
 Ren beregning ud fra sagens opgaver – intet gemmes. Teamoverblik,
-arbejdsbakker, Action Center og rapporter bruger de samme funktioner, så en
+Arbejdsoverblik, Action Center og rapporter bruger de samme funktioner, så en
 status aldrig beregnes forskelligt to steder.
 
 Tre adskilte dimensioner pr. opgave:

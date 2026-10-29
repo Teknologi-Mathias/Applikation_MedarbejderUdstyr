@@ -10,7 +10,7 @@ handling og ejer. Klik på en spor-celle eller næste handling åbner sagen på
 den relevante opgave.
 
 Nøgletallene øverst er klikbare og sætter det tilsvarende filter. Alt beregnes
-af app/services/arbejdsbakke.py og app/domain/arbejdsspor.py.
+af app/services/teamoverblik.py og app/domain/arbejdsspor.py.
 """
 from datetime import date
 
@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 from app import session
 from app.domain import arbejdsspor as sp
 from app.domain.opgave import Opgave
-from app.services import arbejdsbakke as ab
+from app.services import teamoverblik as tov
 from app.ui.hjaelpere import lav_kort, lav_sidehoved, vis_dato
 from app.ui.theme import spor_stil
 from app.ui.widgets import ID_ROLE, SORT_ROLE, STIL_ROLE, PilleDelegate, SortItem
@@ -111,7 +111,7 @@ class TeamoverblikSide(QWidget):
         self.kort = {}
         gitter = QGridLayout()
         gitter.setSpacing(10)
-        for i, tal in enumerate(ab.noegletal([], date.today())):
+        for i, tal in enumerate(tov.noegletal([], date.today())):
             kort = NoegletalKort(tal.navn, tal.filter, tal.forklaring)
             kort.klikket.connect(self.vaelg_filter)
             self.kort[tal.navn] = kort
@@ -120,7 +120,7 @@ class TeamoverblikSide(QWidget):
 
         filtre = QHBoxLayout()
         self.filter_input = QComboBox()
-        for noegle, navn in ab.TEAM_FILTRE:
+        for noegle, navn in tov.TEAM_FILTRE:
             self.filter_input.addItem(navn, noegle)
         self.filter_input.currentIndexChanged.connect(lambda _i: self._vis())
         self.visning_input = QComboBox()
@@ -179,7 +179,7 @@ class TeamoverblikSide(QWidget):
     def opdater(self, sager, risiko_dage: int = 7):
         self._sager = [s for s in sager if not s.arkiveret]
         self.risiko_dage = risiko_dage
-        for tal in ab.noegletal(self._sager, date.today(), risiko_dage):
+        for tal in tov.noegletal(self._sager, date.today(), risiko_dage):
             self.kort[tal.navn].vaerdi.setText(str(tal.antal))
         self._vis()
 
@@ -223,7 +223,7 @@ class TeamoverblikSide(QWidget):
         filter_ = self.filter_input.currentData()
         soeg = self.soeg.text().strip().lower()
         sager = [s for s in self._sager
-                 if ab.sag_matcher(s, filter_, i_dag, session.brugernavn() or "",
+                 if tov.sag_matcher(s, filter_, i_dag, session.brugernavn() or "",
                                    session.afdelinger(), self.risiko_dage)
                  and (not soeg or soeg in f"{s.navn} {getattr(s, 'stilling', '')} "
                                            f"{getattr(s, 'omraade', '')}".lower())]
@@ -235,7 +235,7 @@ class TeamoverblikSide(QWidget):
         self.tabel.setRowCount(len(sager))
         for r, sag in enumerate(sager):
             klar = sp.klarhed(sag, i_dag, self.risiko_dage)
-            naeste = ab.naeste_handling(sag, i_dag)
+            naeste = tov.naeste_handling(sag, i_dag)
             naeste_id = naeste.naeste.id if naeste and naeste.naeste else ""
             start = sag.maaldato()
             lukkede, i_alt = fremdrift(sag)

@@ -261,6 +261,16 @@ try {
     # Samme format som sha256sum: "<hash> *<filnavn>"
     [System.IO.File]::WriteAllText($hashFil, "$hash *$InstallerNavn`n", (New-Object System.Text.UTF8Encoding($false)))
     Ok $hash
+    # Følgefil til Indstillinger → Opdateringer: hvilket databaseskema pakken kræver og
+    # hvilket commit den er bygget fra (siden afviser en pakke, databasen ikke er klar til).
+    Push-Location $Rod
+    try { $Skema = ([string](Invoke-Native { & $Python -c 'import app; print(app.KRAEVET_SKEMA)' })).Trim() }
+    finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0 -or $Skema -notmatch '^\d+$') { Stop-Build "KRAEVET_SKEMA i app\__init__.py kunne ikke læses ('$Skema')." }
+    $infoFil = "$Installer.json"
+    $info = [ordered]@{ version = $Version; kraevet_skema = [int]$Skema; commit = $Commit; sha256 = $hash }
+    [System.IO.File]::WriteAllText($infoFil, ($info | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+    Ok "$InstallerNavn.json (skema $Skema, commit $Commit)"
 
     if ($Udgiv) {
         Trin 'Udgiver til pilotkanalen (central opdatering)'
@@ -282,8 +292,8 @@ try {
     Write-Host "  Commit      : $Commit"
     Write-Host "  Tests       : $TestTekst"
     Write-Host "  Varighed    : $varighed"
-    if ($Udgiv) { Write-Host '  Udgivet     : pilotkanalen (frigiv bagefter med tools\udgiv_version.py frigiv)' }
-    else { Write-Host '  Udgivet     : nej (byg med -Udgiv for at udgive til pilotkanalen)' }
+    if ($Udgiv) { Write-Host '  Udgivet     : pilotkanalen (frigiv bagefter i Indstillinger → Opdateringer)' }
+    else { Write-Host '  Udgivet     : nej – træk installeren ind i IN-BASE → Indstillinger → Opdateringer' }
     Write-Host "  Intet er committet eller tagget. Tag gerne commit $($Commit -replace '\+ucommittet$', '') som v$Version i git."
     exit 0
 }

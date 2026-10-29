@@ -4,11 +4,10 @@ Brugerfladen indeholder ingen forretningsregler – controlleren åbner
 dialoger, kalder servicen via udfoer() (ensartet fejlhåndtering) og beder
 hovedvinduet opdatere visningerne bagefter.
 """
-from PySide6.QtCore import QDate, QDateTime, QTime
+from PySide6.QtCore import QDate
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QDateEdit,
-    QDateTimeEdit,
     QDialog,
     QDialogButtonBox,
     QInputDialog,
@@ -23,7 +22,7 @@ from app.domain import skabelon as sk
 from app.domain import statusprik as prik
 from app.domain.opgave import Opgave
 from app.domain.sag import Sag
-from app.services.onboarding_service import BOOKING, booking_tekst, opgave_med_noegle
+from app.services.onboarding_service import opgave_med_noegle
 from app.ui import action_liste as al
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import laes_dato, vis_dato
@@ -50,26 +49,9 @@ def _vaelg_dato(parent, titel, nuvaerende) -> str | None:
     return felt.date().toString("yyyy-MM-dd") if dialog.exec() else None
 
 
-def _vaelg_tidspunkt(parent, titel, nuvaerende) -> str | None:
-    """Dato og klokkeslæt som ISO ("2026-12-02T08:00") – None ved annuller."""
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(titel)
-    felt = QDateTimeEdit()
-    felt.setCalendarPopup(True)
-    felt.setDisplayFormat("dd-MM-yyyy HH:mm")
-    tid = QDateTime.fromString(nuvaerende[:16], "yyyy-MM-ddTHH:mm") if nuvaerende else QDateTime()
-    felt.setDateTime(tid if tid.isValid() else QDateTime(QDate.currentDate(), QTime(8, 0)))
-    knapper = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    knapper.accepted.connect(dialog.accept)
-    knapper.rejected.connect(dialog.reject)
-    layout = QVBoxLayout(dialog)
-    layout.addWidget(felt)
-    layout.addWidget(knapper)
-    return felt.dateTime().toString("yyyy-MM-ddTHH:mm") if dialog.exec() else None
-
-
-def _vis_menu(menu: QMenu) -> None:
-    menu.exec(QCursor.pos())
+def _vis_menu(menu: QMenu, pos=None) -> None:
+    """Drop down-menuen: lige under cellen (pos fra tabellen), ellers ved musen."""
+    menu.exec(pos if pos is not None else QCursor.pos())
 
 
 def _menupunkt(menu: QMenu, tekst: str, funktion, valgt: bool = False):
@@ -136,8 +118,13 @@ class ModulController:
         """Kaldes, før sagsvinduets ændringer gemmes. False = gem ikke."""
         return True
 
-    def hurtig_status(self, sag_id, noegle):
-        """Klik på en statusprik i tabellen (app/domain/statusprik.py)."""
+    def hurtig_status(self, sag_id, noegle, pos=None):
+        """Klik på et statusfelt i "Aktive forløb" (app/domain/statusprik.py): en drop
+        down-menu under cellen. Valget gemmes straks og vises uden genindlæsning."""
+
+    def _ingen_opgave(self, felt: str) -> None:
+        QMessageBox.information(self.vindue, felt,
+                                f"Forløbet har ingen opgave for \"{felt}\" (se skabelonen).")
 
     def vis_historik(self, sag_id):
         self.aabn_sag(sag_id, start_fane=SagDialog.FANE_TIDSLINJE)
@@ -209,33 +196,73 @@ class ModulController:
 
 class OffboardingController(ModulController):
 
-    def hurtig_status(self, sag_id, noegle):
+    def hurtig_status(self, sag_id, noegle, pos=None):
         sag = self._hent(sag_id)
         if sag is None:
             return
         menu = QMenu(self.vindue)
-        if noegle == prik.NAV:
-            opgave = prik.nav_opgave(sag)
-            if opgave is None:
-                return
-            lukket = opgave.status == Opgave.UDFOERT
-            for tekst, status in (("Lukket i NAV", Opgave.UDFOERT),
-                                  ("Ikke lukket endnu", Opgave.IKKE_STARTET)):
-                _menupunkt(menu, tekst, lambda s=status: self._udfoer(
-                    self.service.saet_opgave_status, sag, opgave.id, s),
-                    lukket == (status == Opgave.UDFOERT))
-        elif noegle == prik.UDSTYR:
-            opgaver = prik.udstyrsopgaver(sag)
+        if noegle == prik.TANKKORT:
+            opgaver = prik.tankkort_opgaver(sag)
             if not opgaver:
-                return
+                return self._ingen_opgave("Tankkort spærret")
+            nu = prik.tankkort(sag).tekst
+            _menupunkt(menu, "Ikke relevant", lambda: self._ikke_relevant(sag, opgaver),
+                       nu == "Ikke relevant")
+            for tekst, status in (("Ikke behandlet", Opgave.IKKE_STARTET),
+                                  ("Behandlet", Opgave.UDFOERT)):
+                _menupunkt(menu, tekst, lambda s=status: self._saet_alle(sag, opgaver, s),
+                           nu == tekst)
+        elif noegle == prik.TOEJ:
+            opgaver = prik.toej_opgaver(sag)
+            if not opgaver:
+                return self._ingen_opgave("Tøj og udstyr")
+            gruppe = [o.id for o in opgaver]
             afleveret = {o.id for o in opgaver if o.status == Opgave.UDFOERT}
             for o in opgaver:
                 _menupunkt(menu, o.udstyr, lambda i=o.id: self._udfoer(
-                    self.service.marker_afleveret, sag, afleveret ^ {i}), o.id in afleveret)
+                    self.service.marker_afleveret, sag, afleveret ^ {i}, gruppe),
+                    o.id in afleveret)
             menu.addSeparator()
+            menu.addAction("Intet afleveret", lambda: self._udfoer(
+                self.service.marker_afleveret, sag, [], gruppe))
             menu.addAction("Alt afleveret", lambda: self._udfoer(
-                self.service.marker_afleveret, sag, [o.id for o in opgaver]))
-        _vis_menu(menu)
+                self.service.marker_afleveret, sag, gruppe, gruppe))
+        elif noegle == prik.TELEFON:
+            opgaver = prik.telefon_opgaver(sag)
+            if not opgaver:
+                return self._ingen_opgave("Telefon & SIM-kort")
+            nu = prik.telefon(sag).tekst
+            for tekst, status in (("Intet afleveret", Opgave.IKKE_STARTET),
+                                  ("Alt afleveret", Opgave.UDFOERT)):
+                _menupunkt(menu, tekst, lambda s=status: self._saet_alle(sag, opgaver, s),
+                           nu == tekst)
+        elif noegle == prik.NAV:
+            opgave = prik.nav_opgave(sag)
+            if opgave is None:
+                return self._ingen_opgave("Lukket i NAV?")
+            for tekst, status in (("Nej", Opgave.IKKE_STARTET), ("Ja", Opgave.UDFOERT)):
+                _menupunkt(menu, tekst, lambda s=status: self._saet_alle(sag, [opgave], s),
+                           (opgave.status == Opgave.UDFOERT) == (status == Opgave.UDFOERT))
+        _vis_menu(menu, pos)
+
+    def _saet_alle(self, sag, opgaver, status):
+        """Samme status på feltets opgaver (oftest én) – ét gem pr. ændret opgave."""
+        for o in opgaver:
+            if o.status == status:
+                continue
+            sag = self._udfoer(self.service.saet_opgave_status, sag, o.id, status)
+            if sag is FEJL:
+                return
+
+    def _ikke_relevant(self, sag, opgaver):
+        """"Ikke relevant" (fx intet tankkort): opgaverne undtages med en fast begrundelse."""
+        for o in opgaver:
+            if o.status == Opgave.UNDTAGET:
+                continue
+            sag = self._udfoer(self.service.undtag_opgave, sag, o.id,
+                               prik.IKKE_RELEVANT_BEGRUNDELSE)
+            if sag is FEJL:
+                return
 
     def opret(self):
         skabeloner = udfoer(self.vindue, self.t.skabeloner.sagsskabeloner, "offboarding")
@@ -320,9 +347,9 @@ class OnboardingController(ModulController):
         if sag is not FEJL:
             self.vindue.vis_oprettet(sag)
 
-    ### ----- statusprikker (kontrakt, udstyr, oplæring) ----------------------
+    ### ----- statusfelter (kontrakt, udstyr, opfølgning) ---------------------
 
-    def hurtig_status(self, sag_id, noegle):
+    def hurtig_status(self, sag_id, noegle, pos=None):
         sag = self._hent(sag_id)
         if sag is None:
             return
@@ -330,10 +357,10 @@ class OnboardingController(ModulController):
         if noegle == prik.KONTRAKT:
             opgave = opgave_med_noegle(sag, prik.KONTRAKT)
             if opgave is None:
-                return
+                return self._ingen_opgave("Kontrakt")
             for tekst, status in (("Ikke sendt", Opgave.IKKE_STARTET),
-                                  ("Sendt til medarbejderen", Opgave.AFVENTER),
-                                  ("Modtaget retur underskrevet", Opgave.UDFOERT)):
+                                  ("Sendt (afventer underskrift)", Opgave.AFVENTER),
+                                  ("Modtaget retur", Opgave.UDFOERT)):
                 _menupunkt(menu, tekst, lambda s=status: self.saet_kontrakt(sag, s),
                            opgave.status == status)
         elif noegle == prik.UDSTYR:
@@ -347,25 +374,20 @@ class OnboardingController(ModulController):
                 _menupunkt(menu, tekst, lambda n=n: self._udfoer(
                     self.service.marker_udstyr_sendt, sag, sendt ^ {n}), n in sendt)
             menu.addSeparator()
-            menu.addAction("Alt sendt", lambda: self._udfoer(
+            menu.addAction("Intet udstyr sendt", lambda: self._udfoer(
+                self.service.marker_udstyr_sendt, sag, []))
+            menu.addAction("Alt udstyr sendt", lambda: self._udfoer(
                 self.service.marker_udstyr_sendt, sag, [n for n, _ in poster]))
-        elif noegle == prik.OPLAERING:
-            opgave = opgave_med_noegle(sag, prik.OPLAERING)
+        elif noegle == prik.OPFOELGNING:
+            opgave = opgave_med_noegle(sag, prik.OPFOELGNING)
             if opgave is None:
-                return
-            nu = booking_tekst(opgave)
-            menu.addAction("Vælg oplæringsdag…", lambda: self._oplaeringsdag(sag, opgave))
-            menu.addSeparator()
-            for tekst in BOOKING:
-                _menupunkt(menu, tekst, lambda t=tekst: self._udfoer(
-                    self.service.fastlaeg_oplaering, sag, t), tekst == nu)
-        _vis_menu(menu)
-
-    def _oplaeringsdag(self, sag, opgave):
-        tidspunkt = _vaelg_tidspunkt(self.vindue, f"Oplæringsdag: {sag.navn}", opgave.planlagt)
-        if tidspunkt:
-            # Et tidspunkt er ikke en booking – bookingstatus bevares.
-            self._udfoer(self.service.fastlaeg_oplaering, sag, booking_tekst(opgave), tidspunkt)
+                return self._ingen_opgave("Opfølgning")
+            for tekst, status in (("Ikke afholdt", Opgave.IKKE_STARTET),
+                                  ("Afholdt", Opgave.UDFOERT)):
+                _menupunkt(menu, tekst, lambda s=status: self._udfoer(
+                    self.service.saet_opgave_status, sag, opgave.id, s),
+                    (opgave.status == Opgave.UDFOERT) == (status == Opgave.UDFOERT))
+        _vis_menu(menu, pos)
 
     def saet_kontrakt(self, sag, status):
         """Manglende lønnr./ansættelsesdato (står på kontrakten) spørges der om her

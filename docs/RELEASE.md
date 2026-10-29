@@ -54,16 +54,17 @@ de findes.
 2. **Commit** ændringerne. Scriptet bygger kun fra en ren arbejdskopi
    (`git status`), så en release altid kan genskabes fra et commit
    (`-TilladUcommittet` til en afprøvningsbuild, der ikke kan udgives).
-3. **Byg (og udgiv til pilot):**
+3. **Byg:**
    ```powershell
-   .\scripts\build_windows.ps1 -Udgiv -Noter "Kort om, hvad der er nyt"
+   .\scripts\build_windows.ps1
    ```
    Trin: miljøtjek → version → git (ren arbejdskopi, commit) → hele den lokale
    testpakke → ryd `build\pyinstaller` og `dist\IN-BASE` → PyInstaller → kontrol
    af appen (version, assets, SSL-certifikater, ingen `.env`/persondata,
-   `--selvtest`) → Inno Setup (højst 50 MB) → SHA-256 → (med `-Udgiv`) upload
-   til pilotkanalen → rapport. Fejler et trin, stopper scriptet med
-   `RELEASE IKKE GENNEMFØRT` og exit-kode 1. Uden `-Udgiv` bygges kun lokalt.
+   `--selvtest`) → Inno Setup (højst 50 MB) → SHA-256 + følgefil `.json` (version,
+   påkrævet skema, commit) → rapport. Fejler et trin, stopper scriptet med
+   `RELEASE IKKE GENNEMFØRT` og exit-kode 1. (`-Udgiv` udgiver direkte fra
+   buildet – normalt gøres det i programmet, se trin 6.)
 4. **Find resultatet** i `release\`:
    ```
    release\IN-BASE-Setup-v0.7.1.exe
@@ -80,8 +81,10 @@ de findes.
      skal give værdien i `.sha256`-filen.
    * Opgradering: installér den nye version oven på den gamle – konfiguration
      og login bevares.
-6. **Frigiv til alle**, når pilotversionen virker:
-   `python tools\udgiv_version.py frigiv <version>` (evt. `--procent 25`, så 100).
+6. **Udgiv i IN-BASE:** *Indstillinger → Opdateringer* (kun administratorer). Træk
+   `release\IN-BASE-Setup-v<version>.exe` ind i feltet (eller *Vælg fil…*), skriv
+   hvad der er nyt, og klik *Udgiv til pilot*. Når pilotbrugerne har afprøvet den:
+   vælg versionen og *Frigiv til alle…* (evt. 25 %, så 100 %).
 7. **Tag** commit'et i git (`v<version>`) – scriptet tagger aldrig selv.
 
 ### Hvilke tests kører scriptet – og hvorfor
@@ -111,9 +114,23 @@ den private Storage-bucket `releases`, kontrollerer SHA-256 og spørger brugeren
 "Opdater og genstart". Installeren kører stille (`/OPDATERING=1`) og starter
 IN-BASE igen. Ingen administratorrettigheder; konfiguration og login bevares.
 
+Udgivelse sker i **IN-BASE → Indstillinger → Opdateringer** (kun administratorer):
+
+* **Ny version:** træk installeren ind. Pakken kontrolleres, før noget sendes:
+  filnavn, versionen inde i exe-filen (et omdøbt build afvises), størrelse (højst
+  50 MB), kontrolsum (`.sha256`), følgefilen `.json` fra buildet (skemakrav + commit),
+  at versionen er nyere end alt udgivet, og at **databasen har det skema, versionen
+  kræver** (ellers: kør migreringerne først – klienterne ville ikke kunne starte).
+  Uploaden kører i baggrunden; versionen udgives til **pilot**.
+* **Udgivne versioner:** *Frigiv til alle…* (andel i %), *Træk tilbage / gyldig igen*,
+  *Kræv som mindste version…* (kun en version, der er frigivet til 100 %) og *Ryd
+  gamle installere…*.
+
+`tools\udgiv_version.py` er reserven fra kommandolinjen – med samme regler:
+
 | Kommando (`python tools\udgiv_version.py …`) | Virkning |
 |---|---|
-| `udgiv <installer> [--noter] [--tvungen]` | Upload + registrering som **pilot** (det gør `-Udgiv`). |
+| `udgiv <installer> [--noter] [--tvungen]` | Kontrol + upload + registrering som **pilot** (det gør `-Udgiv`). |
 | `frigiv <version> [--procent N]` | **Stabil** for alle (eller N % – gradvis udrulning). |
 | `tilbagetraek <version> [--fortryd]` | Stopper versionen. Klienter på den går tilbage til den nyeste gyldige. |
 | `minimum <version>` | Ældre klienter skal opdatere, før de kan arbejde videre. |

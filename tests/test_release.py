@@ -101,6 +101,13 @@ class BuildTest(unittest.TestCase):
         self.assertIn("-m unittest discover -s tests -t .", SCRIPT)
         self.assertIn("$MaksInstaller = 50MB", SCRIPT)
 
+    def test_script_skriver_foelgefil_til_opdateringssiden(self):
+        """Indstillinger → Opdateringer læser skemakrav og commit fra <installer>.json."""
+        self.assertIn('$infoFil = "$Installer.json"', SCRIPT)
+        for felt in ("version = $Version", "kraevet_skema = [int]$Skema", "commit = $Commit",
+                     "sha256 = $hash"):
+            self.assertIn(felt, SCRIPT)
+
     def test_spec_udelader_ubrugte_qt_dele(self):
         for del_ in ("qtvirtualkeyboard", "qt6quick", "qt6qml", "qpdf", "opengl32sw"):
             self.assertIn(f"'{del_}'", SPEC)

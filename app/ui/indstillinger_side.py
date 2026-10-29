@@ -34,6 +34,7 @@ from app.ui.bruger_side import BrugerSide
 from app.ui.data_side import DataSide
 from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, scroll_side, vis_dato
+from app.ui.opdatering_side import OpdateringPanel
 from app.ui.skabelon_side import SkabelonSide
 
 
@@ -423,6 +424,7 @@ class IndstillingerSide(QWidget):
         self.organisation = OrganisationPanel(tjenester)
         self.brugere = BrugerSide(tjenester.auth)
         self.data = DataSide(tjenester, hent_arkiv)
+        self.opdateringer = OpdateringPanel(tjenester)
 
         self.faner = QTabWidget()
         self.faner.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
@@ -432,6 +434,8 @@ class IndstillingerSide(QWidget):
             (self.organisation, "Organisation", "Områder, ansvarlige og regler for Action Center", False),
             (self.brugere, "Brugere", "Brugerkartotek og roller", True),
             (self.data, "Data & sikkerhed", "Backup, gendannelse og slettepolitik", True),
+            (self.opdateringer, "Opdateringer", "Udgiv nye versioner af IN-BASE til alle klienter",
+             True),
         ]
         for panel, navn, tip, _ in self._paneler:
             index = self.faner.addTab(panel, navn)

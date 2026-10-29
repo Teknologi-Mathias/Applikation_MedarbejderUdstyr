@@ -358,6 +358,16 @@ QTableWidget {
     outline: 0;
 }
 QTableWidget::item { padding: 4px 10px; border: none; }
+/* Indstillinger → Opdateringer: feltet, man trækker installeren ind i. */
+QFrame#slipfelt {
+    background: @SURFACE_2; border: 2px dashed @BORDER_STRONG; border-radius: 12px;
+}
+QFrame#slipfelt[aktiv="true"] { border: 2px dashed @PRIMARY; background: @PRIMARY_SOFT; }
+/* Felter inde i tabeller (drop down-celler og redigering af en celle): kompakte,
+   så de ikke skæres af rækkehøjden. */
+QTableWidget QComboBox, QTableWidget QLineEdit {
+    padding: 3px 8px; border-radius: 6px; margin: 2px 3px;
+}
 QHeaderView::section {
     background: @SURFACE; color: @MUTED; border: none;
     border-bottom: 1px solid @BORDER; padding: 10px; font-weight: 700;

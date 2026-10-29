@@ -12,7 +12,7 @@ Telefoner er også låst i databasen (migrering 010), fordi tabellen kun var
 Modulnavnene svarer til check-betingelsen i migrering 010.
 
 Afdelinger (roller): en bruger kan være medlem af flere afdelinger (HR,
-Administration, Merch – migrering 014). De styrer arbejdsbakkerne ("Min
+Administration, Merch – migrering 014). De styrer Teamoverblikkets filter ("Min
 afdeling"), ikke adgangen: alle medlemmer må behandle alle sager.
 """
 from typing import Optional

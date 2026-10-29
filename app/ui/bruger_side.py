@@ -211,7 +211,7 @@ class BrugerSide(QWidget):
         rolle = lav_knap("Skift rolle")
         moduler = lav_knap("Moduladgang…", tooltip="Hvilke moduler brugeren må se")
         afdelinger = lav_knap("Afdelinger…", tooltip="Hvilke afdelinger brugeren er medlem af "
-                                                     "(styrer arbejdsbakken)")
+                                                     "(styrer \"Min afdeling\" i Teamoverblikket)")
         pilot = lav_knap("Pilotkanal til/fra",
                          tooltip="Pilotbrugere får nye versioner af IN-BASE først")
         self.aktiv_knap = lav_knap("Deaktivér / aktivér",
@@ -334,7 +334,7 @@ class BrugerSide(QWidget):
         dialog = FluebenDialog(
             self, f"Afdelinger – {brugernavn}",
             "Vælg de afdelinger, brugeren er medlem af. En bruger kan være i flere. "
-            "Afdelingen afgør, hvad der vises under \"Min afdeling\" i arbejdsbakken – "
+            "Afdelingen afgør, hvad der vises under \"Min afdeling\" i Teamoverblikket – "
             "alle brugere kan stadig behandle alle sager.",
             {a: a for a in AFDELINGER}, adgang.afdelinger_for(self._brugere.get(brugernavn)))
         if dialog.exec() and udfoer(self, self.auth.saet_afdelinger, brugernavn,
