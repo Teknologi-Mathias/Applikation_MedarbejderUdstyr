@@ -25,7 +25,7 @@ log = logging.getLogger("in-base")
 
 # Egen identitet over for Windows, så proceslinjen og notifikationer viser
 # IN-BASE-logoet – også når programmet køres fra kildekoden (python.exe).
-WINDOWS_APP_ID = "MASAN.IN-BASE"
+WINDOWS_APP_ID = "IN-BASE"
 
 
 def _saet_windows_app_id() -> None:
