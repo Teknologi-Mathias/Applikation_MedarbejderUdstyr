@@ -118,13 +118,16 @@ class OpdateringRepository(Protocol):
 
 
 class KalenderRepository(Protocol):
-    """Kalender (migrering 020): kalendere og begivenheder.
+    """Kalender (migrering 020/021): kalendere, begivenheder og deling.
 
-    Ejer og opretter bestemmes af lagringen ud fra login. begivenheder() giver
+    Ejer og opretter bestemmes af lagringen ud fra login. kalendre() giver de
+    kalendere, brugeren har adgang til (Kalender.adgang). begivenheder() giver
     de begivenheder (serier og rettede forekomster), der kan have forekomster i
-    tidsrummet – udfoldningen sker i domænet. opdater()/opdater_kalender()
-    afviser med KonfliktFejl, hvis versionen ikke er den, der blev hentet.
-    importer() springer dubletter over og returnerer antal oprettede.
+    tidsrummet – maskeret ("Optaget") hvor brugeren kun må se ledig/optaget;
+    udfoldningen sker i domænet. opdater()/opdater_kalender() afviser med
+    KonfliktFejl, hvis versionen ikke er den, der blev hentet. importer()
+    springer dubletter over og returnerer antal oprettede. del_kalender() og
+    fjern_deling() returnerer kalenderen med de opdaterede delinger.
     """
 
     def kalendre(self) -> list: ...
@@ -136,6 +139,8 @@ class KalenderRepository(Protocol):
     def opdater(self, begivenhed): ...
     def slet(self, begivenhed_id: str) -> None: ...
     def importer(self, kalender_id: str, begivenheder: list) -> int: ...
+    def del_kalender(self, kalender_id: str, brugernavn: str, niveau: str): ...
+    def fjern_deling(self, kalender_id: str, brugernavn: str): ...
     def signatur(self) -> tuple: ...
 
 

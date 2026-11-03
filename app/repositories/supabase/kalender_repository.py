@@ -1,8 +1,8 @@
-"""Kalender i Supabase (tabeller og RPC'er fra migrering 020).
+"""Kalender i Supabase (tabeller og RPC'er fra migrering 020 og 021).
 
 Al læsning og skrivning går gennem RPC'erne – tabellerne kan ikke læses
-direkte. RPC'erne sætter ejer/opretter ud fra login og kontrollerer adgangen
-(inbase_calendar_access) og versionen.
+direkte. RPC'erne sætter ejer/opretter ud fra login, kontrollerer adgangen
+(inbase_calendar_access) og versionen og maskerer det, brugeren ikke må se.
 """
 from datetime import datetime
 
@@ -88,6 +88,19 @@ class SupabaseKalenderRepository:
                     "importere begivenheder", None) or 0)
         return antal
 
+    ### ----- deling -------------------------------------------------------
+
+    def del_kalender(self, kalender_id: str, brugernavn: str, niveau: str) -> Kalender:
+        raekke = self._rpc("inbase_calendar_share_set", {
+            "p_calendar_id": kalender_id, "p_username": brugernavn, "p_level": niveau},
+            "dele kalenderen")
+        return mapping.kalender_fra_raekke(raekke)
+
+    def fjern_deling(self, kalender_id: str, brugernavn: str) -> Kalender:
+        raekke = self._rpc("inbase_calendar_share_remove", {
+            "p_calendar_id": kalender_id, "p_username": brugernavn}, "fjerne delingen")
+        return mapping.kalender_fra_raekke(raekke)
+
     def signatur(self) -> tuple:
         data = self._rpc("inbase_calendar_signature", {}, "tjekke kalenderen for ændringer")
-        return (data.get("calendars"), data.get("events"), data.get("updated"))
+        return (data.get("calendars"), data.get("events"), data.get("shares"), data.get("updated"))

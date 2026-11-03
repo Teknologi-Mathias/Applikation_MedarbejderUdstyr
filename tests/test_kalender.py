@@ -1,6 +1,6 @@
-"""Kalender: gentagelser, visning, .ics-import og KalenderService (JSON-lagring).
+"""Kalender: gentagelser, visning, .ics-import, deling og KalenderService (JSON-lagring).
 
-Databasens håndhævelse (kun ejeren, versioner) testes i tests/test_supabase_lokal.py.
+Databasens håndhævelse (adgang, maskering, versioner) testes i tests/test_supabase_lokal.py.
 """
 import unittest
 from datetime import datetime, timedelta
@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from app import session
 from app.domain import kalender as kl
 from app.domain.kalender import Begivenhed
-from app.repositories.fejl import ValideringsFejl
+from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.services.kalender_import import laes_ics
 from tests.hjaelp import TjenesteTest
 
@@ -198,6 +198,92 @@ class KalenderServiceTest(TjenesteTest):
         self.assertEqual(self.s.tjek(t(6, 9, 40))[1], [], "for tidligt")
         self.assertEqual([f.titel for f in self.s.tjek(t(6, 9, 46))[1]], ["Møde"])
         self.assertEqual(self.s.tjek(t(6, 9, 47))[1], [], "allerede vist")
+
+
+class DelingTest(TjenesteTest):
+    def setUp(self):
+        super().setUp()
+        self.s = self.t.kalender
+
+    def som(self, navn, rolle="Bruger"):
+        session.log_ind({"brugernavn": navn, "rolle": rolle, "moduler": None})
+        self.s.glem_cache()     # som efter log ud/log på
+
+    def hent(self):
+        return {f.begivenhed.titel: f for f in self.s.forekomster(t(1, 0), t(31, 0))}
+
+    def annes_kalender(self):
+        self.som("ANNE")
+        k = self.s.kalendre()[0]
+        self.s.gem(Begivenhed(k.id, "Tandlæge", t(6, 10), t(6, 11), sted="Klinikken", paamindelse=15))
+        self.s.gem(Begivenhed(k.id, "Hemmeligt", t(7, 10), t(7, 11), privat=True))
+        return k
+
+    def delt(self, kalender_id):
+        return next(k for k in self.s.kalendre() if k.id == kalender_id)
+
+    def test_ledig_optaget_redigere_og_privat(self):
+        k = self.annes_kalender()
+        k = self.s.del_kalender(k, "bo", kl.FREEBUSY)
+        self.assertEqual([(d.brugernavn, d.niveau) for d in k.delinger], [("BO", kl.FREEBUSY)])
+
+        self.som("BO")
+        delt = self.delt(k.id)
+        self.assertEqual((delt.adgang, delt.delinger, delt.er_delt_med_mig), (kl.FREEBUSY, [], True))
+        self.assertEqual({(f.titel, f.begivenhed.sted) for f in self.hent().values()},
+                         {(kl.MASKERET_TITEL, "")}, "kun ledig/optaget")
+        with self.assertRaises(DataFejl):
+            self.s.gem(Begivenhed(k.id, "Bos møde", t(8, 10), t(8, 11)))
+        with self.assertRaises(ValideringsFejl):
+            self.s.del_kalender(delt, "CILLE", kl.LAESE)
+
+        self.som("ANNE")
+        self.s.del_kalender(k, "BO", kl.SKRIVE)
+        self.som("BO")
+        delt = self.delt(k.id)
+        self.assertEqual(set(self.hent()), {"Tandlæge", kl.MASKERET_TITEL}, "privat er stadig skjult")
+        self.s.gem(Begivenhed(k.id, "Bos møde", t(8, 10), t(8, 11)))
+        with self.assertRaises(DataFejl):
+            self.s.slet_forekomst(self.hent()[kl.MASKERET_TITEL], None)
+        with self.assertRaises(ValideringsFejl):
+            self.s.slet_kalender(delt)
+        self.s.forlad(delt)
+        self.assertNotIn(k.id, [x.id for x in self.s.kalendre()])
+        self.som("ANNE")
+        self.assertIn("Bos møde", self.hent(), "Bo skrev i Annes kalender")
+
+    def test_administrator_ser_alt_undtagen_privat_og_kan_moderere(self):
+        k = self.annes_kalender()
+        self.som("CHEF", "Administrator")
+        andres = self.delt(k.id)
+        self.assertEqual(andres.adgang, kl.ADMIN_ADGANG)
+        self.assertEqual(set(self.hent()), {"Tandlæge", kl.MASKERET_TITEL})
+        self.s.slet_forekomst(self.hent()[kl.MASKERET_TITEL], None)
+        self.assertEqual(self.s.del_kalender(andres, "BO", kl.LAESE).delinger[0].brugernavn, "BO")
+        self.s.slet_kalender(andres)
+        self.som("ANNE")
+        self.assertNotIn(k.id, [x.id for x in self.s.kalendre()])
+
+    def test_besked_om_ny_deling_en_gang_og_kun_egne_paamindelser(self):
+        self.som("BO")
+        self.s.kalendre()
+        self.assertEqual(self.s.tjek(t(6, 8))[2], [], "første gang: alt er kendt")
+        k = self.annes_kalender()
+        self.s.del_kalender(k, "BO", kl.SKRIVE)
+        self.som("BO")
+        _, alarmer, nye = self.s.tjek(t(6, 9, 50))
+        self.assertEqual([x.navn for x in nye], [k.navn])
+        self.assertEqual(alarmer, [], "Annes påmindelse følger ikke med")
+        self.s.glem_cache()
+        self.assertEqual(self.s.tjek(t(6, 9, 51))[2], [], "allerede meldt")
+
+    def test_visningsvalg_huskes_pr_bruger(self):
+        self.som("ANNE")
+        self.s.gem_visningsvalg({"skjulte": ["k1"], "viste": [], "farver": {"k2": "#000000"}})
+        self.som("BO")
+        self.assertEqual(self.s.visningsvalg()["skjulte"], [])
+        self.som("ANNE")
+        self.assertEqual(self.s.visningsvalg()["farver"], {"k2": "#000000"})
 
 
 if __name__ == "__main__":

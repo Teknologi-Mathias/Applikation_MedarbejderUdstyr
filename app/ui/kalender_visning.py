@@ -358,7 +358,7 @@ class KalenderVisning(QWidget):
     def tegn_felt(self, maler: QPainter, rekt: QRectF, f: kl.Forekomst, font: QFont,
                   kompakt: bool = False) -> None:
         hex_farve = self.farver.get(f.begivenhed.kalender_id, kl.FARVER[0])
-        dempet = f.begivenhed.kalender_id in self.dempede
+        dempet = f.begivenhed.maskeret or f.begivenhed.kalender_id in self.dempede
         maler.setPen(Qt.PenStyle.NoPen)
         maler.setBrush(_farve(hex_farve, 45 if dempet else 70))
         maler.drawRoundedRect(rekt, 4, 4)

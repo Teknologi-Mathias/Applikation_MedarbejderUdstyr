@@ -22,7 +22,7 @@ from datetime import datetime
 from app.domain import indmelding as im
 from app.domain import skabelon as sk
 from app.domain.indmelding import Aendring, Indmelding, Kommentar
-from app.domain.kalender import Begivenhed, Kalender, serie_slut
+from app.domain.kalender import EJER, Begivenhed, Deling, Kalender, serie_slut
 from app.domain.mdm_enhed import MdmEnhed
 from app.domain.opdatering import Udgivelse
 from app.domain.opgave import laes_iso_dato
@@ -596,7 +596,10 @@ def _tid_ind(tid: datetime | None) -> str | None:
 def kalender_fra_raekke(raekke: dict) -> Kalender:
     return Kalender(navn=raekke.get("name") or "", farve=raekke.get("color") or "",
                     ejer=raekke.get("owner_username") or "", id=str(raekke.get("id") or ""),
-                    version=int(raekke.get("version") or 0))
+                    version=int(raekke.get("version") or 0), adgang=raekke.get("access") or EJER,
+                    ejer_navn=raekke.get("owner_display_name") or raekke.get("owner_username") or "",
+                    delinger=[Deling(d.get("username") or "", d.get("display_name") or "",
+                                     d.get("level") or "") for d in raekke.get("shares") or []])
 
 
 def kalender_til_rpc(felter: dict) -> dict:
@@ -624,6 +627,7 @@ def begivenhed_fra_raekke(raekke: dict) -> Begivenhed:
         oprettet_af=raekke.get("created_by_username") or "",
         id=str(raekke.get("id") or ""),
         version=int(raekke.get("version") or 0),
+        maskeret=bool(raekke.get("masked")),
     )
 
 

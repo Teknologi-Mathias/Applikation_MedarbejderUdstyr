@@ -12,8 +12,11 @@ id) og oprindelig_start (den forekomst, den erstatter).
 Heldagsbegivenheder starter kl. 00:00 og slutter kl. 00:00 dagen efter sidste
 dag (eksklusiv slutdato som i iCalendar).
 
-Rettigheder håndhæves af databasen (migrering 020): kun ejeren ser og ændrer
-sine kalendere.
+Deling (migrering 021): en kalender deles med personer på et af tre niveauer
+(NIVEAUER). Brugerens adgang til en kalender er EJER, SKRIVE, ADMIN_ADGANG
+(administratorer ser alt), LAESE eller FREEBUSY. Ved FREEBUSY og ved private
+begivenheder i andres kalendere sender lagringen kun "Optaget" (maskeret=True).
+Rettighederne håndhæves af databasen.
 """
 import re
 from dataclasses import dataclass, field, fields, replace
@@ -43,6 +46,12 @@ PAAMINDELSER = (
     (24 * 60, "1 dag før"),
 )
 
+# Adgang til en kalender (som i databasen, migrering 021).
+EJER, SKRIVE, ADMIN_ADGANG, LAESE, FREEBUSY = "owner", "write", "admin", "read", "freebusy"
+# Delingsniveauer -> tekst (i stigende rækkefølge).
+NIVEAUER = ((FREEBUSY, "Kun ledig/optaget"), (LAESE, "Se alle detaljer"), (SKRIVE, "Redigere"))
+MASKERET_TITEL = "Optaget"
+
 # Omfang ved ændring/sletning af en forekomst i en serie.
 KUN_DENNE = "kun_denne"
 FREMTIDIGE = "fremtidige"
@@ -62,12 +71,34 @@ _ENHED = {DAGLIG: ("dag", "dage"), UGENTLIG: ("uge", "uger"),
 
 
 @dataclass
+class Deling:
+    brugernavn: str
+    navn: str
+    niveau: str                     # FREEBUSY, LAESE eller SKRIVE
+
+
+@dataclass
 class Kalender:
     navn: str
     farve: str = FARVER[0]
     ejer: str = ""                  # brugernavn – sættes af lagringen ud fra login
     id: str = ""
     version: int = 0
+    adgang: str = EJER              # den aktuelle brugers adgang (fra lagringen)
+    ejer_navn: str = ""
+    delinger: list = field(default_factory=list)   # kun for ejer og administratorer
+
+    @property
+    def er_egen(self) -> bool:
+        return self.adgang == EJER
+
+    @property
+    def kan_skrive(self) -> bool:
+        return self.adgang in (EJER, SKRIVE)
+
+    @property
+    def er_delt_med_mig(self) -> bool:
+        return self.adgang in (SKRIVE, LAESE, FREEBUSY)
 
 
 @dataclass
@@ -89,6 +120,7 @@ class Begivenhed:
     oprettet_af: str = ""
     id: str = ""
     version: int = 0
+    maskeret: bool = False              # kun "Optaget" (sat af lagringen)
 
     @property
     def varighed(self) -> timedelta:
@@ -138,6 +170,17 @@ class Forekomst:
     def noegle(self) -> str:
         """Entydig pr. forekomst (bruges til ikke at give samme påmindelse to gange)."""
         return f"{self.begivenhed.id}@{self.start.isoformat(timespec='minutes')}"
+
+
+def skal_maskeres(begivenhed: Begivenhed, adgang: str) -> bool:
+    """Ledig/optaget – eller en privat begivenhed i en andens kalender."""
+    return adgang == FREEBUSY or (begivenhed.privat and adgang != EJER)
+
+
+def masker(begivenhed: Begivenhed) -> Begivenhed:
+    """Kun tidspunktet: titlen er "Optaget", detaljerne fjernes."""
+    return begivenhed.kopi(titel=MASKERET_TITEL, sted="", beskrivelse="", paamindelse=None,
+                           ical_uid="", oprettet_af="", maskeret=True)
 
 
 ### ----- tid --------------------------------------------------------------

@@ -627,6 +627,92 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertIn(kalender.id, [k.id for k in repo.kalendre()])
         repo.slet_kalender(kalender.id)
 
+    # ----- kalenderdeling (migrering 021) -----------------------------------
+
+    def delt_kalender(self):
+        """Annes kalender med en almindelig og en privat begivenhed."""
+        anne = SupabaseKalenderRepository(self.anne.klient)
+        kalender = anne.opret_kalender(Kalender("Delt testkalender"))
+        start = datetime(2026, 10, 6, 10)
+        anne.opret(Begivenhed(kalender.id, "Tandlæge", start, start + timedelta(hours=1),
+                              sted="Klinikken", beskrivelse="Hemmelig note"))
+        anne.opret(Begivenhed(kalender.id, "Privat aftale", start + timedelta(days=1),
+                              start + timedelta(days=1, hours=1), privat=True))
+        return anne, kalender
+
+    def raa_titler(self, bruger, kalender_id) -> list[str]:
+        """Direkte fra RPC'en – uden om programmet."""
+        data = bruger.klient.rpc("inbase_calendar_events", {
+            "p_from": "2026-10-01T00:00:00+02:00", "p_to": "2026-11-01T00:00:00+01:00"}).execute().data
+        return sorted(json.dumps(r, ensure_ascii=False) for r in data if r["calendar_id"] == kalender_id)
+
+    def test_deling_maskerer_i_databasen(self):
+        anne, kalender = self.delt_kalender()
+        bo = SupabaseKalenderRepository(self.bo.klient)
+        self.assertEqual(self.raa_titler(self.bo, kalender.id), [], "uden deling: intet")
+        signatur = bo.signatur()
+        delt = anne.del_kalender(kalender.id, self.bo.brugernavn.lower(), kl.FREEBUSY)
+        self.assertEqual([(d.brugernavn, d.niveau) for d in delt.delinger],
+                         [(self.bo.brugernavn, kl.FREEBUSY)])
+        self.assertNotEqual(bo.signatur(), signatur, "ny deling opdages i minut-tjekket")
+        raa = " ".join(self.raa_titler(self.bo, kalender.id))
+        for hemmeligt in ("Tandlæge", "Klinikken", "Hemmelig note", "Privat aftale"):
+            self.assertNotIn(hemmeligt, raa, "sendes aldrig til en med ledig/optaget")
+        self.assertEqual(raa.count('"masked": true'), 2)
+        bos = next(k for k in bo.kalendre() if k.id == kalender.id)
+        self.assertEqual((bos.adgang, bos.ejer, bos.delinger), (kl.FREEBUSY, self.anne.brugernavn, []))
+
+        anne.del_kalender(kalender.id, self.bo.brugernavn, kl.LAESE)
+        raa = " ".join(self.raa_titler(self.bo, kalender.id))
+        self.assertIn("Klinikken", raa)
+        self.assertNotIn("Privat aftale", raa, "private er skjult for alle andre end ejeren")
+        begivenheder = [b for b in bo.begivenheder(datetime(2026, 10, 1), datetime(2026, 11, 1))
+                        if b.kalender_id == kalender.id]
+        with self.assertRaises(DataFejl):
+            bo.opdater(begivenheder[0].kopi(titel="Bo retter"))
+        with self.assertRaises(DataFejl):
+            bo.del_kalender(kalender.id, self.admin.brugernavn, kl.LAESE)
+        anne.slet_kalender(kalender.id)
+
+    def test_redigere_moderation_og_fejlbeskeder(self):
+        anne, kalender = self.delt_kalender()
+        bo = SupabaseKalenderRepository(self.bo.klient)
+        for brugernavn in (self.anne.brugernavn, "FINDES_IKKE"):
+            with self.assertRaises(ValideringsFejl):
+                anne.del_kalender(kalender.id, brugernavn, kl.LAESE)
+        anne.del_kalender(kalender.id, self.bo.brugernavn, kl.SKRIVE)
+        start = datetime(2026, 10, 8, 10)
+        bos = bo.opret(Begivenhed(kalender.id, "Bos møde", start, start + timedelta(hours=1)))
+        self.assertEqual(bos.oprettet_af, self.bo.brugernavn)
+        fra, til = datetime(2026, 10, 1), datetime(2026, 11, 1)
+        privat = next(b for b in bo.begivenheder(fra, til)
+                      if b.kalender_id == kalender.id and b.maskeret)
+        with self.assertRaises(DataFejl):
+            bo.slet(privat.id)
+        with self.assertRaises(DataFejl):
+            bo.slet_kalender(kalender.id)
+
+        admin = SupabaseKalenderRepository(self.admin.klient)
+        set_af_admin = next(k for k in admin.kalendre() if k.id == kalender.id)
+        self.assertEqual(set_af_admin.adgang, kl.ADMIN_ADGANG)
+        self.assertEqual([d.brugernavn for d in set_af_admin.delinger], [self.bo.brugernavn])
+        titler = {b.titel for b in admin.begivenheder(fra, til) if b.kalender_id == kalender.id}
+        self.assertEqual(titler, {"Tandlæge", "Bos møde", kl.MASKERET_TITEL})
+        admin.slet(privat.id)                       # moderation
+        bo.fjern_deling(kalender.id, self.bo.brugernavn)   # modtageren forlader kalenderen
+        self.assertNotIn(kalender.id, [k.id for k in bo.kalendre()])
+        admin.slet_kalender(kalender.id)
+        self.assertNotIn(kalender.id, [k.id for k in anne.kalendre()])
+
+    def test_deaktiveret_modtager_ser_intet(self):
+        anne, kalender = self.delt_kalender()
+        cecilie = Bruger(self.service)
+        anne.del_kalender(kalender.id, cecilie.brugernavn, kl.LAESE)
+        self.assertIn(kalender.id, [k.id for k in SupabaseKalenderRepository(cecilie.klient).kalendre()])
+        self.service.rpc("test_saet_aktiv", {"p_id": cecilie.id, "p_active": False}).execute()
+        self.assertEqual(self.raa_titler(cecilie, kalender.id), [])
+        anne.slet_kalender(kalender.id)
+
 
 if __name__ == "__main__":
     unittest.main()

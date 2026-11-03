@@ -240,11 +240,30 @@ class UiTest(TjenesteTest):
         self.assertIs(self.vindue.stak.currentWidget(), side)
         _app.processEvents()
         self.assertEqual([f.titel for f in side.visning.forekomster], ["Ugemøde"])
-        self.assertEqual(side.liste.count(), 1)
+        self.assertEqual([side.liste.item(i).text() for i in range(side.liste.count())],
+                         ["Mine kalendere", kalender.navn])
         side.vaelg_visning("dag")
         self.assertEqual(len(side.visning.dage), 1)
         with mock.patch.object(BegivenhedDialog, "exec") as aaben:
             side._aabn(side.visning.forekomster[0])
+        aaben.assert_called_once()
+
+    def test_delt_kalender_vises_i_egen_gruppe_og_kan_deles(self):
+        from app.domain import kalender as kl
+        from app.ui.kalender_dialoger import DelingDialog
+        admin = session.bruger()
+        session.log_ind({"brugernavn": "ANNE", "rolle": "Bruger", "moduler": None})
+        annes = self.t.kalender.kalendre()[0]
+        self.t.kalender.del_kalender(annes, admin["brugernavn"], kl.LAESE)
+        session.log_ind(admin)
+        self.vindue.vis_side("kalender")
+        side = self.vindue.kalender
+        tekster = [side.liste.item(i).text() for i in range(side.liste.count())]
+        self.assertIn("Delt med mig", tekster)
+        self.assertIn(f"{kl.STANDARD_KALENDER} · ANNE", tekster)
+        egen = next(k for k in side._kalendre if k.er_egen)
+        with mock.patch.object(DelingDialog, "exec") as aaben:
+            side._del_kalender(egen.id)
         aaben.assert_called_once()
 
     def test_baggrundsopgave_leverer_resultat_og_fejl_paa_ui_traaden(self):

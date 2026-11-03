@@ -133,9 +133,7 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
         indmeldinger=IndmeldingService(SupabaseIndmeldingRepository(klient), session.bruger),
         mdm=MdmService(SupabaseMdmRepository(klient),
                        JsonLokalFil(lokal_mappe / stier.MDM_LOKAL_FIL.name), session.bruger),
-        kalender=KalenderService(SupabaseKalenderRepository(klient),
-                                 JsonLokalFil(lokal_mappe / stier.KALENDER_ALARMER_FIL.name),
-                                 session.bruger),
+        kalender=_kalender_service(SupabaseKalenderRepository(klient), lokal_mappe),
         opdatering=OpdateringService(SupabaseOpdateringRepository(klient),
                                      lokal_mappe / stier.OPDATERING_MAPPE.name),
     )
@@ -174,10 +172,16 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
         indmeldinger=IndmeldingService(JsonIndmeldingRepository(datakilde), session.bruger),
         mdm=MdmService(JsonMdmRepository(datakilde),
                        JsonLokalFil(lokal_mappe / stier.MDM_LOKAL_FIL.name), session.bruger),
-        kalender=KalenderService(JsonKalenderRepository(datakilde),
-                                 JsonLokalFil(lokal_mappe / stier.KALENDER_ALARMER_FIL.name),
-                                 session.bruger),
+        kalender=_kalender_service(JsonKalenderRepository(datakilde, session.bruger), lokal_mappe),
     )
+
+
+def _kalender_service(repo, lokal_mappe: Path) -> KalenderService:
+    """Kalenderen med de lokale filer (viste påmindelser, kendte delinger, visningsvalg)."""
+    return KalenderService(repo, JsonLokalFil(lokal_mappe / stier.KALENDER_ALARMER_FIL.name),
+                           session.bruger,
+                           delingslog=JsonLokalFil(lokal_mappe / stier.KALENDER_DELINGER_FIL.name),
+                           visning=JsonLokalFil(lokal_mappe / stier.KALENDER_VISNING_FIL.name))
 
 
 def klargoer(tjenester: Tjenester) -> None:

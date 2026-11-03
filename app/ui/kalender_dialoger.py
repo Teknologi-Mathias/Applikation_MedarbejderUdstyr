@@ -6,7 +6,7 @@ dialogen gemmer gennem en funktion fra siden (gem/slet), så dialogen bliver
 """
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QDate, QDateTime, Qt, QTime
+from PySide6.QtCore import QDate, QDateTime, Qt, QTime, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -86,9 +86,12 @@ class BegivenhedDialog(QDialog):
     """Ny eller ret begivenhed.
 
     begivenhed: udgangspunktet (for en forekomst i en serie med forekomstens start/slut og
-    seriens gentagelse). gem(resultat) og slet() returnerer True, når det lykkedes."""
+    seriens gentagelse). gem(resultat) og slet() returnerer True, når det lykkedes.
+    gem=None: kun visning (en kalender, der er delt til læsning) – evt. med Slet for en
+    administrator. privat_mulig: kun i egne kalendere (privat skjuler den for andre)."""
 
-    def __init__(self, parent, kalendre: list[Kalender], begivenhed: Begivenhed, gem, slet=None):
+    def __init__(self, parent, kalendre: list[Kalender], begivenhed: Begivenhed, gem, slet=None,
+                 privat_mulig: bool = True):
         super().__init__(parent)
         self.begivenhed = begivenhed
         self._gem, self._slet = gem, slet
@@ -152,11 +155,24 @@ class BegivenhedDialog(QDialog):
         form.addRow("Sted", self.sted)
         form.addRow("Beskrivelse", self.beskrivelse)
         form.addRow("", self.privat)
+        self.privat.setVisible(privat_mulig or begivenhed.privat)
 
-        knapper = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
-                                   | QDialogButtonBox.StandardButton.Cancel)
-        knapper.button(QDialogButtonBox.StandardButton.Save).setText("Gem")
-        knapper.button(QDialogButtonBox.StandardButton.Cancel).setText("Annullér")
+        if gem is None:     # kun visning
+            knapper = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            knapper.button(QDialogButtonBox.StandardButton.Close).setText("Luk")
+            for felt in (self.titel, self.kalender, self.heldag, self.start, self.slut,
+                         self.frekvens, self.interval, self.slut_type, self.antal, self.til,
+                         self.paamindelse, self.privat, self.sted, *self.ugedage):
+                felt.setEnabled(False)
+            self.beskrivelse.setReadOnly(True)
+            oprettet = f"Oprettet af {begivenhed.oprettet_af}" if begivenhed.oprettet_af else ""
+            if oprettet:
+                form.addRow("", QLabel(oprettet))
+        else:
+            knapper = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
+                                       | QDialogButtonBox.StandardButton.Cancel)
+            knapper.button(QDialogButtonBox.StandardButton.Save).setText("Gem")
+            knapper.button(QDialogButtonBox.StandardButton.Cancel).setText("Annullér")
         knapper.accepted.connect(self.accept)
         knapper.rejected.connect(self.reject)
         bund = QHBoxLayout()
@@ -293,7 +309,9 @@ class BegivenhedDialog(QDialog):
             else self.paamindelse.currentData(), gentagelse=self._rrule())
 
     def accept(self) -> None:
-        if self._gem(self.resultat()):
+        if self._gem is None:       # kun visning
+            super().reject()
+        elif self._gem(self.resultat()):
             super().accept()
 
     def _slet_klik(self) -> None:
@@ -341,6 +359,101 @@ class KalenderDialog(QDialog):
         if resultat is not FEJL:
             self.resultat = resultat
             super().accept()
+
+
+class DelingDialog(QDialog):
+    """Del en kalender med personer: hvem, og hvad de må (kalender.NIVEAUER).
+
+    Hver ændring gemmes med det samme. brugere: [{"brugernavn", "navn", ...}] – de aktive
+    brugere, der kan vælges. Efter exec(): self.kalender (med de gemte delinger)."""
+
+    def __init__(self, parent, service, kalender: Kalender, brugere: list[dict]):
+        super().__init__(parent)
+        self.service = service
+        self.kalender = kalender
+        self.brugere = brugere
+        self.setWindowTitle(f"Del kalender – {kalender.navn}")
+        self.setMinimumSize(560, 380)
+
+        hjaelp = QLabel("Kun ledig/optaget viser blot 'Optaget' uden titel. Se alle detaljer viser "
+                        "alt undtagen private begivenheder. Redigere giver også ret til at "
+                        "oprette, rette og slette begivenheder.")
+        hjaelp.setWordWrap(True)
+        hjaelp.setObjectName("hjaelpTekst")
+        self.tabel = QTableWidget(0, 3)
+        self.tabel.setHorizontalHeaderLabels(["Person", "Må", ""])
+        self.tabel.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tabel.verticalHeader().setVisible(False)
+        self.tabel.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.tabel.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        self.person = QComboBox()
+        self.person.setMinimumWidth(220)
+        self.niveau = self._niveauvalg(kl.LAESE)
+        tilfoej = lav_knap("Tilføj", "primary")
+        tilfoej.clicked.connect(self._tilfoej)
+        ny = QHBoxLayout()
+        ny.addWidget(QLabel("Del med:"))
+        ny.addWidget(self.person, 1)
+        ny.addWidget(self.niveau)
+        ny.addWidget(tilfoej)
+        luk = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        luk.button(QDialogButtonBox.StandardButton.Close).setText("Luk")
+        luk.rejected.connect(self.accept)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(hjaelp)
+        layout.addWidget(self.tabel, 1)
+        layout.addLayout(ny)
+        layout.addWidget(luk)
+        self._vis()
+
+    @staticmethod
+    def _niveauvalg(valgt: str) -> QComboBox:
+        boks = QComboBox()
+        for niveau, tekst in kl.NIVEAUER:
+            boks.addItem(tekst, niveau)
+        boks.setCurrentIndex(max(0, boks.findData(valgt)))
+        return boks
+
+    def _vis(self) -> None:
+        delinger = self.kalender.delinger
+        self.tabel.setRowCount(len(delinger))
+        for raekke, deling in enumerate(delinger):
+            navn = deling.navn if deling.navn != deling.brugernavn else ""
+            self.tabel.setItem(raekke, 0, QTableWidgetItem(
+                f"{navn} ({deling.brugernavn})" if navn else deling.brugernavn))
+            niveau = self._niveauvalg(deling.niveau)
+            niveau.currentIndexChanged.connect(
+                lambda _i, b=deling.brugernavn, n=niveau: self._gem(b, n.currentData()))
+            self.tabel.setCellWidget(raekke, 1, niveau)
+            fjern = lav_knap("Fjern")
+            fjern.clicked.connect(lambda _c=False, b=deling.brugernavn: self._fjern(b))
+            self.tabel.setCellWidget(raekke, 2, fjern)
+        optaget = {d.brugernavn for d in delinger} | {self.kalender.ejer}
+        self.person.clear()
+        for bruger in self.brugere:
+            if bruger["brugernavn"] not in optaget and bruger.get("aktiv", True):
+                navn = bruger.get("navn") or bruger["brugernavn"]
+                self.person.addItem(f"{navn} ({bruger['brugernavn']})"
+                                    if navn != bruger["brugernavn"] else navn, bruger["brugernavn"])
+
+    def _gem(self, brugernavn: str, niveau: str) -> None:
+        kalender = udfoer(self, self.service.del_kalender, self.kalender, brugernavn, niveau)
+        if kalender is not FEJL:
+            self.kalender = kalender
+        # Tabellens widgets udskiftes – ikke mens signalet fra en af dem kører.
+        QTimer.singleShot(0, self._vis)
+
+    def _tilfoej(self) -> None:
+        if self.person.currentData():
+            self._gem(self.person.currentData(), self.niveau.currentData())
+
+    def _fjern(self, brugernavn: str) -> None:
+        kalender = udfoer(self, self.service.fjern_deling, self.kalender, brugernavn)
+        if kalender is not FEJL:
+            self.kalender = kalender
+            QTimer.singleShot(0, self._vis)
 
 
 _GRAENSER = (("Alle begivenheder", None), ("Fra det seneste år", 365),

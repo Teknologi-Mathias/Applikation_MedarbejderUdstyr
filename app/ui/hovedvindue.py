@@ -46,7 +46,7 @@ from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_app_ikon, lav_knap, lav_sidehoved
 from app.ui.indmelding_side import IndmeldingSide
 from app.ui.indstillinger_side import IndstillingerSide
-from app.ui.kalender_side import KalenderSide, alarm_tekst
+from app.ui.kalender_side import KalenderSide, alarm_tekst, delt_tekst
 from app.ui.login_dialog import LoginDialog
 from app.ui.mdm_side import MdmArkivSide, MdmSide
 from app.ui.modul_controller import OffboardingController, OnboardingController
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
         self._tilfoej("telefoner", self.telefoner)
         self.telefoner_arkiv = MdmArkivSide(self.t.mdm)
         self._tilfoej("telefoner_arkiv", self.telefoner_arkiv)
-        self.kalender = KalenderSide(self.t.kalender)
+        self.kalender = KalenderSide(self.t.kalender, self.t.auth.brugere)
         self._tilfoej("kalender", self.kalender)
         self.indstillinger = IndstillingerSide(
             self.t, self._alle_arkiverede, self._alle_aktive, self.notifikationer.vis_besked,
@@ -548,10 +548,11 @@ class MainWindow(QMainWindow):
             log.error("Minut-tjekket fejlede", exc_info=fejl)
 
     def _kalender_tikket(self, kalender) -> None:
-        """Kalenderens del af minut-tjekket: hent siden igen ved ændringer, vis påmindelser."""
+        """Kalenderens del af minut-tjekket: hent siden igen ved ændringer, vis påmindelser
+        og besked om kalendere, der er delt med brugeren."""
         if kalender is None:
             return
-        signatur, alarmer = kalender
+        signatur, alarmer, nye_delinger = kalender
         if self._kalender_signatur is not None and signatur != self._kalender_signatur \
                 and self.stak.currentWidget() is self.kalender:
             self.kalender.opdater()
@@ -559,6 +560,8 @@ class MainWindow(QMainWindow):
         nu = datetime.now()
         for forekomst in alarmer:
             self.notifikationer.vis_besked(forekomst.titel, alarm_tekst(forekomst, nu))
+        for delt in nye_delinger:
+            self.notifikationer.vis_besked("Ny delt kalender", delt_tekst(delt))
 
     def _vis_paamindelser(self):
         """Windows-notifikationer – kun hvis brugeren har dem slået til."""

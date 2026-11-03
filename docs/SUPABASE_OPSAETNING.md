@@ -6,7 +6,7 @@ sig selv – alt herunder er bevidste, manuelle handlinger.
 
 | Del | Hvor |
 |---|---|
-| SQL-migreringer | `app/infrastructure/database/migrations/001`–`020` |
+| SQL-migreringer | `app/infrastructure/database/migrations/001`–`021` |
 | Backup + gendannelsestest | `scripts/backup_supabase.ps1` (afsnit 13) |
 | Engangs-nulstilling | `app/infrastructure/database/reset/nulstil_forretningsdata.sql` |
 | Edge Functions | `supabase/functions/admin-create-user`, `admin-manage-user` |
@@ -109,8 +109,14 @@ i denne rækkefølge, og tjek at hver giver "Success":
     brugere med valgte moduler). Tabellerne kan kun bruges gennem RPC'erne
     `inbase_calendar_*`. Opretter tabeller; kør den kun én gang.
 
+21. `021_kalender_deling.sql` – Kalender (fase 2): deling med personer (kun
+    ledig/optaget, se detaljer, redigere) i `calendar_shares`. Titler maskeres i
+    databasen ("Optaget"); private begivenheder ses kun af ejeren. Administratorer ser
+    alle kalendere og kan – ligesom ejeren – dele, fjerne delinger og slette. Opretter en
+    tabel; kør den kun én gang (efter 020).
+
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004, 015, 016, 017, 018 og 019). Fremtidige ændringer kommer som nye filer `021_...`,
+fra 004, 015, 016, 017, 018 og 019). Fremtidige ændringer kommer som nye filer `022_...`,
 og **hver ny migrering slutter med**
 `insert into public.schema_migrations (version, name) values (20, '020_...') on conflict do nothing;`.
 Afhænger klienten af migreringen, hæves `KRAEVET_SKEMA` i `app/__init__.py` (se
@@ -375,7 +381,7 @@ $env:INBASE_BACKUP_MAPPE = "D:\IN-BASE-backup"     # et sted med begrænset adga
 **Gendannelse** (fx til et nyt projekt efter et nedbrud – tjek, at du er i det rigtige
 projekt). Samme vej som gendannelsestesten afprøver:
 
-1. Kør migreringerne 001–020 i det nye projekt (afsnit 1).
+1. Kør migreringerne 001–021 i det nye projekt (afsnit 1).
 2. Tøm standarddataene, som migreringerne lægger ind (SQL Editor):
    ```sql
    do $x$ declare t text; begin
