@@ -50,9 +50,10 @@ INDSTILLINGER = "indstillinger.json"
 BRUGERE = "brugere.json"
 OENSKER = "oensker.json"            # Ønsker & Udvikling
 MDM_ENHEDER = "mdm_enheder.json"    # Telefoner (MDM)
+KALENDER = "kalender.json"          # Kalender
 DATAFILER = (
     OFFBOARDING_AKTIVE, OFFBOARDING_ARKIV, ONBOARDING_AKTIVE, ONBOARDING_ARKIV,
-    SKABELONER, INDSTILLINGER, BRUGERE, OENSKER, MDM_ENHEDER,
+    SKABELONER, INDSTILLINGER, BRUGERE, OENSKER, MDM_ENHEDER, KALENDER,
 )
 
 # Filer i den lokale mappe.
@@ -61,6 +62,7 @@ LOG_MAPPE = LOKAL_MAPPE / "Logs"
 PRAEFERENCE_FIL = LOKAL_MAPPE / "praeferencer.json"
 LAGRING_FIL = LOKAL_MAPPE / "lagring.json"
 NOTIFIKATIONSLOG_FIL = LOKAL_MAPPE / "notifikationslog.json"
+KALENDER_ALARMER_FIL = LOKAL_MAPPE / "kalender_alarmer.json"   # viste kalenderpåmindelser
 MDM_LOKAL_FIL = LOKAL_MAPPE / "mdm_klargoering.json"   # huskede klargøringsindstillinger
 OPDATERING_MAPPE = LOKAL_MAPPE / "Opdateringer"         # hentede installere + installerlog
 

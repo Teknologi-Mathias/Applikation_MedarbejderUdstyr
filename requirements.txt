@@ -3,5 +3,8 @@ PySide6-Essentials>=6.6  # QtCore, QtGui, QtNetwork, QtWidgets – ikke Addons/W
 supabase>=2.33,<3        # Supabase Auth, PostgREST og Edge Functions (inkl. httpx)
 python-dotenv>=1.0       # læser %APPDATA%\IN-BASE\.env
 qrcode>=7.4              # Telefoner (MDM): QR-kode til klargøring (uden Pillow)
+python-dateutil>=2.9     # Kalender: gentagelser (RRULE)
+icalendar>=6.1,<8        # Kalender: import af .ics (Google-eksport)
+tzdata>=2024.1           # Kalender: tidszoner (Windows har ingen IANA-database)
 
 # Build-værktøjer (PyInstaller) står i requirements-build.txt.

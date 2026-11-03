@@ -5,11 +5,10 @@ af moduler på profilen ("moduler"); None betyder standarden (som før
 moduladgang fandtes: alt undtagen Telefoner). Dashboard og Indstillinger kan
 alle altid se.
 
-Låsen gælder i programmet (menu, sider og hvilke data der hentes). Kun
-Telefoner er også låst i databasen (migrering 010), fordi tabellen kun var
-åben for administratorer.
+Låsen gælder i programmet (menu, sider og hvilke data der hentes). Telefoner
+og Kalender er også låst i databasen (migrering 010 og 020).
 
-Modulnavnene svarer til check-betingelsen i migrering 010.
+Modulnavnene svarer til check-betingelsen i migrering 010 (udvidet i 020).
 
 Afdelinger (roller): en bruger kan være medlem af flere afdelinger (HR,
 Administration, Merch – migrering 014). De styrer Teamoverblikkets filter ("Min
@@ -23,6 +22,7 @@ ONBOARDING = "onboarding"
 OFFBOARDING = "offboarding"
 OENSKER = "oensker"
 TELEFONER = "telefoner"
+KALENDER = "kalender"
 
 # Modul -> navn (som i menuen).
 MODULER = {
@@ -30,8 +30,9 @@ MODULER = {
     OFFBOARDING: "Offboarding - HAFRA",
     OENSKER: "Ønsker & Udvikling",
     TELEFONER: "Telefoner (MDM)",
+    KALENDER: "Kalender",
 }
-STANDARD = (ONBOARDING, OFFBOARDING, OENSKER)
+STANDARD = (ONBOARDING, OFFBOARDING, OENSKER, KALENDER)
 
 
 def modul_for_side(noegle: str) -> Optional[str]:

@@ -48,16 +48,18 @@ versionsinfo = VSVersionInfo(
 EN_FIL = os.environ.get("INBASE_ONEFILE") == "1"
 
 # Supabase-klienten består af flere pakker med dynamiske imports; tag dem alle med.
+# icalendar (Kalender-import) vælger tidszone-udbyder dynamisk.
 _skjulte = []
 for pakke in ("supabase", "supabase_auth", "supabase_functions", "postgrest", "storage3",
-              "realtime", "app.repositories.supabase", "app.infrastructure.mdm"):
+              "realtime", "app.repositories.supabase", "app.infrastructure.mdm", "icalendar"):
     _skjulte += collect_submodules(pakke)
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets', 'assets')] + collect_data_files('certifi'),   # SSL-rodcertifikater
+    # SSL-rodcertifikater og tidszonerne (Windows har ingen IANA-database til zoneinfo).
+    datas=[('assets', 'assets')] + collect_data_files('certifi') + collect_data_files('tzdata'),
     hiddenimports=_skjulte + ['dotenv', 'qrcode'],
     hookspath=[],
     hooksconfig={},

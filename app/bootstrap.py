@@ -32,6 +32,7 @@ from app.repositories.fejl import DataFejl, OfflineFejl
 from app.repositories.json.bruger_repository import JsonBrugerRepository
 from app.repositories.json.datakilde import Datakilde
 from app.repositories.json.indmelding_repository import JsonIndmeldingRepository
+from app.repositories.json.kalender_repository import JsonKalenderRepository
 from app.repositories.json.json_fil import tjek_skriveadgang
 from app.repositories.json.mdm_repository import JsonMdmRepository
 from app.repositories.json.opsaetning_repository import (
@@ -45,6 +46,7 @@ from app.services.auth_service import AuthService, SupabaseAuthService
 from app.services.backup_service import BackupService
 from app.services.indmelding_service import IndmeldingService
 from app.services.indstillinger_service import IndstillingerService
+from app.services.kalender_service import KalenderService
 from app.services.lagring_service import LagringService, OnlineLagring
 from app.services.mdm_service import MdmService
 from app.services.offboarding_service import OffboardingService
@@ -77,6 +79,7 @@ class Tjenester:
     rapporter: RapportService
     indmeldinger: IndmeldingService       # Ønsker & Udvikling
     mdm: MdmService                       # Telefoner (MDM)
+    kalender: KalenderService
     opdatering: Optional[OpdateringService] = None   # kun Supabase (central opdatering)
 
     def modul(self, proces: str):
@@ -99,6 +102,7 @@ def byg_fra_konfiguration(konfig: DatabaseKonfiguration | None = None) -> Tjenes
 def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -> Tjenester:
     """Services oven på Supabase. klient: supabase-klienten (eller en testklient)."""
     from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRepository
+    from app.repositories.supabase.kalender_repository import SupabaseKalenderRepository
     from app.repositories.supabase.konto_repository import SupabaseKontoRepository
     from app.repositories.supabase.mdm_repository import SupabaseMdmRepository
     from app.repositories.supabase.opdatering_repository import SupabaseOpdateringRepository
@@ -129,6 +133,9 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
         indmeldinger=IndmeldingService(SupabaseIndmeldingRepository(klient), session.bruger),
         mdm=MdmService(SupabaseMdmRepository(klient),
                        JsonLokalFil(lokal_mappe / stier.MDM_LOKAL_FIL.name), session.bruger),
+        kalender=KalenderService(SupabaseKalenderRepository(klient),
+                                 JsonLokalFil(lokal_mappe / stier.KALENDER_ALARMER_FIL.name),
+                                 session.bruger),
         opdatering=OpdateringService(SupabaseOpdateringRepository(klient),
                                      lokal_mappe / stier.OPDATERING_MAPPE.name),
     )
@@ -167,6 +174,9 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
         indmeldinger=IndmeldingService(JsonIndmeldingRepository(datakilde), session.bruger),
         mdm=MdmService(JsonMdmRepository(datakilde),
                        JsonLokalFil(lokal_mappe / stier.MDM_LOKAL_FIL.name), session.bruger),
+        kalender=KalenderService(JsonKalenderRepository(datakilde),
+                                 JsonLokalFil(lokal_mappe / stier.KALENDER_ALARMER_FIL.name),
+                                 session.bruger),
     )
 
 

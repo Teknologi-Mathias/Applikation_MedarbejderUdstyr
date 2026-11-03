@@ -1,0 +1,9 @@
+# vexp-indeks: gratisplanen tillader 2.000 noder - kun app-kildekoden indekseres.
+# Det udelukkede findes med almindelig søgning (se "Not indexed by vexp" i .claude/CLAUDE.md).
+tests/
+docs/
+*.md
+android/
+tools/
+scripts/
+docker/

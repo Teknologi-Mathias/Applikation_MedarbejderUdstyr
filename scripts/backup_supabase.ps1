@@ -4,10 +4,12 @@
 
 .DESCRIPTION
     Supabase Free tager ingen backup. Dette script (kun for projektets ejer) laver en
-    fuld kopi med Supabase CLI og beviser, at den kan gendannes:
+    fuld kopi som lokale filer på denne pc med pg_dump (i Docker – ingen Supabase CLI)
+    og beviser, at den kan gendannes:
 
-      1. Dump: roles.sql, schema.sql, data_public.sql (alle IN-BASE-data, også
-         MDM-signeringsnøglen) og data_auth.sql (konti – følsom).
+      1. Dump: schema.sql (tabeller, funktioner, RLS og rettigheder i public),
+         data_public.sql (alle IN-BASE-data, også MDM-signeringsnøglen) og
+         data_auth.sql (konti – følsom). IN-BASE har ingen egne databaseroller.
       2. Gendannelsestest: en MIDLERTIDIG PostgreSQL-container (samme hovedversion
          som Supabase) får stubben + alle migreringer (docker\initdb), data_public.sql
          indlæses, og antallet af rækker pr. tabel sammenlignes med dumpet. Fejler
@@ -20,7 +22,7 @@
     læg den et sted med begrænset adgang (fx krypteret drev).
     Gendannelse til Supabase: docs\SUPABASE_OPSAETNING.md, afsnit 13.
 
-    Kræver: Supabase CLI (supabase) og Docker Desktop.
+    Kræver kun Docker Desktop (PostgreSQL-imaget hentes automatisk første gang).
 
 .PARAMETER Mappe
     Hvor kopierne lægges (der laves en undermappe pr. kørsel). Kan også sættes med
@@ -64,6 +66,17 @@ function Invoke-Native([scriptblock]$Blok) {
 
 function Get-Sha256([string]$Sti) { (Get-FileHash -LiteralPath $Sti -Algorithm SHA256).Hash.ToLowerInvariant() }
 
+# Kører psql/pg_dump i en midlertidig PostgreSQL-container (ingen Supabase CLI).
+# Forbindelsesstrengen ligger i miljøvariablen INBASE_DB_URL, som "docker -e" arver –
+# den står derfor aldrig på en kommandolinje. "set -f; IFS=" i sh: strengen bruges
+# uden anførselstegn (Windows PowerShell 5.1 fjerner dem) og deles/udvides ikke.
+function Invoke-PgDocker([string]$Image, [string]$Kommando, [string]$Mappe = '') {
+    $argumenter = @('run', '--rm', '-e', 'INBASE_DB_URL')
+    if ($Mappe) { $argumenter += @('-v', "${Mappe}:/ud") }
+    $argumenter += @($Image, 'sh', '-c', "set -f; IFS=; $Kommando")
+    Invoke-Native { & docker @argumenter }
+}
+
 # Rækker pr. tabel i et data-dump med COPY-blokke ("COPY public.x (...) FROM stdin;" … "\.").
 function Get-DumpRaekker([string]$Sti) {
     $antal = [ordered]@{}
@@ -85,9 +98,6 @@ try {
     Write-Host '=== IN-BASE backup af Supabase ===' -ForegroundColor White
 
     Trin 'Kontrollerer værktøjer og backupmappe'
-    if (-not (Get-Command 'supabase' -ErrorAction SilentlyContinue)) {
-        Stop-Backup 'Supabase CLI blev ikke fundet. Installér den (fx: scoop install supabase) – se docs\SUPABASE_OPSAETNING.md, afsnit 4.'
-    }
     Invoke-Native { & docker info --format '{{.ServerVersion}}' } | Out-Null
     if ($LASTEXITCODE -ne 0) { Stop-Backup 'Docker kører ikke. Start Docker Desktop og prøv igen.' }
     if (-not $Mappe) {
@@ -110,22 +120,34 @@ try {
     if ($DbUrl -notmatch '^postgres(ql)?://') { Stop-Backup 'Forbindelsesstrengen skal starte med postgresql://' }
     Ok 'Forbindelsesstreng modtaget (vises og gemmes ikke)'
 
-    Trin 'Dumper roller, skema og data med Supabase CLI'
+    Trin 'Dumper skema og data med pg_dump (i Docker)'
+    $env:INBASE_DB_URL = $DbUrl
+    $svar = Invoke-PgDocker 'postgres:17-alpine' 'psql --dbname=$INBASE_DB_URL -At -c ''show server_version_num'''
+    $nummer = "$($svar | Select-Object -Last 1)".Trim()
+    if ($LASTEXITCODE -ne 0 -or $nummer -notmatch '^\d{5,6}$') {
+        Stop-Backup 'Kunne ikke forbinde til databasen. Tjek forbindelsesstrengen (Session pooler, port 5432) og internetforbindelsen.'
+    }
+    $Major = [math]::Floor([int]$nummer / 10000)
+    $Image = "postgres:$Major-alpine"          # pg_dump i samme hovedversion som Supabase
+    Ok "Forbundet – PostgreSQL $Major ($Image)"
     $dumps = [ordered]@{
-        'roles.sql'       = @('--role-only')
-        'schema.sql'      = @()
-        'data_public.sql' = @('--data-only', '--use-copy', '--schema', 'public')
-        'data_auth.sql'   = @('--data-only', '--use-copy', '--schema', 'auth')
+        'schema.sql'      = '--schema-only --schema=public --no-owner'
+        'data_public.sql' = '--data-only --schema=public'
+        'data_auth.sql'   = '--data-only --schema=auth'
     }
     foreach ($navn in $dumps.Keys) {
         $fil = Join-Path $Ud $navn
-        $ekstra = $dumps[$navn]
-        Invoke-Native { & supabase db dump --db-url $DbUrl -f $fil @ekstra }
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $fil) -or (Get-Item -LiteralPath $fil).Length -eq 0) {
-            Stop-Backup "Dump af $navn mislykkedes (se meddelelserne ovenfor)."
+        Invoke-PgDocker $Image "pg_dump --dbname=`$INBASE_DB_URL $($dumps[$navn]) -f /ud/$navn" $Ud | Out-Null
+        $ok = $LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $fil) -and (Get-Item -LiteralPath $fil).Length -gt 0
+        if (-not $ok -and $navn -eq 'data_auth.sql') {
+            # Kontiene er rare at have, men ikke nødvendige for IN-BASE's data (brugere kan oprettes igen).
+            Write-Host '    BEMÆRK  Konti (auth) kunne ikke dumpes – resten af kopien er gyldig.' -ForegroundColor Yellow
+            continue
         }
+        if (-not $ok) { Stop-Backup "Dump af $navn mislykkedes (se meddelelserne ovenfor)." }
         Ok ("{0} ({1:N0} KB)" -f $navn, ((Get-Item -LiteralPath $fil).Length / 1KB))
     }
+    Remove-Item Env:\INBASE_DB_URL -ErrorAction SilentlyContinue
     $DataFil = Join-Path $Ud 'data_public.sql'
     $forventet = Get-DumpRaekker $DataFil
     if ($forventet.Count -eq 0) { Stop-Backup 'data_public.sql indeholder ingen tabeller – dumpet er ufuldstændigt.' }
@@ -208,5 +230,6 @@ catch {
 }
 finally {
     $DbUrl = $null
+    Remove-Item Env:\INBASE_DB_URL -ErrorAction SilentlyContinue
     Invoke-Native { & docker rm -f $Container 2>$null } | Out-Null
 }

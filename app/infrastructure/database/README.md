@@ -15,6 +15,7 @@ Supabase er IN-BASE's fælles datakilde. Opsætning og drift:
 | `migrations/014` | Arbejdsspor på opgaver, HR's behov på sager, afdelinger (roller) på brugere. |
 | `migrations/015` | Standarder (genereres af `tools/generer_standard_seed.py`; 004 ændres ikke længere). |
 | `migrations/019` | Skemaversion (`schema_migrations`), krav til klienten, delt signatur, central opdatering (`app_releases` + Storage `releases`), opdateringskanal pr. bruger. |
+| `migrations/020` | Kalender: `calendars` + `calendar_events` (serier, undtagelser, rettede forekomster), modulet `kalender`. Ingen direkte tabeladgang – kun RPC'er (`inbase_calendar_*`). |
 | `reset/nulstil_forretningsdata.sql` | Engangs-tømning af forretningsdata (kræver bekræftelse). |
 | `../../repositories/supabase/` | ALLE kald til tabeller, RPC, Auth og Edge Functions. |
 | `../../repositories/supabase/mapping.py` | Den ENESTE oversættelse domæne ↔ kolonner (feltkort). |
@@ -37,6 +38,8 @@ case_tasks: task_key, track, department, depends_on[] (andre opgavers task_key),
    (e-mail = internt login-alias)
 user_profiles ──< development_requests ──< development_request_comments
  (indsender/ansvarlig)                 └──< development_request_events (insert-only)
+user_profiles ──< calendars ──< calendar_events ──< calendar_events (rettede forekomster,
+   (ejer)                       (rrule, exdates)      recurrence_of + original_start)
 ```
 
 ## Skrivning
@@ -54,6 +57,9 @@ user_profiles ──< development_requests ──< development_request_comments
 * Ønsker & Udvikling via `inbase_create_request`, `inbase_update_request`
   (versionstjek, rettigheder, statusovergange, historik pr. felt) og
   `inbase_add_request_comment`. Sletning direkte (RLS: kun admin).
+* Kalender KUN via RPC'erne fra 020 (også læsning: `inbase_calendars`,
+  `inbase_calendar_events`), så deling senere kan maskere felter. Adgangen afgøres ét
+  sted: `inbase_calendar_access(kalender)` (i fase 1: 'owner' eller ingen).
 
 ## Nyt felt – uden at duplikere databasekode
 

@@ -22,6 +22,7 @@ from datetime import datetime
 from app.domain import indmelding as im
 from app.domain import skabelon as sk
 from app.domain.indmelding import Aendring, Indmelding, Kommentar
+from app.domain.kalender import Begivenhed, Kalender, serie_slut
 from app.domain.mdm_enhed import MdmEnhed
 from app.domain.opdatering import Udgivelse
 from app.domain.opgave import laes_iso_dato
@@ -577,3 +578,67 @@ def udgivelse_fra_raekke(raekke: dict) -> Udgivelse:
 
 def udgivelse_til_raekke(udgivelse: Udgivelse) -> dict:
     return _til_raekke(asdict(udgivelse), UDGIVELSE_FELTER)
+
+
+# ---------------------------------------------------------------------------
+# Kalender (calendars og calendar_events, migrering 020)
+# ---------------------------------------------------------------------------
+
+def _tid_ud(vaerdi) -> datetime | None:
+    tekst = fra_tidspunkt(vaerdi)
+    return datetime.fromisoformat(tekst) if tekst else None
+
+
+def _tid_ind(tid: datetime | None) -> str | None:
+    return til_tidspunkt(tid.isoformat()) if tid else None
+
+
+def kalender_fra_raekke(raekke: dict) -> Kalender:
+    return Kalender(navn=raekke.get("name") or "", farve=raekke.get("color") or "",
+                    ejer=raekke.get("owner_username") or "", id=str(raekke.get("id") or ""),
+                    version=int(raekke.get("version") or 0))
+
+
+def kalender_til_rpc(felter: dict) -> dict:
+    """{"navn": ..., "farve": ...} -> {"name": ..., "color": ...}."""
+    kolonner = {"id": "id", "navn": "name", "farve": "color"}
+    return {kolonner[k]: v for k, v in felter.items() if k in kolonner and v not in (None, "")}
+
+
+def begivenhed_fra_raekke(raekke: dict) -> Begivenhed:
+    return Begivenhed(
+        kalender_id=str(raekke.get("calendar_id") or ""),
+        titel=raekke.get("title") or "",
+        start=_tid_ud(raekke.get("starts_at")),
+        slut=_tid_ud(raekke.get("ends_at")),
+        heldag=bool(raekke.get("all_day")),
+        sted=raekke.get("location") or "",
+        beskrivelse=raekke.get("description") or "",
+        privat=bool(raekke.get("private")),
+        paamindelse=raekke.get("reminder_minutes"),
+        gentagelse=raekke.get("rrule") or "",
+        undtagelser=[_tid_ud(t) for t in raekke.get("exdates") or []],
+        gentagelse_af=str(raekke.get("recurrence_of") or ""),
+        oprindelig_start=_tid_ud(raekke.get("original_start")),
+        ical_uid=raekke.get("ical_uid") or "",
+        oprettet_af=raekke.get("created_by_username") or "",
+        id=str(raekke.get("id") or ""),
+        version=int(raekke.get("version") or 0),
+    )
+
+
+def begivenhed_til_rpc(b: Begivenhed, ny: bool = True) -> dict:
+    """Begivenheden som RPC-parameter. ny=False: uden id og seriefelter (kan ikke ændres)."""
+    data = {
+        "calendar_id": til_uuid(b.kalender_id), "title": b.titel, "description": b.beskrivelse,
+        "location": b.sted, "starts_at": _tid_ind(b.start), "ends_at": _tid_ind(b.slut),
+        "all_day": b.heldag, "private": b.privat, "reminder_minutes": b.paamindelse,
+        "rrule": b.gentagelse, "recur_until": _tid_ind(serie_slut(b)) if b.gentages else None,
+        "exdates": [_tid_ind(t) for t in b.undtagelser],
+    }
+    if ny:
+        data.update({"id": til_uuid(b.id), "ical_uid": b.ical_uid,
+                     "recurrence_of": til_uuid(b.gentagelse_af),
+                     "original_start": _tid_ind(b.oprindelig_start)})
+        data = {k: v for k, v in data.items() if v is not None or k == "reminder_minutes"}
+    return data

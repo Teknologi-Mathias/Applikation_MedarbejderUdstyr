@@ -19,10 +19,13 @@ import os
 import time
 import unittest
 import uuid
+from datetime import datetime, timedelta
 
 from app import KRAEVET_SKEMA, session
 from app.domain import historik
+from app.domain import kalender as kl
 from app.domain import opdatering as op
+from app.domain.kalender import Begivenhed, Kalender
 from app.domain import skabelon as sk
 from app.domain.offboarding import Medarbejder
 from app.domain.onboarding import OnboardingForloeb
@@ -31,6 +34,7 @@ from app.domain.opgave import Opgave
 from app.repositories.fejl import DataFejl, KonfliktFejl, SessionUdloebetFejl, ValideringsFejl
 from app.repositories.supabase import mapping
 from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRepository
+from app.repositories.supabase.kalender_repository import SupabaseKalenderRepository
 from app.repositories.supabase.konto_repository import SupabaseKontoRepository
 from app.repositories.supabase.opdatering_repository import SupabaseOpdateringRepository
 from app.repositories.supabase.opsaetning_repository import (
@@ -548,6 +552,80 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertTrue(profil["klient_set"])
         with self.assertRaises(ValideringsFejl):
             repo.rapporter("ikke-en-version")
+
+    # ----- kalender (migrering 020) -----------------------------------------
+
+    def test_kalender_kun_for_ejeren_og_ikke_direkte_fra_tabellen(self):
+        anne, bo = SupabaseKalenderRepository(self.anne.klient), SupabaseKalenderRepository(self.bo.klient)
+        kalender = anne.opret_kalender(Kalender("Annes testkalender"))
+        self.assertEqual(kalender.ejer, self.anne.brugernavn)
+        start = datetime(2026, 10, 5, 9)
+        serie = anne.opret(Begivenhed(kalender.id, "Ugemøde", start, start + timedelta(hours=1),
+                                      gentagelse="FREQ=WEEKLY;COUNT=3", privat=True))
+        self.assertEqual(serie.oprettet_af, self.anne.brugernavn)
+        fra, til = datetime(2026, 10, 1), datetime(2026, 11, 1)
+        self.assertIn(serie.id, [b.id for b in anne.begivenheder(fra, til)])
+        self.assertNotIn(kalender.id, [k.id for k in bo.kalendre()])
+        self.assertEqual([b for b in bo.begivenheder(fra, til) if b.id == serie.id], [])
+        for funktion in (lambda: bo.opdater(serie.kopi(titel="Bos")), lambda: bo.slet_kalender(kalender.id),
+                         lambda: bo.opret(serie.kopi(id="", version=0, titel="Snyd"))):
+            with self.assertRaises(DataFejl):
+                funktion()
+        with self.assertRaises(Exception):   # ingen select-grant (42501): kun RPC'erne
+            self.bo.klient.table("calendar_events").select("title").execute()
+        self.assertEqual(next(b for b in anne.begivenheder(fra, til) if b.id == serie.id).titel,
+                         "Ugemøde", "Bo ændrede intet")
+        anne.slet_kalender(kalender.id)
+
+    def test_kalender_version_rettet_forekomst_og_import(self):
+        repo = SupabaseKalenderRepository(self.anne.klient)
+        kalender = repo.opret_kalender(Kalender("Import-test"))
+        start = datetime(2026, 10, 5, 9)
+        serie = repo.opret(Begivenhed(kalender.id, "Ugemøde", start, start + timedelta(hours=1),
+                                      gentagelse="FREQ=WEEKLY;BYDAY=MO", paamindelse=15))
+        rettet = repo.opret(Begivenhed(kalender.id, "Flyttet", start + timedelta(days=7, hours=4),
+                                       start + timedelta(days=7, hours=5), gentagelse_af=serie.id,
+                                       oprindelig_start=start + timedelta(days=7)))
+        opdateret = repo.opdater(serie.kopi(undtagelser=[start + timedelta(days=14)]))
+        self.assertEqual((opdateret.version, opdateret.paamindelse), (2, 15))
+        with self.assertRaises(KonfliktFejl):
+            repo.opdater(serie.kopi(titel="Forældet version"))
+        fra, til = datetime(2026, 10, 1), datetime(2026, 11, 1)
+
+        def egne():
+            return [b for b in repo.begivenheder(fra, til) if b.kalender_id == kalender.id]
+
+        alle = kl.forekomster(egne(), fra, til)
+        self.assertEqual([(f.start.day, f.titel) for f in alle],
+                         [(5, "Ugemøde"), (12, "Flyttet"), (26, "Ugemøde")])
+        self.assertEqual(repo.opdater(opdateret.kopi(gentagelse="")).gentagelse, "")
+        self.assertNotIn(rettet.id, [b.id for b in egne()],
+                         "en serie uden gentagelse har ingen rettede forekomster")
+
+        ny = Begivenhed(kalender.id, "Importeret", start, start + timedelta(hours=1),
+                        gentagelse="FREQ=DAILY;COUNT=5", ical_uid="uid-1@test")
+        flyttet = Begivenhed(kalender.id, "Importeret (flyttet)", start + timedelta(days=1, hours=2),
+                             start + timedelta(days=1, hours=3), ical_uid="uid-1@test",
+                             oprindelig_start=start + timedelta(days=1))
+        self.assertEqual(repo.importer(kalender.id, [flyttet, ny]), 2)
+        self.assertEqual(repo.importer(kalender.id, [flyttet, ny]), 0, "dubletter springes over")
+        signatur = repo.signatur()
+        repo.slet_kalender(kalender.id)
+        self.assertNotEqual(repo.signatur(), signatur)
+        self.assertNotIn(kalender.id, [k.id for k in repo.kalendre()])
+
+    def test_kalender_kraever_modulet(self):
+        repo = SupabaseKalenderRepository(self.bo.klient)
+        kalender = repo.opret_kalender(Kalender("Bos kalender"))
+        self.admin.konto.saet_moduler(self.bo.id, ["oensker"])
+        try:
+            self.assertEqual(repo.kalendre(), [])
+            with self.assertRaises(DataFejl):
+                repo.opret_kalender(Kalender("Uden modul"))
+        finally:
+            self.admin.konto.saet_moduler(self.bo.id, None)
+        self.assertIn(kalender.id, [k.id for k in repo.kalendre()])
+        repo.slet_kalender(kalender.id)
 
 
 if __name__ == "__main__":

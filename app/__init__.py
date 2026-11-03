@@ -14,7 +14,7 @@ VERSION = f"V{__version__}"   # visning i programmet, fx "V0.7.1"
 # Den databaseskemaversion, klienten kræver (schema_migrations, migrering 019).
 # Hæves, når klienten afhænger af en ny migrering – ellers forsvinder nye felter
 # lydløst i en ældre database. Se docs/RELEASE.md.
-KRAEVET_SKEMA = 19
+KRAEVET_SKEMA = 20
 
 APP_NAVN = "IN-BASE"
 APP_SLOGAN = "Administrationsværktøj, prototype."

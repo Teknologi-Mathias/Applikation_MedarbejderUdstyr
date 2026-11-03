@@ -226,13 +226,26 @@ class UiTest(TjenesteTest):
         self.assertEqual(self.vindue.sider["off_aktive"].tabel.rowCount(), 0, "data er fjernet")
         afslut.assert_called_once()
 
-    def test_kalender_er_et_udkast_med_besked(self):
-        self.vindue.vis_side("dashboard")
-        with mock.patch.object(QMessageBox, "information") as besked:
-            self.vindue.sidebar.knapper["kalender"].click()
-        self.assertEqual(besked.call_args.args[1:], ("Kalender", "Under udvikling, afvent adgang."))
-        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.dashboard, "ingen side skiftes")
-        self.assertTrue(self.vindue.sidebar.knapper["overblik"].isChecked())
+    def test_kalender_viser_egne_begivenheder_og_dialogen_aabner(self):
+        from datetime import datetime, timedelta
+
+        from app.domain.kalender import Begivenhed
+        from app.ui.kalender_dialoger import BegivenhedDialog
+        start = datetime.combine(datetime.now().date(), datetime.min.time()) + timedelta(hours=10)
+        kalender = self.t.kalender.kalendre()[0]
+        self.t.kalender.gem(Begivenhed(kalender.id, "Ugemøde", start, start + timedelta(hours=1),
+                                       gentagelse="FREQ=WEEKLY"))
+        self.vindue.sidebar.knapper["kalender"].click()
+        side = self.vindue.kalender
+        self.assertIs(self.vindue.stak.currentWidget(), side)
+        _app.processEvents()
+        self.assertEqual([f.titel for f in side.visning.forekomster], ["Ugemøde"])
+        self.assertEqual(side.liste.count(), 1)
+        side.vaelg_visning("dag")
+        self.assertEqual(len(side.visning.dage), 1)
+        with mock.patch.object(BegivenhedDialog, "exec") as aaben:
+            side._aabn(side.visning.forekomster[0])
+        aaben.assert_called_once()
 
     def test_baggrundsopgave_leverer_resultat_og_fejl_paa_ui_traaden(self):
         from app.ui.baggrund import koer_i_baggrund

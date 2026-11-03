@@ -10,6 +10,7 @@ from tests.hjaelp import TjenesteTest
 MIGRERING_010 = (Path(__file__).resolve().parents[1]
                  / "app/infrastructure/database/migrations/010_moduladgang.sql")
 MIGRERING_014 = MIGRERING_010.with_name("014_arbejdsspor.sql")
+MIGRERING_020 = MIGRERING_010.with_name("020_kalender.sql")   # den gældende modulliste
 
 
 class ReglerTest(unittest.TestCase):
@@ -25,9 +26,11 @@ class ReglerTest(unittest.TestCase):
         self.assertEqual(adgang.modul_for_side("on_skabeloner"), adgang.ONBOARDING)
         self.assertIsNone(adgang.modul_for_side("dashboard"))
         self.assertEqual(adgang.modul_for_side("telefoner_arkiv"), adgang.TELEFONER)
+        self.assertIn(adgang.KALENDER, adgang.STANDARD, "kalenderen er slået til for alle")
+        self.assertEqual(adgang.modul_for_side("kalender"), adgang.KALENDER)
 
-    def test_modulnavne_stemmer_med_migrering_010(self):
-        sql = MIGRERING_010.read_text(encoding="utf-8")
+    def test_modulnavne_stemmer_med_migrering_020(self):
+        sql = MIGRERING_020.read_text(encoding="utf-8")
         for modul in adgang.MODULER:
             self.assertIn(f"'{modul}'", sql)
 

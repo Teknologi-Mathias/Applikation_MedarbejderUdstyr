@@ -6,7 +6,7 @@ sig selv – alt herunder er bevidste, manuelle handlinger.
 
 | Del | Hvor |
 |---|---|
-| SQL-migreringer | `app/infrastructure/database/migrations/001`–`019` |
+| SQL-migreringer | `app/infrastructure/database/migrations/001`–`020` |
 | Backup + gendannelsestest | `scripts/backup_supabase.ps1` (afsnit 13) |
 | Engangs-nulstilling | `app/infrastructure/database/reset/nulstil_forretningsdata.sql` |
 | Edge Functions | `supabase/functions/admin-create-user`, `admin-manage-user` |
@@ -104,8 +104,13 @@ i denne rækkefølge, og tjek at hver giver "Success":
     igen. Krævet af IN-BASE 0.10 og nyere – en nyere klient mod en ældre database
     stopper med en besked.
 
+20. `020_kalender.sql` – Kalender (fase 1): egne kalendere og begivenheder med
+    gentagelser, påmindelser og import. Modulet `kalender` (slået til for alle – også
+    brugere med valgte moduler). Tabellerne kan kun bruges gennem RPC'erne
+    `inbase_calendar_*`. Opretter tabeller; kør den kun én gang.
+
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004, 015, 016, 017, 018 og 019). Fremtidige ændringer kommer som nye filer `020_...`,
+fra 004, 015, 016, 017, 018 og 019). Fremtidige ændringer kommer som nye filer `021_...`,
 og **hver ny migrering slutter med**
 `insert into public.schema_migrations (version, name) values (20, '020_...') on conflict do nothing;`.
 Afhænger klienten af migreringen, hæves `KRAEVET_SKEMA` i `app/__init__.py` (se
@@ -341,8 +346,9 @@ separat testprojekt – aldrig mod produktionsdata.
 
 ## 13. Backup og gendannelse (Supabase Free har ingen automatisk backup)
 
-`scripts\backup_supabase.ps1` (kun projektets ejer; kræver Supabase CLI og Docker
-Desktop) laver en fuld kopi **og beviser, at den kan gendannes**:
+`scripts\backup_supabase.ps1` (kun projektets ejer; kræver kun Docker Desktop – `pg_dump`
+køres i en PostgreSQL-container, ingen Supabase CLI) laver en fuld kopi som **lokale
+filer på pc'en** **og beviser, at den kan gendannes**:
 
 ```powershell
 $env:INBASE_BACKUP_MAPPE = "D:\IN-BASE-backup"     # et sted med begrænset adgang
@@ -352,11 +358,12 @@ $env:INBASE_BACKUP_MAPPE = "D:\IN-BASE-backup"     # et sted med begrænset adga
 * Forbindelsesstrengen: Dashboard → **Connect** → *Session pooler* (indeholder
   databasens adgangskode). Den indtastes skjult, når scriptet spørger (eller sættes i
   `$env:INBASE_BACKUP_DB_URL` for den ene PowerShell-session) og skrives aldrig til disk.
-* Pr. kørsel en mappe `yyyy-MM-dd_HHmm` med `roles.sql`, `schema.sql`,
-  `data_public.sql` (alle IN-BASE-data – også MDM-signeringsnøglen og
-  nulstillingskoderne), `data_auth.sql` (konti inkl. kode-hashes – følsom) og
-  `manifest.json` (kontrolsummer, rækker pr. tabel, testresultat). De 12 nyeste
-  beholdes (`-Behold`).
+* Pr. kørsel en mappe `yyyy-MM-dd_HHmm` med `schema.sql` (produktionens skema i
+  `public` – til sammenligning med migreringerne), `data_public.sql` (alle
+  IN-BASE-data – også MDM-signeringsnøglen og nulstillingskoderne), `data_auth.sql`
+  (konti inkl. kode-hashes – følsom) og `manifest.json` (kontrolsummer, rækker pr.
+  tabel, testresultat). De 12 nyeste beholdes (`-Behold`). IN-BASE har ingen egne
+  databaseroller, så der er ingen rolle-dump.
 * **Gendannelsestest:** en midlertidig container (samme PostgreSQL-hovedversion)
   får stubben + alle migreringer, `data_public.sql` indlæses, og rækkerne
   sammenlignes tabel for tabel. Fejler indlæsningen, afviger produktionens skema fra
@@ -366,16 +373,28 @@ $env:INBASE_BACKUP_MAPPE = "D:\IN-BASE-backup"     # et sted med begrænset adga
   pc'en (krypteret). Gratis projekter pauses efter 7 dage uden aktivitet.
 
 **Gendannelse** (fx til et nyt projekt efter et nedbrud – tjek, at du er i det rigtige
-projekt): kør `roles.sql`, `schema.sql` og data i én transaktion med psql:
+projekt). Samme vej som gendannelsestesten afprøver:
 
-```
-psql --single-transaction --variable ON_ERROR_STOP=1 --file roles.sql --file schema.sql ^
-     --command "SET session_replication_role = replica" --file data_public.sql ^
-     --file data_auth.sql --dbname "<forbindelsesstreng til det nye projekt>"
-```
-
-Deploy derefter Edge Functions (afsnit 4), og ret `%APPDATA%\IN-BASE\.env` på pc'erne,
-hvis projektets URL er ændret.
+1. Kør migreringerne 001–020 i det nye projekt (afsnit 1).
+2. Tøm standarddataene, som migreringerne lægger ind (SQL Editor):
+   ```sql
+   do $x$ declare t text; begin
+     for t in select tablename from pg_tables where schemaname = 'public' loop
+       execute format('truncate table public.%I cascade', t); end loop;
+   end $x$;
+   ```
+3. Indlæs data fra backupmappen (PowerShell, kun Docker kræves – brug samme
+   PostgreSQL-hovedversion som i `manifest.json`):
+   ```powershell
+   $env:INBASE_DB_URL = "<Session pooler-forbindelsesstreng til det nye projekt>"
+   docker run --rm -e INBASE_DB_URL -e PGOPTIONS="-c session_replication_role=replica" `
+     -v "D:\IN-BASE-backup\<yyyy-MM-dd_HHmm>:/ud" postgres:15-alpine `
+     sh -c 'psql --dbname=$INBASE_DB_URL -v ON_ERROR_STOP=1 -1 -f /ud/data_public.sql'
+   ```
+4. Konti: indlæs `data_auth.sql` på samme måde. Fejler det (en anden Supabase-version
+   af `auth`), oprettes brugerne igen (afsnit 5 og 7) – sager og historik er intakte.
+5. Deploy Edge Functions (afsnit 4), og ret `%APPDATA%\IN-BASE\.env` på pc'erne, hvis
+   projektets URL er ændret.
 
 ## Kendte begrænsninger
 

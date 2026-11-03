@@ -13,7 +13,7 @@ data fjernes fra siderne, log på-skærmen vises).
 import logging
 import time
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 
 from PySide6.QtCore import QTime, QTimer, Qt
 from PySide6.QtWidgets import (
@@ -46,6 +46,7 @@ from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_app_ikon, lav_knap, lav_sidehoved
 from app.ui.indmelding_side import IndmeldingSide
 from app.ui.indstillinger_side import IndstillingerSide
+from app.ui.kalender_side import KalenderSide, alarm_tekst
 from app.ui.login_dialog import LoginDialog
 from app.ui.mdm_side import MdmArkivSide, MdmSide
 from app.ui.modul_controller import OffboardingController, OnboardingController
@@ -93,11 +94,11 @@ OMRAADER = [
         ("telefoner_arkiv", "Arkiv"),
     ]),
     ("oensker", "Ønsker & Udvikling", "oensker", [("oensker", "Ønsker & Udvikling")]),
+    ("kalender", "Kalender", "kalender", [("kalender", "Kalender")]),
 ]
 # Udkast i menuen: vises, men har endnu ingen side – et klik giver blot en besked.
-UDKAST = [
-    ("kalender", "Kalender", "kalender", []),
-]
+# (nøgle, menutekst, ikon, [])
+UDKAST = []
 UDKAST_BESKED = "Under udvikling, afvent adgang."
 # Side -> område (Indstillinger hører ikke til et område).
 OMRAADE_FOR_SIDE = {side: noegle for noegle, _, _, sider in OMRAADER for side, _ in sider}
@@ -165,6 +166,7 @@ class MainWindow(QMainWindow):
         self._indstillinger = {}        # fælles indstillinger fra seneste hentning
         self._generation = 0            # tælles op ved hver lokal ændring/hentning
         self._tikker = False            # et minut-tjek kører i baggrunden
+        self._kalender_signatur = None  # kalenderens signatur fra seneste minut-tjek
 
         self._opbyg_gui()
         self._daglig_backup()
@@ -227,6 +229,8 @@ class MainWindow(QMainWindow):
         self._tilfoej("telefoner", self.telefoner)
         self.telefoner_arkiv = MdmArkivSide(self.t.mdm)
         self._tilfoej("telefoner_arkiv", self.telefoner_arkiv)
+        self.kalender = KalenderSide(self.t.kalender)
+        self._tilfoej("kalender", self.kalender)
         self.indstillinger = IndstillingerSide(
             self.t, self._alle_arkiverede, self._alle_aktive, self.notifikationer.vis_besked,
         )
@@ -493,12 +497,21 @@ class MainWindow(QMainWindow):
             self._tjek_opdatering()
 
     def _tik(self, kendte: dict, med_paamindelser: bool) -> dict:
-        """Baggrundstråd: sessionstjek, de ændrede lister og påmindelsesskabelonerne.
-        En udløbet session eller lukket adgang kaster SessionUdloebetFejl (log ud)."""
+        """Baggrundstråd: sessionstjek, de ændrede lister, påmindelsesskabelonerne og
+        kalenderen (signatur og påmindelser). En udløbet session eller lukket adgang
+        kaster SessionUdloebetFejl (log ud)."""
         self.t.auth.kontroller_session()
         resultat = self._hent(False, kendte)
         resultat["paamindelser"] = (self.t.skabeloner.aktive(sk.PAAMINDELSE)
                                     if med_paamindelser else None)
+        resultat["kalender"] = None
+        if session.har_adgang(adgang.KALENDER):
+            try:
+                resultat["kalender"] = self.t.kalender.tjek(datetime.now())
+            except SessionUdloebetFejl:
+                raise
+            except DataFejl as fejl:     # kalenderen må ikke stoppe resten af minut-tjekket
+                log.warning("Kalenderen kunne ikke tjekkes: %s", fejl)
         return resultat
 
     def _opdater_i_baggrund(self):
@@ -513,8 +526,11 @@ class MainWindow(QMainWindow):
 
     def _tik_faerdig(self, resultat: dict, generation: int):
         self._tikker = False
-        if session.bruger() is None or generation != self._generation:
-            return   # logget ud, eller der er gemt/hentet imens – næste tik henter igen
+        if session.bruger() is None:
+            return
+        self._kalender_tikket(resultat.get("kalender"))   # påmindelserne er allerede logget
+        if generation != self._generation:
+            return   # der er gemt/hentet imens – næste tik henter igen
         self._anvend(resultat)
         self.vis_data()
         self._opdater_aktuel_side()
@@ -530,6 +546,19 @@ class MainWindow(QMainWindow):
             self._saet_forbindelse(MISTET)
         else:
             log.error("Minut-tjekket fejlede", exc_info=fejl)
+
+    def _kalender_tikket(self, kalender) -> None:
+        """Kalenderens del af minut-tjekket: hent siden igen ved ændringer, vis påmindelser."""
+        if kalender is None:
+            return
+        signatur, alarmer = kalender
+        if self._kalender_signatur is not None and signatur != self._kalender_signatur \
+                and self.stak.currentWidget() is self.kalender:
+            self.kalender.opdater()
+        self._kalender_signatur = signatur
+        nu = datetime.now()
+        for forekomst in alarmer:
+            self.notifikationer.vis_besked(forekomst.titel, alarm_tekst(forekomst, nu))
 
     def _vis_paamindelser(self):
         """Windows-notifikationer – kun hvis brugeren har dem slået til."""
@@ -623,7 +652,7 @@ class MainWindow(QMainWindow):
         self.stak.setCurrentWidget(side)
         # Telefoner og Arkiv hentes kun, når siden åbnes (ikke hvert minut) – sparer Supabase-trafik.
         if isinstance(side, (SkabelonSide, IndstillingerSide, IndmeldingSide, MdmSide,
-                             MdmArkivSide)):
+                             MdmArkivSide, KalenderSide)):
             side.opdater()
 
     def vis_oprettet(self, sag):
@@ -763,9 +792,11 @@ class MainWindow(QMainWindow):
         self._signatur = {}
         self._generation += 1           # et igangværende minut-tjek kasseres
         self._opdatering,self._opdatering_fil, self._opdatering_tjekket = None, None, None
+        self._kalender_signatur = None
+        self.t.kalender.glem_cache()
         self.sidebar.saet_opdatering(None)
         for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
-                + [self.oensker, self.telefoner, self.telefoner_arkiv]:
+                + [self.oensker, self.telefoner, self.telefoner_arkiv, self.kalender]:
             side.ryd()
         self.teamoverblik.opdater([])
 
