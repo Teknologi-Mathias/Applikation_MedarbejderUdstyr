@@ -147,7 +147,7 @@ try {
 
     Trin 'Læser versionsnummeret (app\__init__.py)'
     Push-Location $Rod
-    try { $Version = ([string](Invoke-Native { & $Python -c 'import app; app.version_tupel(); print(app.__version__)' })).Trim() }
+    try { $Version = "$(Invoke-Native { & $Python -c 'import app; app.version_tupel(); print(app.__version__)' })".Trim() }
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0 -or $Version -notmatch '^\d+\.\d+\.\d+$') {
         Stop-Build "Versionsnummeret i app\__init__.py er ugyldigt ('$Version'). Brug MAJOR.MINOR.PATCH, fx 1.0.0."
@@ -159,9 +159,9 @@ try {
     if ($Erstatter) { Write-Host "    BEMÆRK  $InstallerNavn findes allerede og bliver ERSTATTET." -ForegroundColor Yellow }
 
     Trin 'Kontrollerer git (en release skal kunne genskabes fra et commit)'
-    $Commit = ([string](Invoke-Native { & git -C $Rod rev-parse --short HEAD })).Trim()
+    $Commit = "$(Invoke-Native { & git -C $Rod rev-parse --short HEAD })".Trim()
     if ($LASTEXITCODE -ne 0 -or -not $Commit) { Stop-Build 'git blev ikke fundet, eller projektmappen er ikke et git-repository.' }
-    $Aendringer = ([string](Invoke-Native { & git -C $Rod status --porcelain })).Trim()
+    $Aendringer = "$(Invoke-Native { & git -C $Rod status --porcelain })".Trim()
     if ($Aendringer) {
         if ($Udgiv) { Stop-Build 'Der er ucommittede ændringer – en sådan build kan ikke udgives. Commit først.' }
         if (-not $TilladUcommittet) {
@@ -177,7 +177,7 @@ try {
 
     Trin 'Klargør klientkonfigurationen til %APPDATA%\IN-BASE\.env'
     if (Test-Path -LiteralPath $InstallerArbejde) { Remove-Item -LiteralPath $InstallerArbejde -Recurse -Force }
-    $SupabaseUrl = ([string](Invoke-Native { & $Python (Join-Path $Rod 'tools\lav_klientkonfig.py') $KlientKonfig $GenereretKonfig })).Trim()
+    $SupabaseUrl = "$(Invoke-Native { & $Python (Join-Path $Rod 'tools\lav_klientkonfig.py') $KlientKonfig $GenereretKonfig })".Trim()
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $GenereretKonfig)) {
         Stop-Build (@(
             "Klientkonfigurationen kunne ikke laves ud fra: $KlientKonfig",
@@ -264,7 +264,7 @@ try {
     # Følgefil til Indstillinger → Opdateringer: hvilket databaseskema pakken kræver og
     # hvilket commit den er bygget fra (siden afviser en pakke, databasen ikke er klar til).
     Push-Location $Rod
-    try { $Skema = ([string](Invoke-Native { & $Python -c 'import app; print(app.KRAEVET_SKEMA)' })).Trim() }
+    try { $Skema = "$(Invoke-Native { & $Python -c 'import app; print(app.KRAEVET_SKEMA)' })".Trim() }
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0 -or $Skema -notmatch '^\d+$') { Stop-Build "KRAEVET_SKEMA i app\__init__.py kunne ikke læses ('$Skema')." }
     $infoFil = "$Installer.json"
