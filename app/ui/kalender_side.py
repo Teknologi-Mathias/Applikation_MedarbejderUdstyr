@@ -1,14 +1,17 @@
-"""Siden Kalender: dag- og ugevisning af brugerens egne og delte kalendere.
+"""Siden Kalender: dag- og ugevisning af egne og kollegers kalendere.
 
-Venstre: kalenderlisten i grupper – Mine kalendere, Delt med mig og (kun for
-administratorer, skjult som standard) Andre kalendere – med vis/skjul, farve,
-deling, ret/slet, ny kalender og import. Højre: KalenderVisning.
+Alle ser alle kalendere (migrering 022). Venstre: kalenderlisten i to grupper –
+Mine kalendere og Kollegers kalendere – hvor hver kalender slås til og fra med et
+klik, samt ny kalender og import. Højre: KalenderVisning.
+
+Hver kalender vises i sin egen farve: deler to kalendere farve, får den sidste en
+ledig farve i visningen. Egne kalendere kan ændres; kollegers åbnes
+skrivebeskyttet (administratorer kan slette – moderation). Private begivenheder i
+andres kalendere vises som "Optaget" og kan ikke åbnes.
 
 Data hentes, når siden åbnes, ved skift af periode og efter en handling – og fra
-hovedvinduet, når minut-tjekket ser en ændring. Skjulte kalendere og egne farver
-på delte kalendere huskes pr. bruger på pc'en (KalenderService.visningsvalg).
-Begivenheder, brugeren kun må se som ledig/optaget, kan ikke åbnes; kalendere
-delt til læsning åbnes skrivebeskyttet.
+hovedvinduet, når minut-tjekket ser en ændring. Hvilke kalendere der er slået fra,
+huskes pr. bruger på pc'en (KalenderService.skjulte).
 """
 from datetime import date, timedelta
 
@@ -16,7 +19,6 @@ from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QColorDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -34,7 +36,6 @@ from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import MAANEDER, dansk_dato, lav_knap, lav_kort, lav_sidehoved
 from app.ui.kalender_dialoger import (
     BegivenhedDialog,
-    DelingDialog,
     ImportDialog,
     KalenderDialog,
     farve_ikon,
@@ -44,7 +45,6 @@ from app.ui.kalender_visning import KalenderVisning, dage_i, tidsrum
 
 DAG, UGE = "dag", "uge"
 ID_ROLE = Qt.ItemDataRole.UserRole
-_NIVEAU_TEKST = dict(kl.NIVEAUER)
 
 
 def periodetekst(visning: str, dage: list[date]) -> str:
@@ -68,29 +68,34 @@ def alarm_tekst(forekomst, nu) -> str:
     return tid + (f" · {forekomst.begivenhed.sted}" if forekomst.begivenhed.sted else "")
 
 
-def delt_tekst(kalender) -> str:
-    """Notifikationen, når en kalender er delt med brugeren."""
-    return (f"{kalender.ejer_navn or kalender.ejer} har delt kalenderen '{kalender.navn}' med dig "
-            f"({_NIVEAU_TEKST.get(kalender.adgang, '').lower()}).")
+def egne_farver(kalendre: list) -> dict:
+    """Kalender-id -> farve, så ingen to kalendere ser ens ud. Egne kalendere og de
+    ældste beholder deres farve; en senere kalender med samme farve får en ledig."""
+    farver, brugte = {}, []
+    for k in sorted(kalendre, key=lambda k: not k.er_egen):
+        farve = k.farve if k.farve.upper() not in brugte else kl.ledig_farve(brugte)
+        farver[k.id] = farve
+        brugte.append(farve.upper())
+    return farver
 
 
 class KalenderSide(QWidget):
-    def __init__(self, service, hent_brugere=lambda: [], parent=None):
+    def __init__(self, service, parent=None):
         super().__init__(parent)
         self.service = service
-        self.hent_brugere = hent_brugere
         self._dag = date.today()
         self._visning = UGE
         self._kalendre = []
         self._forekomster = []
-        self._valg = None               # visningsvalg (hentes ved første opdatering)
+        self._farver = {}
+        self._skjulte = None            # fravalgte kalendere (hentes ved første opdatering)
         self._rullet = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 28, 32, 28)
         layout.setSpacing(14)
-        hoved, _ = lav_sidehoved("Kalender", "Dine og dine kollegers delte kalendere. Klik eller "
-                                 "træk i kalenderen for at oprette en begivenhed.")
+        hoved, _ = lav_sidehoved("Kalender", "Din og dine kollegers kalendere. Klik eller træk i "
+                                 "kalenderen for at oprette en begivenhed.")
         layout.addLayout(hoved)
 
         vaerktoej = QHBoxLayout()
@@ -138,7 +143,7 @@ class KalenderSide(QWidget):
         ny_kalender.clicked.connect(self._ny_kalender)
         importer = lav_knap("Importér .ics…", tooltip="Fx Google Kalender via Google Takeout")
         importer.clicked.connect(self._importer)
-        hjaelp = QLabel("Højreklik på en kalender for at dele den.")
+        hjaelp = QLabel("Klik på en kalender for at vise eller skjule den.")
         hjaelp.setObjectName("hjaelpTekst")
         hjaelp.setWordWrap(True)
         panel_lag.addWidget(titel)
@@ -174,14 +179,15 @@ class KalenderSide(QWidget):
         forekomster = udfoer(self, self.service.forekomster, *tidsrum(self._dage()))
         if forekomster is FEJL:
             return
-        if self._valg is None:
-            self._valg = self.service.visningsvalg()
+        if self._skjulte is None:
+            self._skjulte = self.service.skjulte()
         self._kalendre, self._forekomster = kalendre, forekomster
+        self._farver = egne_farver(kalendre)
         self._vis_kalendre()
         self._vis()
 
     def ryd(self) -> None:
-        self._kalendre, self._forekomster, self._valg = [], [], None
+        self._kalendre, self._forekomster, self._farver, self._skjulte = [], [], {}, None
         self.liste.clear()
         self.visning.vis(self._dage(), [], {})
 
@@ -191,35 +197,21 @@ class KalenderSide(QWidget):
             self._rullet = True
             self.visning.rul_til_morgen()
 
-    def _valgt(self) -> dict:
-        return self._valg or {"skjulte": [], "viste": [], "farver": {}}
-
     def _skjult(self, kalender) -> bool:
-        valg = self._valgt()
-        if kalender.adgang == kl.ADMIN_ADGANG:      # andres kalendere: skjult som standard
-            return kalender.id not in valg["viste"]
-        return kalender.id in valg["skjulte"]
-
-    def _farve(self, kalender) -> str:
-        return self._valgt()["farver"].get(kalender.id, kalender.farve) if not kalender.er_egen \
-            else kalender.farve
+        return kalender.id in (self._skjulte or set())
 
     def _vis(self) -> None:
-        skjulte = {k.id for k in self._kalendre if self._skjult(k)}
+        skjulte = self._skjulte or set()
         synlige = [f for f in self._forekomster if f.begivenhed.kalender_id not in skjulte]
-        self.visning.vis(self._dage(), synlige, {k.id: self._farve(k) for k in self._kalendre})
+        self.visning.vis(self._dage(), synlige, self._farver)
         self._vis_periode()
 
     def _vis_periode(self) -> None:
         self.periode.setText(periodetekst(self._visning, self._dage()))
 
     def _vis_kalendre(self) -> None:
-        grupper = (
-            ("Mine kalendere", [k for k in self._kalendre if k.er_egen]),
-            ("Delt med mig", [k for k in self._kalendre if k.er_delt_med_mig]),
-            ("Andre kalendere (administrator)",
-             [k for k in self._kalendre if k.adgang == kl.ADMIN_ADGANG]),
-        )
+        grupper = (("Mine kalendere", [k for k in self._kalendre if k.er_egen]),
+                   ("Kollegers kalendere", [k for k in self._kalendre if not k.er_egen]))
         self.liste.blockSignals(True)
         self.liste.clear()
         for overskrift, kalendre in grupper:
@@ -232,38 +224,26 @@ class KalenderSide(QWidget):
             hoved.setFont(skrift)
             self.liste.addItem(hoved)
             for k in sorted(kalendre, key=lambda k: (k.ejer_navn.lower(), k.navn.lower())):
-                tekst = k.navn if k.er_egen else f"{k.navn} · {k.ejer_navn or k.ejer}"
-                item = QListWidgetItem(farve_ikon(self._farve(k)), tekst)
+                tekst = k.navn if k.er_egen else f"{k.ejer_navn or k.ejer} · {k.navn}"
+                item = QListWidgetItem(farve_ikon(self._farver.get(k.id, k.farve)), tekst)
                 item.setData(ID_ROLE, k.id)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
                               | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(Qt.CheckState.Unchecked if self._skjult(k)
                                    else Qt.CheckState.Checked)
-                if k.er_delt_med_mig:
-                    item.setToolTip(f"Delt af {k.ejer_navn or k.ejer}: "
-                                    f"{_NIVEAU_TEKST.get(k.adgang, '').lower()}")
-                elif k.delinger:
-                    item.setToolTip("Delt med " + ", ".join(d.navn or d.brugernavn
-                                                            for d in k.delinger))
                 self.liste.addItem(item)
         self.liste.blockSignals(False)
 
-    def _gem_valg(self) -> None:
-        udfoer(self, self.service.gem_visningsvalg, self._valgt())
-
     def _kalender_vist(self, item: QListWidgetItem) -> None:
-        kalender = self._kalender(item.data(ID_ROLE))
-        if kalender is None:
+        kalender_id = item.data(ID_ROLE)
+        if kalender_id is None:
             return
-        valg = self._valg = self._valgt()
-        vist = item.checkState() == Qt.CheckState.Checked
-        liste, tilfoej = (valg["viste"], vist) if kalender.adgang == kl.ADMIN_ADGANG \
-            else (valg["skjulte"], not vist)
-        if tilfoej and kalender.id not in liste:
-            liste.append(kalender.id)
-        elif not tilfoej and kalender.id in liste:
-            liste.remove(kalender.id)
-        self._gem_valg()
+        self._skjulte = set(self._skjulte or set())
+        if item.checkState() == Qt.CheckState.Checked:
+            self._skjulte.discard(kalender_id)
+        else:
+            self._skjulte.add(kalender_id)
+        udfoer(self, self.service.gem_skjulte, self._skjulte)
         self._vis()
 
     ### ----- navigation -----------------------------------------------------
@@ -284,19 +264,19 @@ class KalenderSide(QWidget):
 
     ### ----- begivenheder ---------------------------------------------------
 
-    def _skrivbare(self) -> list:
-        """Kalendere, brugeren kan oprette begivenheder i (egne og delt til redigering)."""
-        return [k for k in self._kalendre if k.kan_skrive]
+    def _egne(self) -> list:
+        """Kalendere, brugeren kan oprette begivenheder i."""
+        return [k for k in self._kalendre if k.er_egen]
 
     def _ny_nu(self) -> None:
         start = kl.dagens_start(self._dag) + timedelta(hours=9)
         self._ny(start, start + timedelta(hours=1), False)
 
     def _ny(self, start, slut, heldag: bool) -> None:
-        kalendre = self._skrivbare()
+        kalendre = self._egne()
         if not kalendre:
             return
-        synlig = next((k for k in kalendre if k.er_egen and not self._skjult(k)), kalendre[0])
+        synlig = next((k for k in kalendre if not self._skjult(k)), kalendre[0])
         ny = Begivenhed(synlig.id, "", start, slut, heldag=heldag)
 
         def gem(resultat) -> bool:
@@ -310,7 +290,7 @@ class KalenderSide(QWidget):
         b = forekomst.begivenhed
         kalender = self._kalender(b.kalender_id)
         if b.maskeret or kalender is None:
-            QToolTip.showText(QCursor.pos(), "Optaget – detaljerne er ikke delt med dig.", self)
+            QToolTip.showText(QCursor.pos(), "Optaget – aftalen er privat.", self)
             return
         serie = udfoer(self, self.service.serie_for, forekomst, efter_konflikt=self.opdater)
         if serie is FEJL:
@@ -340,13 +320,11 @@ class KalenderSide(QWidget):
             return self._efter(udfoer(dialog, self.service.slet_forekomst, forekomst, omfang,
                                       efter_konflikt=self.opdater))
 
-        kan_slette = kalender.kan_skrive or self.service.kan_administrere(kalender)
-        if kalender.kan_skrive:
-            dialog = BegivenhedDialog(self, self._skrivbare(), udgangspunkt, gem, slet,
-                                      privat_mulig=kalender.er_egen)
-        else:       # delt til læsning – administratorer kan slette (moderation)
+        if kalender.er_egen:
+            dialog = BegivenhedDialog(self, self._egne(), udgangspunkt, gem, slet)
+        else:       # en kollegas – kun visning; administratorer kan slette (moderation)
             dialog = BegivenhedDialog(self, [kalender], udgangspunkt, None,
-                                      slet if kan_slette else None)
+                                      slet if self.service.kan_administrere(kalender) else None)
         dialog.exec()
 
     def _efter(self, resultat) -> bool:
@@ -367,7 +345,7 @@ class KalenderSide(QWidget):
             self._ret_kalender(kalender.id)
 
     def _ny_kalender(self) -> None:
-        dialog = KalenderDialog(self, self.service, brugte_farver=[k.farve for k in self._kalendre])
+        dialog = KalenderDialog(self, self.service, brugte_farver=list(self._farver.values()))
         if dialog.exec():
             self.opdater()
 
@@ -375,41 +353,6 @@ class KalenderSide(QWidget):
         kalender = self._kalender(kalender_id)
         if kalender is not None and KalenderDialog(self, self.service, kalender).exec():
             self.opdater()
-
-    def _del_kalender(self, kalender_id: str) -> None:
-        kalender = self._kalender(kalender_id)
-        if kalender is None:
-            return
-        brugere = udfoer(self, self.hent_brugere)
-        if brugere is FEJL:
-            return
-        DelingDialog(self, self.service, kalender, brugere).exec()
-        self.opdater()
-
-    def _egen_farve(self, kalender_id: str) -> None:
-        kalender = self._kalender(kalender_id)
-        if kalender is None:
-            return
-        farve = QColorDialog.getColor(Qt.GlobalColor.white, self, "Farve (kun hos dig)")
-        if farve.isValid():
-            self._valg = self._valgt()
-            self._valg["farver"][kalender.id] = farve.name()
-            self._gem_valg()
-            self._vis_kalendre()
-            self._vis()
-
-    def _forlad(self, kalender_id: str) -> None:
-        kalender = self._kalender(kalender_id)
-        if kalender is None:
-            return
-        svar = QMessageBox.question(
-            self, "Fjern fra min liste",
-            f"Fjern '{kalender.navn}' fra din liste? {kalender.ejer_navn or kalender.ejer} kan dele "
-            "den med dig igen.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if svar == QMessageBox.StandardButton.Yes:
-            self._efter(udfoer(self, self.service.forlad, kalender))
 
     def _slet_kalender(self, kalender_id: str) -> None:
         kalender = self._kalender(kalender_id)
@@ -428,23 +371,16 @@ class KalenderSide(QWidget):
     def _kalender_menu(self, pos) -> None:
         item = self.liste.itemAt(pos)
         kalender = self._kalender(item.data(ID_ROLE)) if item is not None else None
-        if kalender is None:
+        if kalender is None or not self.service.kan_administrere(kalender):
             return
         menu = QMenu(self)
-        if self.service.kan_administrere(kalender):
-            menu.addAction("Del…", lambda: self._del_kalender(kalender.id))
         if kalender.er_egen:
             menu.addAction("Ret navn og farve…", lambda: self._ret_kalender(kalender.id))
-        else:
-            menu.addAction("Skift farve (kun hos mig)…", lambda: self._egen_farve(kalender.id))
-        if kalender.er_delt_med_mig:
-            menu.addAction("Fjern fra min liste…", lambda: self._forlad(kalender.id))
-        if self.service.kan_administrere(kalender):
             menu.addSeparator()
-            menu.addAction("Slet kalender…", lambda: self._slet_kalender(kalender.id))
+        menu.addAction("Slet kalender…", lambda: self._slet_kalender(kalender.id))
         menu.exec(self.liste.mapToGlobal(pos))
 
     def _importer(self) -> None:
-        dialog = ImportDialog(self, self.service, self._skrivbare())
+        dialog = ImportDialog(self, self.service, self._egne())
         if dialog.exec():
             self.opdater()

@@ -33,6 +33,12 @@ class SagRepository(Protocol):
 
 class SkabelonRepository(Protocol):
     def hent_alle(self) -> dict: ...
+    def hent(self, slags: str) -> list[dict]:
+        """Én slags skabeloner – arbejdsgange uden deres gamle versioner (se versioner())."""
+
+    def versioner(self, skabelon_id: str) -> list[dict]:
+        """En arbejdsgangs gemte tidligere udgaver, ældste først."""
+
     def gem(self, slags: str, skabelon: dict, placering: int) -> None:
         """Opretter/opdaterer ÉN skabelon. placering = dens nummer i listen."""
 
@@ -118,16 +124,15 @@ class OpdateringRepository(Protocol):
 
 
 class KalenderRepository(Protocol):
-    """Kalender (migrering 020/021): kalendere, begivenheder og deling.
+    """Kalender (migrering 020–022): kalendere og begivenheder.
 
-    Ejer og opretter bestemmes af lagringen ud fra login. kalendre() giver de
-    kalendere, brugeren har adgang til (Kalender.adgang). begivenheder() giver
-    de begivenheder (serier og rettede forekomster), der kan have forekomster i
-    tidsrummet – maskeret ("Optaget") hvor brugeren kun må se ledig/optaget;
-    udfoldningen sker i domænet. opdater()/opdater_kalender() afviser med
-    KonfliktFejl, hvis versionen ikke er den, der blev hentet. importer()
-    springer dubletter over og returnerer antal oprettede. del_kalender() og
-    fjern_deling() returnerer kalenderen med de opdaterede delinger.
+    Ejer og opretter bestemmes af lagringen ud fra login. kalendre() giver alle
+    kalendere (egne og kollegers – Kalender.adgang). begivenheder() giver de
+    begivenheder (serier og rettede forekomster), der kan have forekomster i
+    tidsrummet – private i andres kalendere maskeret ("Optaget"); udfoldningen
+    sker i domænet. opdater()/opdater_kalender() afviser med KonfliktFejl, hvis
+    versionen ikke er den, der blev hentet. importer() springer dubletter over og
+    returnerer antal oprettede.
     """
 
     def kalendre(self) -> list: ...
@@ -139,8 +144,6 @@ class KalenderRepository(Protocol):
     def opdater(self, begivenhed): ...
     def slet(self, begivenhed_id: str) -> None: ...
     def importer(self, kalender_id: str, begivenheder: list) -> int: ...
-    def del_kalender(self, kalender_id: str, brugernavn: str, niveau: str): ...
-    def fjern_deling(self, kalender_id: str, brugernavn: str): ...
     def signatur(self) -> tuple: ...
 
 

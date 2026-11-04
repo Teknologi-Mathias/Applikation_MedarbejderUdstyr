@@ -149,12 +149,13 @@ class KalenderServiceTest(TjenesteTest):
     def hent(self):
         return self.s.forekomster(t(1, 0), t(31, 0) + timedelta(days=30))
 
-    def test_foerste_gang_oprettes_min_kalender_kun_egne_ses(self):
-        self.assertEqual((self.k.navn, self.k.ejer), (kl.STANDARD_KALENDER, "tester"))
-        self.s.gem(Begivenhed(self.k.id, "Tandlæge", t(6, 8), t(6, 9)))
+    def test_foerste_gang_oprettes_min_kalender(self):
+        self.assertEqual((self.k.navn, self.k.ejer, self.k.er_egen),
+                         (kl.STANDARD_KALENDER, "tester", True))
         session.log_ind({"brugernavn": "ANDEN", "rolle": "Bruger", "moduler": None})
-        self.assertNotIn(self.k.id, [k.id for k in self.s.kalendre()])
-        self.assertEqual(self.hent(), [])
+        egne = [k for k in self.s.kalendre() if k.er_egen]
+        self.assertEqual(len(egne), 1, "ANDEN får sin egen, selv om testerens findes")
+        self.assertNotEqual(egne[0].id, self.k.id)
 
     def test_validering(self):
         for b in (Begivenhed(self.k.id, " ", t(6), t(6, 10)),
@@ -200,7 +201,9 @@ class KalenderServiceTest(TjenesteTest):
         self.assertEqual(self.s.tjek(t(6, 9, 47))[1], [], "allerede vist")
 
 
-class DelingTest(TjenesteTest):
+class KollegaTest(TjenesteTest):
+    """Alle ser alle kalendere (migrering 022); kun ejeren ændrer."""
+
     def setUp(self):
         super().setUp()
         self.s = self.t.kalender
@@ -219,71 +222,45 @@ class DelingTest(TjenesteTest):
         self.s.gem(Begivenhed(k.id, "Hemmeligt", t(7, 10), t(7, 11), privat=True))
         return k
 
-    def delt(self, kalender_id):
-        return next(k for k in self.s.kalendre() if k.id == kalender_id)
-
-    def test_ledig_optaget_redigere_og_privat(self):
+    def test_kolleger_ser_alt_undtagen_private_og_kan_ikke_aendre(self):
         k = self.annes_kalender()
-        k = self.s.del_kalender(k, "bo", kl.FREEBUSY)
-        self.assertEqual([(d.brugernavn, d.niveau) for d in k.delinger], [("BO", kl.FREEBUSY)])
-
         self.som("BO")
-        delt = self.delt(k.id)
-        self.assertEqual((delt.adgang, delt.delinger, delt.er_delt_med_mig), (kl.FREEBUSY, [], True))
-        self.assertEqual({(f.titel, f.begivenhed.sted) for f in self.hent().values()},
-                         {(kl.MASKERET_TITEL, "")}, "kun ledig/optaget")
+        annes = next(x for x in self.s.kalendre() if x.id == k.id)
+        self.assertEqual((annes.er_egen, annes.ejer_navn), (False, "ANNE"))
+        self.assertEqual(self.hent()["Tandlæge"].begivenhed.sted, "Klinikken", "alle detaljer")
+        self.assertIn(kl.MASKERET_TITEL, self.hent(), "privat vises som Optaget")
+        self.assertNotIn("Hemmeligt", self.hent())
         with self.assertRaises(DataFejl):
             self.s.gem(Begivenhed(k.id, "Bos møde", t(8, 10), t(8, 11)))
-        with self.assertRaises(ValideringsFejl):
-            self.s.del_kalender(delt, "CILLE", kl.LAESE)
-
-        self.som("ANNE")
-        self.s.del_kalender(k, "BO", kl.SKRIVE)
-        self.som("BO")
-        delt = self.delt(k.id)
-        self.assertEqual(set(self.hent()), {"Tandlæge", kl.MASKERET_TITEL}, "privat er stadig skjult")
-        self.s.gem(Begivenhed(k.id, "Bos møde", t(8, 10), t(8, 11)))
         with self.assertRaises(DataFejl):
-            self.s.slet_forekomst(self.hent()[kl.MASKERET_TITEL], None)
+            self.s.slet_forekomst(self.hent()["Tandlæge"], None)
         with self.assertRaises(ValideringsFejl):
-            self.s.slet_kalender(delt)
-        self.s.forlad(delt)
-        self.assertNotIn(k.id, [x.id for x in self.s.kalendre()])
-        self.som("ANNE")
-        self.assertIn("Bos møde", self.hent(), "Bo skrev i Annes kalender")
+            self.s.slet_kalender(annes)
 
-    def test_administrator_ser_alt_undtagen_privat_og_kan_moderere(self):
+    def test_administrator_kan_slette_kollegers(self):
         k = self.annes_kalender()
         self.som("CHEF", "Administrator")
-        andres = self.delt(k.id)
-        self.assertEqual(andres.adgang, kl.ADMIN_ADGANG)
-        self.assertEqual(set(self.hent()), {"Tandlæge", kl.MASKERET_TITEL})
+        annes = next(x for x in self.s.kalendre() if x.id == k.id)
+        self.assertEqual(set(self.hent()), {"Tandlæge", kl.MASKERET_TITEL}, "privat også for admin")
         self.s.slet_forekomst(self.hent()[kl.MASKERET_TITEL], None)
-        self.assertEqual(self.s.del_kalender(andres, "BO", kl.LAESE).delinger[0].brugernavn, "BO")
-        self.s.slet_kalender(andres)
+        self.s.slet_kalender(annes)
         self.som("ANNE")
         self.assertNotIn(k.id, [x.id for x in self.s.kalendre()])
 
-    def test_besked_om_ny_deling_en_gang_og_kun_egne_paamindelser(self):
-        self.som("BO")
-        self.s.kalendre()
-        self.assertEqual(self.s.tjek(t(6, 8))[2], [], "første gang: alt er kendt")
+    def test_hver_kalender_sin_farve_og_kun_egne_paamindelser(self):
         k = self.annes_kalender()
-        self.s.del_kalender(k, "BO", kl.SKRIVE)
         self.som("BO")
-        _, alarmer, nye = self.s.tjek(t(6, 9, 50))
-        self.assertEqual([x.navn for x in nye], [k.navn])
-        self.assertEqual(alarmer, [], "Annes påmindelse følger ikke med")
-        self.s.glem_cache()
-        self.assertEqual(self.s.tjek(t(6, 9, 51))[2], [], "allerede meldt")
+        bos = next(x for x in self.s.kalendre() if x.er_egen)
+        self.assertNotEqual(bos.farve, k.farve, "ny kalender får en ledig farve")
+        self.assertEqual(self.s.tjek(t(6, 9, 50))[1], [], "Annes påmindelse følger ikke med")
 
-    def test_visningsvalg_huskes_pr_bruger(self):
+    def test_fravalgte_kalendere_huskes_pr_bruger(self):
         self.som("ANNE")
-        self.s.gem_visningsvalg({"skjulte": ["k1"], "viste": [], "farver": {"k2": "#000000"}})
+        self.s.gem_skjulte({"k1"})
         self.som("BO")
-        self.assertEqual(self.s.visningsvalg()["skjulte"], [])
+        self.assertEqual(self.s.skjulte(), set(), "alle er slået til fra start")
         self.som("ANNE")
-        self.assertEqual(self.s.visningsvalg()["farver"], {"k2": "#000000"})
+        self.assertEqual(self.s.skjulte(), {"k1"})
 
 
 if __name__ == "__main__":

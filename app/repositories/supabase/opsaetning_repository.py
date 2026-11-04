@@ -21,14 +21,25 @@ class SupabaseSkabelonRepository:
         self.klient = klient
 
     def hent_alle(self) -> dict:
-        alle = {}
-        for slags, tabel in mapping.SKABELON_TABELLER.items():
-            raekker = hent_alle(
-                lambda t=tabel, s=slags: self.klient.table(t).select(mapping.SKABELON_SELECT[s])
-                .order("sort_order").order("name"),
-                "hente skabeloner")
-            alle[slags] = [mapping.skabelon_fra_raekke(slags, r) for r in raekker]
-        return alle
+        return {slags: self.hent(slags) for slags in mapping.SKABELON_TABELLER}
+
+    def hent(self, slags: str) -> list[dict]:
+        """Kun én tabel – og arbejdsgange uden versionerne (de hentes af versioner())."""
+        tabel = mapping.SKABELON_TABELLER[slags]
+        raekker = hent_alle(
+            lambda: self.klient.table(tabel).select(mapping.SKABELON_SELECT[slags])
+            .order("sort_order").order("name"),
+            "hente skabeloner")
+        return [mapping.skabelon_fra_raekke(slags, r) for r in raekker]
+
+    def versioner(self, skabelon_id: str) -> list[dict]:
+        if mapping.til_uuid(skabelon_id) is None:
+            return []
+        raekker = hent_alle(
+            lambda: self.klient.table("workflow_template_versions").select("version, snapshot")
+            .eq("template_id", skabelon_id).order("version"),
+            "hente skabelonens versioner")
+        return [r["snapshot"] for r in raekker]
 
     def gem(self, slags: str, skabelon: dict, placering: int) -> None:
         raekke = mapping.skabelon_til_raekke(slags, skabelon, placering)

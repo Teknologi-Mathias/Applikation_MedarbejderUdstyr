@@ -69,7 +69,10 @@ class UiTest(TjenesteTest):
         self.vindue.vis_omraade("onboarding")
         self.assertFalse(self.vindue.fane_ramme.isHidden())
         self.assertEqual(self.vindue.faner.count(), len(omraader["onboarding"]))
-        self.vindue.faner.setCurrentIndex(2)                   # Aktive forløb
+        self.assertEqual([s for s, _ in omraader["onboarding"]],
+                         ["on_oversigt", "on_aktive", "on_skabeloner", "on_arkiv"],
+                         "forenklet: ingen Teamoverblik eller Opgaver og milepæle")
+        self.vindue.faner.setCurrentIndex(1)                   # Aktive forløb
         self.assertIs(self.vindue.stak.currentWidget(), self.vindue.sider["on_aktive"])
         self.vindue.vis_omraade("overblik")
         self.assertTrue(self.vindue.fane_ramme.isHidden(), "én side = ingen faner")
@@ -78,16 +81,12 @@ class UiTest(TjenesteTest):
         self.vindue.sidebar.indstillinger_knap.click()        # tandhjulet ved brugeren
         self.assertIs(self.vindue.stak.currentWidget(), self.vindue.indstillinger)
 
-    def test_dashboard_kort_aabner_den_filtrerede_liste(self):
+    def test_dashboard_kort_aabner_aktive_forloeb(self):
         kort = self.vindue.dashboard.kort
         self.assertEqual(kort["starter_snart"].vaerdi.text(), "1")   # onboarding om 7 dage
         self.assertTrue(kort["forsinkede"].vaerdi.text().isdigit())
-        kort["forsinkede"].klikket.emit("forsinkede")                # forløb i Teamoverblikket
-        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.teamoverblik)
-        self.assertEqual(self.vindue.teamoverblik.filter_input.currentData(), "forsinkede")
-        kort["i_risiko"].klikket.emit("i_risiko")
-        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.teamoverblik)
-        self.assertEqual(self.vindue.teamoverblik.filter_input.currentData(), "risiko")
+        kort["forsinkede"].klikket.emit("forsinkede")
+        self.assertIs(self.vindue.stak.currentWidget(), self.vindue.sider["on_aktive"])
 
     def test_sagsvindue_viser_milepaele_og_laaste_opgaver(self):
         dialog = SagDialog(self.vindue, self.on, ["tester"])
@@ -226,6 +225,40 @@ class UiTest(TjenesteTest):
         self.assertEqual(self.vindue.sider["off_aktive"].tabel.rowCount(), 0, "data er fjernet")
         afslut.assert_called_once()
 
+    def test_minut_tjek_henter_kun_det_aendrede(self):
+        """Supabase-stien (inbase_tick): uændrede signaturer henter intet igen, og et
+        skjult vindue tjekker kun netværket hvert 5. minut."""
+        from app.repositories.supabase.tjek_repository import Signaturer
+        sager = {p: self.t.modul(p).signatur() for p in ("onboarding", "offboarding")}
+        tjek = mock.Mock()
+        tjek.signaturer.return_value = Signaturer(profil={}, sager=sager, kalender=(0, 0, 0, None),
+                                                  indstillinger=(1,), skabeloner=(1,))
+        self.vindue.notifikationer.slaaet_til = True
+
+        def tik():
+            self.vindue._minut_tik()
+            QThreadPool.globalInstance().waitForDone()
+            _app.processEvents()
+
+        with mock.patch.object(self.t, "tjek", tjek), \
+                mock.patch.object(self.t, "backup", None), \
+                mock.patch.object(self.t.auth, "kontroller_profil", create=True) as profil, \
+                mock.patch.object(self.t.indstillinger, "hent",
+                                  wraps=self.t.indstillinger.hent) as indstillinger, \
+                mock.patch.object(self.t.skabeloner, "aktive",
+                                  wraps=self.t.skabeloner.aktive) as skabeloner, \
+                mock.patch.object(self.vindue.notifikationer, "vis_paamindelser"), \
+                mock.patch.object(self.vindue, "isVisible", return_value=True):
+            tik()
+            tik()
+            self.assertEqual(tjek.signaturer.call_count, 2)
+            profil.assert_called_with({})
+            self.assertEqual(indstillinger.call_count, 1, "kun første gang (ukendt signatur)")
+            self.assertEqual(skabeloner.call_count, 1)
+            with mock.patch.object(self.vindue, "isVisible", return_value=False):
+                tik()
+            self.assertEqual(tjek.signaturer.call_count, 2, "skjult: intet netværkstjek")
+
     def test_kalender_viser_egne_begivenheder_og_dialogen_aabner(self):
         from datetime import datetime, timedelta
 
@@ -248,23 +281,24 @@ class UiTest(TjenesteTest):
             side._aabn(side.visning.forekomster[0])
         aaben.assert_called_once()
 
-    def test_delt_kalender_vises_i_egen_gruppe_og_kan_deles(self):
+    def test_kollegers_kalendere_vises_i_egen_farve_og_kan_slaas_fra(self):
+        from PySide6.QtCore import Qt
+
         from app.domain import kalender as kl
-        from app.ui.kalender_dialoger import DelingDialog
         admin = session.bruger()
         session.log_ind({"brugernavn": "ANNE", "rolle": "Bruger", "moduler": None})
-        annes = self.t.kalender.kalendre()[0]
-        self.t.kalender.del_kalender(annes, admin["brugernavn"], kl.LAESE)
+        self.t.kalender.kalendre()                  # Annes "Min kalender"
         session.log_ind(admin)
         self.vindue.vis_side("kalender")
         side = self.vindue.kalender
         tekster = [side.liste.item(i).text() for i in range(side.liste.count())]
-        self.assertIn("Delt med mig", tekster)
-        self.assertIn(f"{kl.STANDARD_KALENDER} · ANNE", tekster)
-        egen = next(k for k in side._kalendre if k.er_egen)
-        with mock.patch.object(DelingDialog, "exec") as aaben:
-            side._del_kalender(egen.id)
-        aaben.assert_called_once()
+        self.assertIn("Kollegers kalendere", tekster)
+        self.assertIn(f"ANNE · {kl.STANDARD_KALENDER}", tekster)
+        self.assertEqual(len(set(side._farver.values())), len(side._kalendre), "én farve hver")
+        annes = next(i for i in range(side.liste.count())
+                     if side.liste.item(i).text().startswith("ANNE"))
+        side.liste.item(annes).setCheckState(Qt.CheckState.Unchecked)   # klik fra
+        self.assertEqual(len(self.t.kalender.skjulte()), 1, "huskes")
 
     def test_baggrundsopgave_leverer_resultat_og_fejl_paa_ui_traaden(self):
         from app.ui.baggrund import koer_i_baggrund

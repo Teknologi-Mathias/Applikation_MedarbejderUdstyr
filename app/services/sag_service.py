@@ -6,7 +6,7 @@ tidslinjen og gemmer med optimistisk låsning (KonfliktFejl ved samtidige
 ændringer).
 """
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from app.domain import afhaengighed
@@ -17,6 +17,22 @@ from app.repositories.fejl import KonfliktFejl, ValideringsFejl
 from app.services import workflow
 
 log = logging.getLogger(__name__)
+
+# Ændrede sager hentes lidt længere tilbage end seneste kendte ændring: en gemning,
+# der startede før sidste hentning men blev færdig efter, har et ældre tidspunkt.
+OVERLAP = timedelta(minutes=2)
+
+
+def _siden(kendt: tuple | None) -> str | None:
+    """Tidspunktet, ændrede sager hentes fra – None: hent hele listen.
+
+    Den seneste kendte ændring (begge halvdele): alt, der er ændret siden sidste
+    hentning, har et senere tidspunkt (minus OVERLAP)."""
+    try:
+        tidspunkter = [datetime.fromisoformat(halvdel[1]) for halvdel in kendt or () if halvdel[1]]
+    except (IndexError, TypeError, ValueError):   # ukendt format (fx JSON-filsignatur)
+        return None
+    return (max(tidspunkter) - OVERLAP).isoformat() if tidspunkter else None
 
 
 class SagService:
@@ -37,6 +53,35 @@ class SagService:
 
     def signatur(self) -> tuple:
         return self.repo.signatur()
+
+    def opdater_lister(self, kendt: tuple | None, ny: tuple, aktive: list[Sag] | None,
+                       arkiv: list[Sag] | None) -> tuple:
+        """(aktive, arkiv) for de halvdele, hvis signatur er ændret (None = uændret).
+
+        Har lagringen hent_aendrede (Supabase), hentes kun de ændrede sager og flettes
+        ind i de lister, vinduet allerede har. Passer resultatet ikke med databasens
+        id-liste, eller kan det ikke afgøres, hentes halvdelen helt.
+        """
+        aendret = [kendt is None or ny[i] != kendt[i] for i in (0, 1)]
+        if not any(aendret):
+            return None, None
+        siden = _siden(kendt)
+        if siden is None or aktive is None or arkiv is None or not hasattr(self.repo, "hent_aendrede"):
+            return (self.repo.hent_aktive() if aendret[0] else None,
+                    self.repo.hent_arkiverede() if aendret[1] else None)
+        aendrede, alle = self.repo.hent_aendrede(siden)
+        nye = {s.id: s for s in aendrede}
+        resultat = []
+        for i, (arkiveret, gamle) in enumerate(((False, aktive), (True, arkiv))):
+            kendte = {s.id for s in gamle}
+            liste = [nye.get(s.id, s) for s in gamle if alle.get(s.id) is arkiveret] + \
+                    [s for s in aendrede if alle.get(s.id) is arkiveret and s.id not in kendte]
+            if {s.id for s in liste} != {sag_id for sag_id, a in alle.items() if a is arkiveret}:
+                log.info("%s: ændringerne passede ikke med databasen – henter hele listen",
+                         self.proces)
+                liste = self.repo.hent_arkiverede() if arkiveret else self.repo.hent_aktive()
+            resultat.append(liste if aendret[i] else None)
+        return tuple(resultat)
 
     ### ----- validering -----------------------------------------------------
 

@@ -72,6 +72,17 @@ class SupabaseSagRepository:
         sager = self._til_sager(svar.data or [])
         return sager[0] if sager else None
 
+    def hent_aendrede(self, siden: str) -> tuple[list[Sag], dict[str, bool]]:
+        """(sager ændret fra og med siden, alle sagers id -> arkiveret). Id-listen er lille
+        og fanger sletninger og sager, der er flyttet mellem aktive og arkiv."""
+        alle = hent_alle(lambda: self.klient.table("lifecycle_cases").select("id, archived_on")
+                         .eq("process", self.proces).order("id"),
+                         f"tjekke {self.proces}-sager for ændringer")
+        aendrede = self._til_sager(hent_alle(
+            lambda: self._forespoergsel().gte("updated_at", siden).order("created_at").order("id"),
+            f"hente ændrede {self.proces}-sager"))
+        return aendrede, {r["id"]: r["archived_on"] is not None for r in alle}
+
     def signatur(self) -> tuple:
         """(aktive, arkiv): antal + seneste ændring for hver halvdel i ét kald (RPC fra
         migrering 019). Ændrer sig, når en sag oprettes, ændres, arkiveres eller slettes –

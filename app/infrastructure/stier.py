@@ -63,8 +63,7 @@ PRAEFERENCE_FIL = LOKAL_MAPPE / "praeferencer.json"
 LAGRING_FIL = LOKAL_MAPPE / "lagring.json"
 NOTIFIKATIONSLOG_FIL = LOKAL_MAPPE / "notifikationslog.json"
 KALENDER_ALARMER_FIL = LOKAL_MAPPE / "kalender_alarmer.json"   # viste kalenderpåmindelser
-KALENDER_DELINGER_FIL = LOKAL_MAPPE / "kalender_delinger.json" # kendte delte kalendere
-KALENDER_VISNING_FIL = LOKAL_MAPPE / "kalender_visning.json"   # skjulte kalendere, egne farver
+KALENDER_VISNING_FIL = LOKAL_MAPPE / "kalender_visning.json"   # fravalgte kalendere
 MDM_LOKAL_FIL = LOKAL_MAPPE / "mdm_klargoering.json"   # huskede klargøringsindstillinger
 OPDATERING_MAPPE = LOKAL_MAPPE / "Opdateringer"         # hentede installere + installerlog
 

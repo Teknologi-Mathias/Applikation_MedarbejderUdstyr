@@ -9,6 +9,7 @@ via bootstrap og opretter aldrig selv en forbindelse.
 import logging
 import threading
 
+from app.infrastructure.database import trafik
 from app.infrastructure.database.config import DatabaseKonfiguration, hent_konfiguration
 
 log = logging.getLogger(__name__)
@@ -39,8 +40,21 @@ def opret_klient(konfig: DatabaseKonfiguration | None = None):
         if _klient is not None and _klient_konfig == konfig:
             return _klient
         try:
-            from supabase import ClientOptions, create_client
-            _klient = create_client(
+            from supabase import Client, ClientOptions
+
+            class MaaltKlient(Client):
+                """Tæller datatrafikken på PostgREST (trafik.py). Forbindelsen oprettes
+                igen ved hvert nyt token, så tælleren lægges på, hver gang den bygges."""
+
+                @staticmethod
+                def _init_postgrest_client(*args, **kwargs):
+                    postgrest = Client._init_postgrest_client(*args, **kwargs)
+                    hooks = postgrest.session.event_hooks
+                    postgrest.session.event_hooks = {
+                        **hooks, "response": [*hooks["response"], trafik.taeller.svar_modtaget]}
+                    return postgrest
+
+            _klient = MaaltKlient.create(
                 konfig.url,
                 konfig.anon_noegle,
                 options=ClientOptions(

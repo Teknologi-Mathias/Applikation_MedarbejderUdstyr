@@ -20,6 +20,7 @@ import time
 import unittest
 import uuid
 from datetime import datetime, timedelta
+from unittest import mock
 
 from app import KRAEVET_SKEMA, session
 from app.domain import historik
@@ -35,6 +36,7 @@ from app.repositories.fejl import DataFejl, KonfliktFejl, SessionUdloebetFejl, V
 from app.repositories.supabase import mapping
 from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRepository
 from app.repositories.supabase.kalender_repository import SupabaseKalenderRepository
+from app.repositories.supabase.klient import kald
 from app.repositories.supabase.konto_repository import SupabaseKontoRepository
 from app.repositories.supabase.opdatering_repository import SupabaseOpdateringRepository
 from app.repositories.supabase.opsaetning_repository import (
@@ -43,6 +45,7 @@ from app.repositories.supabase.opsaetning_repository import (
     SupabaseSkabelonRepository,
 )
 from app.repositories.supabase.sag_repository import SupabaseSagRepository
+from app.repositories.supabase.tjek_repository import SupabaseTjekRepository
 from app.services.auth_service import SupabaseAuthService
 from app.services.indmelding_service import IndmeldingService
 from app.services.indstillinger_service import IndstillingerService
@@ -350,7 +353,14 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertEqual(hos_bo["version"], 2)
         self.assertEqual([o["navn"] for o in hos_bo["opgaver"]], ["Opgave A", "Opgave B"])
         self.assertEqual(hos_bo["opgaver"][0]["frist_dage"], 3)
-        self.assertEqual(len(hos_bo["versioner"]), 1)
+        # Listen har ikke versionerne med (trafik) – de hentes for sig og overlever
+        # en gemning uden indholdsændring.
+        self.assertEqual(hos_bo["versioner"], [])
+        self.assertEqual(len(self.bo.skabeloner.repo.versioner(gemt["id"])), 1)
+        self.admin.skabeloner.skift_aktiv(sk.SAG, hos_bo)
+        self.assertEqual(len(self.bo.skabeloner.repo.versioner(gemt["id"])), 1)
+        gammel = self.bo.skabeloner.version({"id": gemt["id"], "version": 1})
+        self.assertEqual([o["navn"] for o in gammel["opgaver"]], ["Opgave A"])
 
     # ----- brugernavne og deaktivering -------------------------------------
 
@@ -516,6 +526,49 @@ class SupabaseLokalTest(unittest.TestCase):
         self.anne.offboarding.arkiver(sag)
         self.assertNotEqual(repo.signatur()[1], efter_opret[1])
 
+    # ----- minut-tjekket (migrering 023) ------------------------------------
+
+    def test_minut_tjek_i_et_kald(self):
+        tjek = SupabaseTjekRepository(self.anne.klient)
+        foer = tjek.signaturer()
+        self.assertEqual(foer.profil["brugernavn"], self.anne.brugernavn)
+        self.assertEqual(foer.sager["offboarding"], self.anne.offboarding.repo.signatur())
+        self.assertEqual(foer.kalender, SupabaseKalenderRepository(self.anne.klient).signatur())
+        self.ny_offboarding(self.anne)
+        self.anne.skabeloner.gem(sk.MAIL, sk.ny_skabelon(sk.MAIL))
+        efter = tjek.signaturer()
+        self.assertNotEqual(efter.sager["offboarding"], foer.sager["offboarding"])
+        self.assertEqual(efter.sager["onboarding"], foer.sager["onboarding"])
+        self.assertNotEqual(efter.skabeloner, foer.skabeloner)
+        self.assertEqual(efter.indstillinger, foer.indstillinger)
+        self.assertIsNone(SupabaseTjekRepository(self.uden_profil.klient).signaturer().profil)
+
+    def test_kun_aendrede_sager_hentes_og_flettes(self):
+        s = self.anne.offboarding
+        a, b, c = (self.ny_offboarding(self.anne) for _ in range(3))
+        kendt, aktive, arkiv = s.signatur(), s.hent_aktive(), s.hent_arkiverede()
+        self.assertEqual(s.opdater_lister(kendt, s.signatur(), aktive, arkiv), (None, None))
+
+        self.bo.aktiv()          # en kollega ændrer én sag ...
+        b_hos_bo = self.bo.offboarding.hent(b.id)
+        opgave_id = b_hos_bo.opgaver[1].id
+        self.bo.offboarding.marker_opgave_udfoert(b_hos_bo, opgave_id)
+        self.anne.aktiv()        # ... en anden arkiveres, og en tredje slettes
+        s.arkiver(s.hent(a.id), "Test")
+        self.admin.offboarding.slet(self.admin.offboarding.hent(c.id))
+
+        with mock.patch.object(s.repo, "hent_aktive", wraps=s.repo.hent_aktive) as aktive_helt, \
+                mock.patch.object(s.repo, "hent_arkiverede", wraps=s.repo.hent_arkiverede) as arkiv_helt:
+            nye_aktive, nyt_arkiv = s.opdater_lister(kendt, s.signatur(), aktive, arkiv)
+        aktive_helt.assert_not_called()
+        arkiv_helt.assert_not_called()
+        self.assertEqual({x.id for x in nye_aktive}, {x.id for x in s.hent_aktive()})
+        self.assertEqual({x.id for x in nyt_arkiv}, {x.id for x in s.hent_arkiverede()})
+        self.assertNotIn(c.id, {x.id for x in nye_aktive})
+        self.assertIn(a.id, {x.id for x in nyt_arkiv})
+        aendret = next(x for x in nye_aktive if x.id == b.id)
+        self.assertEqual(aendret.find_opgave(opgave_id).status, Opgave.UDFOERT)
+
     def test_udgivelser_pilotkanal_og_kun_administratorer_udgiver(self):
         n = uuid.uuid4().int % 10**6
         stabil = Udgivelse(f"9.{n}.0", op.STABIL, f"stabil-{n}.exe", "a" * 64, 10)
@@ -555,18 +608,19 @@ class SupabaseLokalTest(unittest.TestCase):
 
     # ----- kalender (migrering 020) -----------------------------------------
 
-    def test_kalender_kun_for_ejeren_og_ikke_direkte_fra_tabellen(self):
+    def test_kalender_kun_ejeren_aendrer_og_ikke_direkte_fra_tabellen(self):
         anne, bo = SupabaseKalenderRepository(self.anne.klient), SupabaseKalenderRepository(self.bo.klient)
         kalender = anne.opret_kalender(Kalender("Annes testkalender"))
         self.assertEqual(kalender.ejer, self.anne.brugernavn)
         start = datetime(2026, 10, 5, 9)
         serie = anne.opret(Begivenhed(kalender.id, "Ugemøde", start, start + timedelta(hours=1),
-                                      gentagelse="FREQ=WEEKLY;COUNT=3", privat=True))
+                                      gentagelse="FREQ=WEEKLY;COUNT=3"))
         self.assertEqual(serie.oprettet_af, self.anne.brugernavn)
         fra, til = datetime(2026, 10, 1), datetime(2026, 11, 1)
         self.assertIn(serie.id, [b.id for b in anne.begivenheder(fra, til)])
-        self.assertNotIn(kalender.id, [k.id for k in bo.kalendre()])
-        self.assertEqual([b for b in bo.begivenheder(fra, til) if b.id == serie.id], [])
+        bos_syn = next(k for k in bo.kalendre() if k.id == kalender.id)
+        self.assertEqual((bos_syn.adgang, bos_syn.er_egen), (kl.LAESE, False), "alle ser alle")
+        self.assertEqual([b.titel for b in bo.begivenheder(fra, til) if b.id == serie.id], ["Ugemøde"])
         for funktion in (lambda: bo.opdater(serie.kopi(titel="Bos")), lambda: bo.slet_kalender(kalender.id),
                          lambda: bo.opret(serie.kopi(id="", version=0, titel="Snyd"))):
             with self.assertRaises(DataFejl):
@@ -627,90 +681,62 @@ class SupabaseLokalTest(unittest.TestCase):
         self.assertIn(kalender.id, [k.id for k in repo.kalendre()])
         repo.slet_kalender(kalender.id)
 
-    # ----- kalenderdeling (migrering 021) -----------------------------------
+    # ----- alle ser alle (migrering 021/022) --------------------------------
 
-    def delt_kalender(self):
+    def annes_kalender(self):
         """Annes kalender med en almindelig og en privat begivenhed."""
         anne = SupabaseKalenderRepository(self.anne.klient)
-        kalender = anne.opret_kalender(Kalender("Delt testkalender"))
+        kalender = anne.opret_kalender(Kalender("Annes testkalender"))
         start = datetime(2026, 10, 6, 10)
         anne.opret(Begivenhed(kalender.id, "Tandlæge", start, start + timedelta(hours=1),
-                              sted="Klinikken", beskrivelse="Hemmelig note"))
+                              sted="Klinikken", beskrivelse="Fri note"))
         anne.opret(Begivenhed(kalender.id, "Privat aftale", start + timedelta(days=1),
-                              start + timedelta(days=1, hours=1), privat=True))
+                              start + timedelta(days=1, hours=1), sted="Hemmeligt sted",
+                              privat=True))
         return anne, kalender
 
-    def raa_titler(self, bruger, kalender_id) -> list[str]:
+    def raa(self, bruger, kalender_id) -> str:
         """Direkte fra RPC'en – uden om programmet."""
         data = bruger.klient.rpc("inbase_calendar_events", {
             "p_from": "2026-10-01T00:00:00+02:00", "p_to": "2026-11-01T00:00:00+01:00"}).execute().data
-        return sorted(json.dumps(r, ensure_ascii=False) for r in data if r["calendar_id"] == kalender_id)
+        return " ".join(json.dumps(r, ensure_ascii=False) for r in data if r["calendar_id"] == kalender_id)
 
-    def test_deling_maskerer_i_databasen(self):
-        anne, kalender = self.delt_kalender()
-        bo = SupabaseKalenderRepository(self.bo.klient)
-        self.assertEqual(self.raa_titler(self.bo, kalender.id), [], "uden deling: intet")
-        signatur = bo.signatur()
-        delt = anne.del_kalender(kalender.id, self.bo.brugernavn.lower(), kl.FREEBUSY)
-        self.assertEqual([(d.brugernavn, d.niveau) for d in delt.delinger],
-                         [(self.bo.brugernavn, kl.FREEBUSY)])
-        self.assertNotEqual(bo.signatur(), signatur, "ny deling opdages i minut-tjekket")
-        raa = " ".join(self.raa_titler(self.bo, kalender.id))
-        for hemmeligt in ("Tandlæge", "Klinikken", "Hemmelig note", "Privat aftale"):
-            self.assertNotIn(hemmeligt, raa, "sendes aldrig til en med ledig/optaget")
-        self.assertEqual(raa.count('"masked": true'), 2)
-        bos = next(k for k in bo.kalendre() if k.id == kalender.id)
-        self.assertEqual((bos.adgang, bos.ejer, bos.delinger), (kl.FREEBUSY, self.anne.brugernavn, []))
-
-        anne.del_kalender(kalender.id, self.bo.brugernavn, kl.LAESE)
-        raa = " ".join(self.raa_titler(self.bo, kalender.id))
-        self.assertIn("Klinikken", raa)
-        self.assertNotIn("Privat aftale", raa, "private er skjult for alle andre end ejeren")
-        begivenheder = [b for b in bo.begivenheder(datetime(2026, 10, 1), datetime(2026, 11, 1))
-                        if b.kalender_id == kalender.id]
-        with self.assertRaises(DataFejl):
-            bo.opdater(begivenheder[0].kopi(titel="Bo retter"))
-        with self.assertRaises(DataFejl):
-            bo.del_kalender(kalender.id, self.admin.brugernavn, kl.LAESE)
+    def test_kolleger_ser_detaljer_men_aldrig_private(self):
+        anne, kalender = self.annes_kalender()
+        raa = self.raa(self.bo, kalender.id)
+        for synligt in ("Tandlæge", "Klinikken", "Fri note"):
+            self.assertIn(synligt, raa)
+        for hemmeligt in ("Privat aftale", "Hemmeligt sted"):
+            self.assertNotIn(hemmeligt, raa, "private sendes aldrig til andre end ejeren")
+        self.assertEqual(raa.count('"masked": true'), 1)
+        admin = self.raa(self.admin, kalender.id)
+        self.assertNotIn("Privat aftale", admin, "heller ikke til administratorer")
         anne.slet_kalender(kalender.id)
 
-    def test_redigere_moderation_og_fejlbeskeder(self):
-        anne, kalender = self.delt_kalender()
-        bo = SupabaseKalenderRepository(self.bo.klient)
-        for brugernavn in (self.anne.brugernavn, "FINDES_IKKE"):
-            with self.assertRaises(ValideringsFejl):
-                anne.del_kalender(kalender.id, brugernavn, kl.LAESE)
-        anne.del_kalender(kalender.id, self.bo.brugernavn, kl.SKRIVE)
-        start = datetime(2026, 10, 8, 10)
-        bos = bo.opret(Begivenhed(kalender.id, "Bos møde", start, start + timedelta(hours=1)))
-        self.assertEqual(bos.oprettet_af, self.bo.brugernavn)
+    def test_administrator_kan_slette_kollegers_og_deling_er_fjernet(self):
+        anne, kalender = self.annes_kalender()
+        bo, admin = SupabaseKalenderRepository(self.bo.klient), SupabaseKalenderRepository(self.admin.klient)
         fra, til = datetime(2026, 10, 1), datetime(2026, 11, 1)
-        privat = next(b for b in bo.begivenheder(fra, til)
-                      if b.kalender_id == kalender.id and b.maskeret)
+        privat = next(b for b in bo.begivenheder(fra, til) if b.kalender_id == kalender.id and b.maskeret)
         with self.assertRaises(DataFejl):
             bo.slet(privat.id)
         with self.assertRaises(DataFejl):
             bo.slet_kalender(kalender.id)
-
-        admin = SupabaseKalenderRepository(self.admin.klient)
-        set_af_admin = next(k for k in admin.kalendre() if k.id == kalender.id)
-        self.assertEqual(set_af_admin.adgang, kl.ADMIN_ADGANG)
-        self.assertEqual([d.brugernavn for d in set_af_admin.delinger], [self.bo.brugernavn])
-        titler = {b.titel for b in admin.begivenheder(fra, til) if b.kalender_id == kalender.id}
-        self.assertEqual(titler, {"Tandlæge", "Bos møde", kl.MASKERET_TITEL})
         admin.slet(privat.id)                       # moderation
-        bo.fjern_deling(kalender.id, self.bo.brugernavn)   # modtageren forlader kalenderen
-        self.assertNotIn(kalender.id, [k.id for k in bo.kalendre()])
+        with self.assertRaises(DataFejl):           # RPC'en til deling findes ikke længere
+            with kald("dele kalenderen"):
+                self.anne.klient.rpc("inbase_calendar_share_set", {
+                    "p_calendar_id": kalender.id, "p_username": self.bo.brugernavn,
+                    "p_level": "write"}).execute()
         admin.slet_kalender(kalender.id)
         self.assertNotIn(kalender.id, [k.id for k in anne.kalendre()])
 
-    def test_deaktiveret_modtager_ser_intet(self):
-        anne, kalender = self.delt_kalender()
+    def test_deaktiveret_bruger_ser_ingen_kalendere(self):
+        anne, kalender = self.annes_kalender()
         cecilie = Bruger(self.service)
-        anne.del_kalender(kalender.id, cecilie.brugernavn, kl.LAESE)
         self.assertIn(kalender.id, [k.id for k in SupabaseKalenderRepository(cecilie.klient).kalendre()])
         self.service.rpc("test_saet_aktiv", {"p_id": cecilie.id, "p_active": False}).execute()
-        self.assertEqual(self.raa_titler(cecilie, kalender.id), [])
+        self.assertEqual(self.raa(cecilie, kalender.id), "")
         anne.slet_kalender(kalender.id)
 
 

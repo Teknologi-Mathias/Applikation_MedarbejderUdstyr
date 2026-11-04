@@ -32,6 +32,13 @@ class JsonSkabelonRepository:
             gem_json(alle, fil)
         return alle
 
+    def hent(self, slags: str) -> list[dict]:
+        return self.hent_alle()[slags]
+
+    def versioner(self, skabelon_id: str) -> list[dict]:
+        skabelon = next((s for s in self.hent(sk.SAG) if s["id"] == skabelon_id), None)
+        return list(skabelon.get("versioner") or []) if skabelon else []
+
     def gem(self, slags: str, skabelon: dict, placering: int) -> None:
         self.datakilde.kraev_online("Ændring af skabeloner")
         alle = self.hent_alle()

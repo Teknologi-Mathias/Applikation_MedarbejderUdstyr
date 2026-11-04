@@ -13,7 +13,7 @@ aldrig til JSON-filer eller databaser.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from app import session
 from app.domain import historik
@@ -56,6 +56,9 @@ from app.services.paamindelser import PaamindelsesService
 from app.services.rapport_service import RapportService
 from app.services.skabelon_service import SkabelonService
 
+if TYPE_CHECKING:   # Supabase-pakkerne indlæses først, når Supabase bruges
+    from app.repositories.supabase.tjek_repository import SupabaseTjekRepository
+
 log = logging.getLogger(__name__)
 
 SAGSTYPER = {
@@ -81,6 +84,7 @@ class Tjenester:
     mdm: MdmService                       # Telefoner (MDM)
     kalender: KalenderService
     opdatering: Optional[OpdateringService] = None   # kun Supabase (central opdatering)
+    tjek: Optional["SupabaseTjekRepository"] = None   # kun Supabase: minut-tjekket i ét kald
 
     def modul(self, proces: str):
         return self.onboarding if proces == OnboardingForloeb.PROCES else self.offboarding
@@ -112,6 +116,7 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
         SupabaseSkabelonRepository,
     )
     from app.repositories.supabase.sag_repository import SupabaseSagRepository
+    from app.repositories.supabase.tjek_repository import SupabaseTjekRepository
 
     historik.saet_brugerkilde(session.brugernavn)
     skabeloner = SkabelonService(SupabaseSkabelonRepository(klient))
@@ -136,6 +141,7 @@ def byg_supabase_tjenester(klient, lokal_mappe: Path, kilde: str = "Supabase") -
         kalender=_kalender_service(SupabaseKalenderRepository(klient), lokal_mappe),
         opdatering=OpdateringService(SupabaseOpdateringRepository(klient),
                                      lokal_mappe / stier.OPDATERING_MAPPE.name),
+        tjek=SupabaseTjekRepository(klient),
     )
 
 
@@ -177,10 +183,9 @@ def byg_tjenester(central_mappe: Path = stier.CENTRAL_DATA_MAPPE,
 
 
 def _kalender_service(repo, lokal_mappe: Path) -> KalenderService:
-    """Kalenderen med de lokale filer (viste påmindelser, kendte delinger, visningsvalg)."""
+    """Kalenderen med de lokale filer (viste påmindelser, fravalgte kalendere)."""
     return KalenderService(repo, JsonLokalFil(lokal_mappe / stier.KALENDER_ALARMER_FIL.name),
                            session.bruger,
-                           delingslog=JsonLokalFil(lokal_mappe / stier.KALENDER_DELINGER_FIL.name),
                            visning=JsonLokalFil(lokal_mappe / stier.KALENDER_VISNING_FIL.name))
 
 

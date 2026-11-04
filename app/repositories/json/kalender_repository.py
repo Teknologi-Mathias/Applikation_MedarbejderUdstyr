@@ -1,10 +1,9 @@
 """JSON-lagring af Kalender (Data/kalender.json) – kun udvikling/tests.
 
-Gør det samme som RPC'erne i migrering 020 og 021 (ejer og opretter ud fra
-login, deling på niveauer, administratorer ser alt, maskering af ledig/optaget
-og private begivenheder, versionskontrol, dubletkontrol ved import), men UDEN
-databasens beskyttelse: filen kan læses direkte. Brugerne, der deles med,
-kontrolleres ikke mod brugerlisten. Kræver online-tilstand.
+Gør det samme som RPC'erne i migrering 020–022 (ejer og opretter ud fra login,
+alle ser alle kalendere, kun ejeren ændrer, administratorer kan slette,
+maskering af private begivenheder, versionskontrol, dubletkontrol ved import),
+men UDEN databasens beskyttelse: filen kan læses direkte. Kræver online-tilstand.
 """
 import uuid
 from datetime import datetime
@@ -13,15 +12,14 @@ from typing import Callable, Optional
 from app.domain import kalender as kl
 from app.domain.bruger import normaliser_brugernavn
 from app.domain.historik import nuvaerende_bruger
-from app.domain.kalender import Begivenhed, Deling, Kalender, serie_slut
+from app.domain.kalender import Begivenhed, Kalender, serie_slut
 from app.infrastructure.stier import KALENDER
-from app.repositories.fejl import DataFejl, KonfliktFejl, ValideringsFejl
+from app.repositories.fejl import DataFejl, KonfliktFejl
 from app.repositories.json.datakilde import Datakilde
 from app.repositories.json.json_fil import fil_signatur, gem_json, hent_json
 
 _TIDER = ("start", "slut", "oprindelig_start")
 _KALENDERFELTER = ("navn", "farve", "ejer", "id", "version")
-_RANG = {kl.EJER: 5, kl.SKRIVE: 4, kl.LAESE: 3, kl.ADMIN_ADGANG: 2, kl.FREEBUSY: 1}
 
 
 def _ud(b: Begivenhed) -> dict:
@@ -49,8 +47,7 @@ class JsonKalenderRepository:
 
     def _laes(self) -> dict:
         data = hent_json(self.datakilde.fil(KALENDER), forventet=dict)
-        return {"kalendre": data.get("kalendre", []), "begivenheder": data.get("begivenheder", []),
-                "delinger": data.get("delinger", [])}
+        return {"kalendre": data.get("kalendre", []), "begivenheder": data.get("begivenheder", [])}
 
     def _gem(self, data: dict) -> None:
         gem_json(data, self.datakilde.fil(KALENDER))
@@ -64,18 +61,14 @@ class JsonKalenderRepository:
     def _er_admin(self) -> bool:
         return (self._aktuel_bruger() or {}).get("rolle") == "Administrator"
 
-    def _adgang(self, data: dict, kalender: dict) -> Optional[str]:
+    @staticmethod
+    def _adgang(kalender: dict) -> str:
+        """Alle ser alle kalendere; kun ejerens egne kan ændres."""
         mig = normaliser_brugernavn(nuvaerende_bruger())
-        if normaliser_brugernavn(kalender["ejer"]) == mig:
-            return kl.EJER
-        niveauer = [d["niveau"] for d in data["delinger"]
-                    if d["kalender_id"] == kalender["id"] and d["brugernavn"] == mig]
-        if self._er_admin():
-            niveauer.append(kl.ADMIN_ADGANG)
-        return max(niveauer, key=_RANG.get, default=None)
+        return kl.EJER if normaliser_brugernavn(kalender["ejer"]) == mig else kl.LAESE
 
-    def _kan_moderere(self, data: dict, kalender: dict) -> bool:
-        return self._adgang(data, kalender) == kl.EJER or self._er_admin()
+    def _kan_moderere(self, kalender: dict) -> bool:
+        return self._adgang(kalender) == kl.EJER or self._er_admin()
 
     def _find(self, data: dict, kalender_id: str) -> dict:
         kalender = next((k for k in data["kalendre"] if k["id"] == kalender_id), None)
@@ -83,32 +76,25 @@ class JsonKalenderRepository:
             raise KonfliktFejl("Kalenderen findes ikke længere.")
         return kalender
 
-    def _kraev(self, data: dict, kalender_id: str, niveauer=(kl.EJER, kl.SKRIVE)) -> dict:
+    def _kraev(self, data: dict, kalender_id: str) -> dict:
         kalender = self._find(data, kalender_id)
-        if self._adgang(data, kalender) not in niveauer:
-            raise DataFejl("Du har ikke rettighed til at ændre i denne kalender.")
+        if self._adgang(kalender) != kl.EJER:
+            raise DataFejl("Du kan kun ændre i dine egne kalendere.")
         return kalender
 
     def _kraev_begivenhed(self, data: dict, b: Begivenhed, sletning: bool = False) -> None:
-        kalender = self._find(data, b.kalender_id)
-        if sletning and self._kan_moderere(data, kalender):
+        if sletning and self._kan_moderere(self._find(data, b.kalender_id)):
             return
         self._kraev(data, b.kalender_id)
-        if b.privat and self._adgang(data, kalender) != kl.EJER:
-            raise DataFejl("Begivenheden er privat – kun ejeren kan ændre den.")
 
-    def _kalender(self, data: dict, k: dict) -> Kalender:
-        delinger = [Deling(d["brugernavn"], d["brugernavn"], d["niveau"])
-                    for d in data["delinger"] if d["kalender_id"] == k["id"]] \
-            if self._kan_moderere(data, k) else []
-        return Kalender(**{f: k[f] for f in _KALENDERFELTER}, adgang=self._adgang(data, k),
-                        ejer_navn=k["ejer"], delinger=sorted(delinger, key=lambda d: d.brugernavn))
+    def _kalender(self, k: dict) -> Kalender:
+        return Kalender(**{f: k[f] for f in _KALENDERFELTER}, adgang=self._adgang(k),
+                        ejer_navn=k["ejer"])
 
     ### ----- kalendere ------------------------------------------------------
 
     def kalendre(self) -> list[Kalender]:
-        data = self._laes()
-        return [self._kalender(data, k) for k in data["kalendre"] if self._adgang(data, k)]
+        return [self._kalender(k) for k in self._laes()["kalendre"]]
 
     def opret_kalender(self, kalender: Kalender) -> Kalender:
         data = self._skriv()
@@ -116,63 +102,31 @@ class JsonKalenderRepository:
               "id": kalender.id or str(uuid.uuid4()), "version": 1}
         data["kalendre"].append(ny)
         self._gem(data)
-        return self._kalender(data, ny)
+        return self._kalender(ny)
 
     def opdater_kalender(self, kalender_id: str, version: int, aendringer: dict) -> Kalender:
         data = self._skriv()
-        kalender = self._kraev(data, kalender_id, (kl.EJER,))
+        kalender = self._kraev(data, kalender_id)
         if kalender["version"] != version:
             raise KonfliktFejl("Kalenderen er ændret et andet sted, efter du åbnede den.")
         kalender.update({k: v for k, v in aendringer.items() if k in ("navn", "farve")},
                         version=version + 1)
         self._gem(data)
-        return self._kalender(data, kalender)
+        return self._kalender(kalender)
 
     def slet_kalender(self, kalender_id: str) -> None:
         data = self._skriv()
-        if not self._kan_moderere(data, self._find(data, kalender_id)):
+        if not self._kan_moderere(self._find(data, kalender_id)):
             raise DataFejl("Kun ejeren eller en administrator kan slette kalenderen.")
-        for noegle in ("begivenheder", "delinger"):
-            data[noegle] = [x for x in data[noegle] if x["kalender_id"] != kalender_id]
+        data["begivenheder"] = [b for b in data["begivenheder"] if b["kalender_id"] != kalender_id]
         data["kalendre"] = [k for k in data["kalendre"] if k["id"] != kalender_id]
         self._gem(data)
-
-    ### ----- deling ---------------------------------------------------------
-
-    def del_kalender(self, kalender_id: str, brugernavn: str, niveau: str) -> Kalender:
-        data = self._skriv()
-        kalender = self._find(data, kalender_id)
-        if not self._kan_moderere(data, kalender):
-            raise DataFejl("Kun ejeren eller en administrator kan dele kalenderen.")
-        if niveau not in dict(kl.NIVEAUER):
-            raise ValideringsFejl("Ukendt delingsniveau.")
-        brugernavn = normaliser_brugernavn(brugernavn)
-        if not brugernavn or brugernavn == normaliser_brugernavn(kalender["ejer"]):
-            raise ValideringsFejl(f"Kalenderen tilhører allerede {brugernavn}.")
-        data["delinger"] = [d for d in data["delinger"]
-                            if not (d["kalender_id"] == kalender_id and d["brugernavn"] == brugernavn)]
-        data["delinger"].append({"kalender_id": kalender_id, "brugernavn": brugernavn,
-                                 "niveau": niveau})
-        self._gem(data)
-        return self._kalender(data, kalender)
-
-    def fjern_deling(self, kalender_id: str, brugernavn: str) -> Kalender:
-        data = self._skriv()
-        kalender = self._find(data, kalender_id)
-        brugernavn = normaliser_brugernavn(brugernavn)
-        selv = brugernavn == normaliser_brugernavn(nuvaerende_bruger())
-        if not selv and not self._kan_moderere(data, kalender):
-            raise DataFejl("Kun ejeren eller en administrator kan fjerne delinger.")
-        data["delinger"] = [d for d in data["delinger"]
-                            if not (d["kalender_id"] == kalender_id and d["brugernavn"] == brugernavn)]
-        self._gem(data)
-        return self._kalender(data, kalender)
 
     ### ----- begivenheder ---------------------------------------------------
 
     def begivenheder(self, fra: datetime, til: datetime) -> list[Begivenhed]:
         data = self._laes()
-        adgang = {k["id"]: self._adgang(data, k) for k in data["kalendre"]}
+        adgang = {k["id"]: self._adgang(k) for k in data["kalendre"]}
         alle = [_ind(b) for b in data["begivenheder"] if adgang.get(b["kalender_id"])]
         serier = {b.id for b in alle
                   if b.start < til and (serie_slut(b) is None or serie_slut(b) >= fra)}
@@ -199,9 +153,6 @@ class JsonKalenderRepository:
         gammel = _ind(data["begivenheder"][index])
         self._kraev_begivenhed(data, gammel)
         self._kraev(data, begivenhed.kalender_id)
-        if begivenhed.privat and not gammel.privat \
-                and self._adgang(data, self._find(data, begivenhed.kalender_id)) != kl.EJER:
-            raise DataFejl("Kun ejeren kan gøre en begivenhed privat.")
         if gammel.version != begivenhed.version:
             raise KonfliktFejl("Begivenheden er ændret et andet sted, efter du åbnede den. "
                                "Dine ændringer er ikke gemt – åbn den igen.")

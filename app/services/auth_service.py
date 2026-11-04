@@ -326,9 +326,14 @@ class SupabaseAuthService:
         Kaldes jævnligt af hovedvinduet. Databasen afviser i forvejen al adgang
         for en deaktiveret konto (RLS) – her lukkes også programmet ned.
         """
+        if self._aktuel:
+            self.kontroller_profil(self.repo.profil(self._aktuel["id"]))
+
+    def kontroller_profil(self, profil: dict | None) -> None:
+        """Som kontroller_session(), men med en profil, der allerede er hentet
+        (minut-tjekket får den med i inbase_tick, migrering 023)."""
         if not self._aktuel:
             return
-        profil = self.repo.profil(self._aktuel["id"])
         if profil is None or not profil["aktiv"]:
             raise SessionUdloebetFejl(ADGANG_LUKKET)
         if profil["rolle"] != self._aktuel["rolle"]:

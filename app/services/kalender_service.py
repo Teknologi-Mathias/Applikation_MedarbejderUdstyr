@@ -1,7 +1,8 @@
 """Kalender: kalendere, begivenheder, serier, påmindelser og import.
 
 Servicen validerer input, så brugeren får en tydelig besked, FØR noget sendes.
-Adgangskontrollen ligger i databasen (RPC'erne i migrering 020 og 021).
+Adgangskontrollen ligger i databasen (RPC'erne i migrering 020–022): alle ser
+alle kalendere, kun ejeren ændrer, administratorer kan slette.
 
 Serier: en ændring eller sletning af en forekomst gælder enten kun den
 (kalender.KUN_DENNE), den og de fremtidige (FREMTIDIGE – serien afkortes, og en
@@ -9,14 +10,11 @@ ny serie starter ved forekomsten) eller hele serien (HELE_SERIEN). Seriens
 øvrige data hentes fra de begivenheder, der sidst blev hentet med forekomster().
 
 Påmindelser: tjek() kaldes hvert minut (i baggrunden) og returnerer de
-forekomster i brugerens EGNE kalendere, hvis påmindelse er nået, og de
-kalendere, der siden sidst er delt med brugeren. Hvad der er vist/kendt, gemmes
-i Lokal/kalender_alarmer.json og Lokal/kalender_delinger.json, så en genstart
-ikke giver gentagelser.
+forekomster i brugerens EGNE kalendere, hvis påmindelse er nået. Hvilke der er
+vist, gemmes i Lokal/kalender_alarmer.json, så en genstart ikke giver gentagelser.
 
-Deling (migrering 021): ejeren og administratorer deler og fjerner delinger;
-modtageren kan fjerne sig selv. Hvilke kalendere der er skjult, og egne farver
-på delte kalendere, huskes pr. bruger på pc'en (Lokal/kalender_visning.json).
+Hvilke kalendere der er slået fra, huskes pr. bruger på pc'en
+(Lokal/kalender_visning.json).
 """
 import logging
 from dataclasses import dataclass
@@ -95,12 +93,10 @@ def valider_kalender(kalender: Kalender) -> None:
 class KalenderService:
     def __init__(self, repo: KalenderRepository, alarmlog: JsonLokalFil,
                  aktuel_bruger: Callable[[], Optional[dict]] = lambda: None,
-                 delingslog: Optional[JsonLokalFil] = None,
                  visning: Optional[JsonLokalFil] = None):
         self.repo = repo
         self.alarmlog = alarmlog
-        self.delingslog = delingslog    # kendte delte kalendere pr. bruger
-        self.visning = visning          # skjulte kalendere og egne farver pr. bruger
+        self.visning = visning          # fravalgte kalendere pr. bruger
         self._aktuel_bruger = aktuel_bruger
         self._kendte: dict = {}         # id -> Begivenhed fra seneste forekomster()
         self._alarm_cache = None        # (signatur, dato, begivenheder, egne kalender-id'er)
@@ -115,16 +111,18 @@ class KalenderService:
         return (self._aktuel_bruger() or {}).get("rolle") == "Administrator"
 
     def kan_administrere(self, kalender: Kalender) -> bool:
-        """Dele, fjerne delinger og slette: ejeren og administratorer."""
+        """Slette kalendere og begivenheder: ejeren og administratorer (moderation)."""
         return kalender.er_egen or self.er_administrator()
 
     ### ----- kalendere ------------------------------------------------------
 
     def kalendre(self) -> list[Kalender]:
-        """Brugerens egne og delte kalendere. Første gang oprettes "Min kalender"."""
+        """Egne og kollegers kalendere. Første gang oprettes "Min kalender" – i en farve,
+        ingen anden kalender har."""
         kalendre = self.repo.kalendre()
         if not any(k.er_egen for k in kalendre) and self.har_adgang():
-            kalendre = [self.repo.opret_kalender(Kalender(kl.STANDARD_KALENDER)), *kalendre]
+            farve = kl.ledig_farve(k.farve for k in kalendre)
+            kalendre = [self.repo.opret_kalender(Kalender(kl.STANDARD_KALENDER, farve)), *kalendre]
         return kalendre
 
     def gem_kalender(self, kalender: Kalender) -> Kalender:
@@ -141,46 +139,19 @@ class KalenderService:
             raise ValideringsFejl("Kun ejeren eller en administrator kan slette kalenderen.")
         self.repo.slet_kalender(kalender.id)
 
-    ### ----- deling ---------------------------------------------------------
+    ### ----- fravalgte kalendere (pr. bruger på denne pc) -------------------
 
-    def del_kalender(self, kalender: Kalender, brugernavn: str, niveau: str) -> Kalender:
-        brugernavn = normaliser_brugernavn(brugernavn)
-        if not self.kan_administrere(kalender):
-            raise ValideringsFejl("Kun ejeren eller en administrator kan dele kalenderen.")
-        if niveau not in dict(kl.NIVEAUER):
-            raise ValideringsFejl("Vælg hvad personen må se.")
-        if not brugernavn:
-            raise ValideringsFejl("Vælg en person.")
-        if brugernavn == normaliser_brugernavn(kalender.ejer):
-            raise ValideringsFejl(f"Kalenderen tilhører allerede {brugernavn}.")
-        return self.repo.del_kalender(kalender.id, brugernavn, niveau)
-
-    def fjern_deling(self, kalender: Kalender, brugernavn: str) -> Kalender:
-        brugernavn = normaliser_brugernavn(brugernavn)
-        if brugernavn != self._brugernavn() and not self.kan_administrere(kalender):
-            raise ValideringsFejl("Kun ejeren eller en administrator kan fjerne delinger.")
-        return self.repo.fjern_deling(kalender.id, brugernavn)
-
-    def forlad(self, kalender: Kalender) -> None:
-        """Modtageren fjerner en delt kalender fra sin liste."""
-        self.fjern_deling(kalender, self._brugernavn())
-
-    ### ----- visningsvalg (pr. bruger på denne pc) ---------------------------
-
-    def visningsvalg(self) -> dict:
-        """{"skjulte": [...], "viste": [...], "farver": {kalender_id: hex}}.
-        viste: administratorens visning af andres kalendere (skjult som standard)."""
+    def skjulte(self) -> set[str]:
+        """Id'erne på de kalendere, brugeren har slået fra (alle er slået til fra start)."""
         if self.visning is None:
-            return {"skjulte": [], "viste": [], "farver": {}}
-        valg = self.visning.hent().get(self._brugernavn(), {})
-        return {"skjulte": list(valg.get("skjulte", [])), "viste": list(valg.get("viste", [])),
-                "farver": dict(valg.get("farver", {}))}
+            return set()
+        return set(self.visning.hent().get(self._brugernavn(), {}).get("skjulte", []))
 
-    def gem_visningsvalg(self, valg: dict) -> None:
+    def gem_skjulte(self, skjulte: set[str]) -> None:
         if self.visning is None or not self._brugernavn():
             return
         data = self.visning.hent()
-        data[self._brugernavn()] = valg
+        data[self._brugernavn()] = {"skjulte": sorted(skjulte)}
         self.visning.gem(data)
 
     ### ----- begivenheder ---------------------------------------------------
@@ -307,42 +278,27 @@ class KalenderService:
 
     ### ----- påmindelser (minut-tjekket) -------------------------------------
 
-    def tjek(self, nu: datetime) -> tuple[tuple, list[Forekomst], list[Kalender]]:
-        """(signatur, påmindelser der skal vises nu, nye delte kalendere). Kører i
-        baggrunden hvert minut; henter kun igen, når signaturen eller datoen har ændret
-        sig. Påmindelser gælder kun egne kalendere (ikke ejerens i en delt kalender)."""
-        signatur = self.repo.signatur()
+    def tjek(self, nu: datetime, signatur: tuple | None = None) -> tuple[tuple, list[Forekomst]]:
+        """(signatur, påmindelser der skal vises nu). Kører i baggrunden hvert minut;
+        henter kun igen, når signaturen eller datoen har ændret sig. Påmindelser gælder
+        kun egne kalendere (ikke kollegers). signatur: allerede kendt (minut-tjekket
+        får den med i ét samlet kald) – ellers hentes den."""
+        if signatur is None:
+            signatur = self.repo.signatur()
         cache = self._alarm_cache
-        nye_delinger = []
         if cache is None or cache[0] != signatur or cache[1] != nu.date():
             fra = kl.dagens_start(nu.date())
-            kalendre = self.repo.kalendre()
             cache = (signatur, nu.date(),
                      self.repo.begivenheder(fra - timedelta(days=1), fra + _ALARM_VINDUE),
-                     {k.id for k in kalendre if k.er_egen})
+                     {k.id for k in self.repo.kalendre() if k.er_egen})
             self._alarm_cache = cache
-            nye_delinger = self._nye_delinger(kalendre)
         fra = kl.dagens_start(nu.date())
         aktuelle = [f for f in kl.forekomster(cache[2], fra - timedelta(days=1), fra + _ALARM_VINDUE)
                     if f.begivenhed.kalender_id in cache[3]
                     and f.begivenhed.paamindelse is not None
                     and f.start - timedelta(minutes=f.begivenhed.paamindelse) <= nu
                     < f.start + ALARM_SENEST]
-        return signatur, self._ikke_vist(aktuelle, nu), nye_delinger
-
-    def _nye_delinger(self, kalendre: list[Kalender]) -> list[Kalender]:
-        """Kalendere delt med brugeren, siden sidst. Første gang: ingen (alle bliver kendte)."""
-        bruger = self._brugernavn()
-        if self.delingslog is None or not bruger:
-            return []
-        data = self.delingslog.hent()
-        delte = [k for k in kalendre if k.er_delt_med_mig]
-        kendte = data.get(bruger)
-        nye = [] if kendte is None else [k for k in delte if k.id not in set(kendte)]
-        if kendte is None or nye or len(kendte) != len(delte):
-            data[bruger] = [k.id for k in delte]
-            self.delingslog.gem(data)
-        return nye
+        return signatur, self._ikke_vist(aktuelle, nu)
 
     def _ikke_vist(self, forekomster: list[Forekomst], nu: datetime) -> list[Forekomst]:
         bruger = (self._aktuel_bruger() or {}).get("brugernavn", "")

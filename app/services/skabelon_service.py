@@ -32,7 +32,8 @@ class SkabelonService:
         return self.repo.hent_alle()
 
     def aktive(self, slags: str, proces: str | None = None) -> list[dict]:
-        return sk.aktive(self.hent_alle(), slags, proces)
+        """Henter kun den ene slags (minut-tjekket bruger påmindelserne)."""
+        return sk.aktive({slags: self.repo.hent(slags)}, slags, proces)
 
     def sagsskabeloner(self, proces: str, stilling: str | None = None) -> list[dict]:
         skabeloner = self.aktive(sk.SAG, proces)
@@ -45,15 +46,18 @@ class SkabelonService:
             fejl = afhaengighed.find_fejl(skabelon.get("opgaver") or [])
             if fejl:
                 raise ValideringsFejl(" ".join(fejl))
-        alle = self.hent_alle()
-        liste = alle[slags]
+        liste = self.repo.hent(slags)
         ny = copy.deepcopy(skabelon)
         index = next((i for i, s in enumerate(liste) if s["id"] == ny["id"]), None)
         if index is not None and slags == sk.SAG:
+            # Listen har ikke versionerne med – hent dem, så de gemmes uændret med
+            # (gemningen erstatter skabelonens versioner med dem, der sendes).
+            versioner = self.repo.versioner(ny["id"])
             gammel = liste[index]
+            ny["versioner"] = versioner
             if _indhold(gammel) != _indhold(ny):
                 forrige = {k: v for k, v in gammel.items() if k != "versioner"}
-                ny["versioner"] = (gammel.get("versioner") or [])[-(MAKS_VERSIONER - 1):] + [forrige]
+                ny["versioner"] = versioner[-(MAKS_VERSIONER - 1):] + [forrige]
                 ny["version"] = int(gammel.get("version", 1)) + 1
                 log.info("Skabelon %s gemt som version %s", ny["navn"], ny["version"])
         ny["aendret"], ny["aendret_af"] = nu(), nuvaerende_bruger()
@@ -65,13 +69,13 @@ class SkabelonService:
         eller den aktuelle udgave, hvis versionen ikke længere er gemt."""
         if not reference or not reference.get("id"):
             return None
-        skabelon = next((s for s in self.hent_alle()[sk.SAG] if s["id"] == reference["id"]), None)
+        skabelon = next((s for s in self.repo.hent(sk.SAG) if s["id"] == reference["id"]), None)
         if skabelon is None:
             return None
         version = int(reference.get("version") or skabelon.get("version", 1))
         if int(skabelon.get("version", 1)) == version:
             return skabelon
-        return next((v for v in skabelon.get("versioner") or []
+        return next((v for v in self.repo.versioner(skabelon["id"])
                      if int(v.get("version", 1)) == version), skabelon)
 
     def slet(self, slags: str, skabelon: dict) -> None:
@@ -79,7 +83,7 @@ class SkabelonService:
         egne kopier af opgaverne og påvirkes ikke. Den sidste skabelon til en proces
         kan ikke slettes (der skal altid kunne oprettes forløb)."""
         if slags == sk.SAG:
-            samme = [s for s in self.hent_alle()[sk.SAG] if s.get("proces") == skabelon.get("proces")]
+            samme = [s for s in self.repo.hent(sk.SAG) if s.get("proces") == skabelon.get("proces")]
             if len(samme) <= 1:
                 raise ValideringsFejl("Den sidste arbejdsgangsskabelon kan ikke slettes – "
                                       "opret en ny først, eller ret denne.")
@@ -90,4 +94,4 @@ class SkabelonService:
         return self.gem(slags, dict(skabelon, aktiv=not skabelon["aktiv"]))
 
     def relevant_mailskabelon(self, medarbejder) -> dict | None:
-        return sk.relevant_mailskabelon(self.hent_alle(), medarbejder)
+        return sk.relevant_mailskabelon({sk.MAIL: self.repo.hent(sk.MAIL)}, medarbejder)

@@ -6,7 +6,7 @@ sig selv – alt herunder er bevidste, manuelle handlinger.
 
 | Del | Hvor |
 |---|---|
-| SQL-migreringer | `app/infrastructure/database/migrations/001`–`021` |
+| SQL-migreringer | `app/infrastructure/database/migrations/001`–`023` |
 | Backup + gendannelsestest | `scripts/backup_supabase.ps1` (afsnit 13) |
 | Engangs-nulstilling | `app/infrastructure/database/reset/nulstil_forretningsdata.sql` |
 | Edge Functions | `supabase/functions/admin-create-user`, `admin-manage-user` |
@@ -115,8 +115,19 @@ i denne rækkefølge, og tjek at hver giver "Success":
     alle kalendere og kan – ligesom ejeren – dele, fjerne delinger og slette. Opretter en
     tabel; kør den kun én gang (efter 020).
 
+22. `022_kalender_alle_ser_alle.sql` – Kalender forenklet: alle ser alle kalendere med
+    alle detaljer (private stadig som "Optaget"); kun ejeren ændrer, administratorer
+    kan slette. Delingen fra 021 fjernes (delinger slettes, dele-RPC'erne droppes;
+    tabellen bliver stående tom), og kalendere med samme farve får hver sin. Kør den
+    kun én gang (efter 021).
+
+23. `023_minut_tjek.sql` – Minut-tjekket i ét kald (`inbase_tick`): profil og signaturer
+    for sager, kalender, indstillinger og skabeloner. Klienten henter kun det ændrede
+    (mindre egress på Free-planen). Kræves af klienten fra denne version
+    (`KRAEVET_SKEMA = 23`).
+
 Kør aldrig filerne igen på en database, hvor de allerede er anvendt (bortset
-fra 004, 015, 016, 017, 018 og 019). Fremtidige ændringer kommer som nye filer `022_...`,
+fra 004, 015, 016, 017, 018 og 019). Fremtidige ændringer kommer som nye filer `023_...`,
 og **hver ny migrering slutter med**
 `insert into public.schema_migrations (version, name) values (20, '020_...') on conflict do nothing;`.
 Afhænger klienten af migreringen, hæves `KRAEVET_SKEMA` i `app/__init__.py` (se
@@ -381,7 +392,7 @@ $env:INBASE_BACKUP_MAPPE = "D:\IN-BASE-backup"     # et sted med begrænset adga
 **Gendannelse** (fx til et nyt projekt efter et nedbrud – tjek, at du er i det rigtige
 projekt). Samme vej som gendannelsestesten afprøver:
 
-1. Kør migreringerne 001–021 i det nye projekt (afsnit 1).
+1. Kør migreringerne 001–023 i det nye projekt (afsnit 1).
 2. Tøm standarddataene, som migreringerne lægger ind (SQL Editor):
    ```sql
    do $x$ declare t text; begin

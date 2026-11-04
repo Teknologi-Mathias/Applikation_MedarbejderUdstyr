@@ -22,7 +22,7 @@ from datetime import datetime
 from app.domain import indmelding as im
 from app.domain import skabelon as sk
 from app.domain.indmelding import Aendring, Indmelding, Kommentar
-from app.domain.kalender import EJER, Begivenhed, Deling, Kalender, serie_slut
+from app.domain.kalender import EJER, Begivenhed, Kalender, serie_slut
 from app.domain.mdm_enhed import MdmEnhed
 from app.domain.opdatering import Udgivelse
 from app.domain.opgave import laes_iso_dato
@@ -348,7 +348,9 @@ SKABELON_TABELLER = {
     sk.PAAMINDELSE: "notification_rules",
 }
 SKABELON_SELECT = {
-    sk.SAG: "*, workflow_template_tasks(*), workflow_template_versions(*)",
+    # Uden workflow_template_versions: op til 25 fulde kopier pr. arbejdsgang ville
+    # ellers følge med hver hentning (Supabase-trafik). Se SupabaseSkabelonRepository.versioner.
+    sk.SAG: "*, workflow_template_tasks(*)",
     sk.MAIL: "*",
     sk.PAAMINDELSE: "*",
 }
@@ -597,9 +599,7 @@ def kalender_fra_raekke(raekke: dict) -> Kalender:
     return Kalender(navn=raekke.get("name") or "", farve=raekke.get("color") or "",
                     ejer=raekke.get("owner_username") or "", id=str(raekke.get("id") or ""),
                     version=int(raekke.get("version") or 0), adgang=raekke.get("access") or EJER,
-                    ejer_navn=raekke.get("owner_display_name") or raekke.get("owner_username") or "",
-                    delinger=[Deling(d.get("username") or "", d.get("display_name") or "",
-                                     d.get("level") or "") for d in raekke.get("shares") or []])
+                    ejer_navn=raekke.get("owner_display_name") or raekke.get("owner_username") or "")
 
 
 def kalender_til_rpc(felter: dict) -> dict:

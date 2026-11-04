@@ -12,11 +12,10 @@ id) og oprindelig_start (den forekomst, den erstatter).
 Heldagsbegivenheder starter kl. 00:00 og slutter kl. 00:00 dagen efter sidste
 dag (eksklusiv slutdato som i iCalendar).
 
-Deling (migrering 021): en kalender deles med personer på et af tre niveauer
-(NIVEAUER). Brugerens adgang til en kalender er EJER, SKRIVE, ADMIN_ADGANG
-(administratorer ser alt), LAESE eller FREEBUSY. Ved FREEBUSY og ved private
-begivenheder i andres kalendere sender lagringen kun "Optaget" (maskeret=True).
-Rettighederne håndhæves af databasen.
+Synlighed (migrering 022): alle ser alle kalendere med alle detaljer. Brugerens
+adgang til en kalender er EJER (egen – kan ændres) eller LAESE (en kollegas).
+Private begivenheder i andres kalendere sender lagringen kun som "Optaget"
+(maskeret=True). Rettighederne håndhæves af databasen.
 """
 import re
 from dataclasses import dataclass, field, fields, replace
@@ -35,9 +34,11 @@ MAKS_KALENDERNAVN = 80
 MAKS_PAAMINDELSE = 28 * 24 * 60     # minutter (4 uger)
 STANDARD_KALENDER = "Min kalender"
 
-# Kalenderfarver (gemmes som hex; ens i begge temaer).
+# Kalenderfarver (gemmes som hex; ens i begge temaer). Hver kalender får sin egen –
+# nok til hele kontoret. Samme rækkefølge som paletten i migrering 022.
 FARVER = ("#4F46E5", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#EC4899", "#8B5CF6",
-          "#64748B")
+          "#64748B", "#14B8A6", "#F97316", "#84CC16", "#06B6D4", "#D946EF", "#A16207",
+          "#0F766E", "#BE123C")
 
 # Påmindelse -> tekst (None = ingen).
 PAAMINDELSER = (
@@ -46,10 +47,8 @@ PAAMINDELSER = (
     (24 * 60, "1 dag før"),
 )
 
-# Adgang til en kalender (som i databasen, migrering 021).
-EJER, SKRIVE, ADMIN_ADGANG, LAESE, FREEBUSY = "owner", "write", "admin", "read", "freebusy"
-# Delingsniveauer -> tekst (i stigende rækkefølge).
-NIVEAUER = ((FREEBUSY, "Kun ledig/optaget"), (LAESE, "Se alle detaljer"), (SKRIVE, "Redigere"))
+# Adgang til en kalender (som i databasen, migrering 022).
+EJER, LAESE = "owner", "read"
 MASKERET_TITEL = "Optaget"
 
 # Omfang ved ændring/sletning af en forekomst i en serie.
@@ -71,13 +70,6 @@ _ENHED = {DAGLIG: ("dag", "dage"), UGENTLIG: ("uge", "uger"),
 
 
 @dataclass
-class Deling:
-    brugernavn: str
-    navn: str
-    niveau: str                     # FREEBUSY, LAESE eller SKRIVE
-
-
-@dataclass
 class Kalender:
     navn: str
     farve: str = FARVER[0]
@@ -86,19 +78,17 @@ class Kalender:
     version: int = 0
     adgang: str = EJER              # den aktuelle brugers adgang (fra lagringen)
     ejer_navn: str = ""
-    delinger: list = field(default_factory=list)   # kun for ejer og administratorer
 
     @property
     def er_egen(self) -> bool:
+        """Egne kalendere kan ændres; kollegers kan kun ses."""
         return self.adgang == EJER
 
-    @property
-    def kan_skrive(self) -> bool:
-        return self.adgang in (EJER, SKRIVE)
 
-    @property
-    def er_delt_med_mig(self) -> bool:
-        return self.adgang in (SKRIVE, LAESE, FREEBUSY)
+def ledig_farve(brugte) -> str:
+    """Den første farve, ingen anden kalender har (ellers den mindst brugte)."""
+    brugte = [f.upper() for f in brugte]
+    return min(FARVER, key=lambda f: (brugte.count(f.upper()), FARVER.index(f)))
 
 
 @dataclass
@@ -173,8 +163,8 @@ class Forekomst:
 
 
 def skal_maskeres(begivenhed: Begivenhed, adgang: str) -> bool:
-    """Ledig/optaget – eller en privat begivenhed i en andens kalender."""
-    return adgang == FREEBUSY or (begivenhed.privat and adgang != EJER)
+    """En privat begivenhed i en andens kalender."""
+    return begivenhed.privat and adgang != EJER
 
 
 def masker(begivenhed: Begivenhed) -> Begivenhed:

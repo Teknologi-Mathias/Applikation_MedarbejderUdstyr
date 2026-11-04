@@ -16,7 +16,9 @@ Supabase er IN-BASE's fælles datakilde. Opsætning og drift:
 | `migrations/015` | Standarder (genereres af `tools/generer_standard_seed.py`; 004 ændres ikke længere). |
 | `migrations/019` | Skemaversion (`schema_migrations`), krav til klienten, delt signatur, central opdatering (`app_releases` + Storage `releases`), opdateringskanal pr. bruger. |
 | `migrations/020` | Kalender: `calendars` + `calendar_events` (serier, undtagelser, rettede forekomster), modulet `kalender`. Ingen direkte tabeladgang – kun RPC'er (`inbase_calendar_*`). |
-| `migrations/021` | Kalenderdeling: `calendar_shares` (freebusy/read/write), maskering af titler i databasen, administratorers adgang og moderation. |
+| `migrations/021` | Kalenderdeling: `calendar_shares`, maskering af private begivenheder i databasen, administratorers moderation. |
+| `migrations/022` | Kalender forenklet: alle ser alle (`calendar_shares` bruges ikke længere), én farve pr. kalender. |
+| `migrations/023` | Minut-tjekket i ét kald (`inbase_tick`): profil + signaturer for sager, kalender, indstillinger og skabeloner. |
 | `reset/nulstil_forretningsdata.sql` | Engangs-tømning af forretningsdata (kræver bekræftelse). |
 | `../../repositories/supabase/` | ALLE kald til tabeller, RPC, Auth og Edge Functions. |
 | `../../repositories/supabase/mapping.py` | Den ENESTE oversættelse domæne ↔ kolonner (feltkort). |
@@ -40,8 +42,7 @@ case_tasks: task_key, track, department, depends_on[] (andre opgavers task_key),
 user_profiles ──< development_requests ──< development_request_comments
  (indsender/ansvarlig)                 └──< development_request_events (insert-only)
 user_profiles ──< calendars ──< calendar_events ──< calendar_events (rettede forekomster,
-   (ejer)       │               (rrule, exdates)      recurrence_of + original_start)
-                └──< calendar_shares >── user_profiles (modtager, level)
+   (ejer)                       (rrule, exdates)      recurrence_of + original_start)
 ```
 
 ## Skrivning
@@ -59,10 +60,10 @@ user_profiles ──< calendars ──< calendar_events ──< calendar_events 
 * Ønsker & Udvikling via `inbase_create_request`, `inbase_update_request`
   (versionstjek, rettigheder, statusovergange, historik pr. felt) og
   `inbase_add_request_comment`. Sletning direkte (RLS: kun admin).
-* Kalender KUN via RPC'erne fra 020/021 (også læsning: `inbase_calendars`,
-  `inbase_calendar_events`), så titler kan maskeres ("Optaget") i databasen. Adgangen
-  afgøres ét sted: `inbase_calendar_access(kalender)` → owner > write > read > admin >
-  freebusy (eller ingen). Moderation (dele, slette): `inbase_calendar_can_moderate`.
+* Kalender KUN via RPC'erne fra 020–022 (også læsning: `inbase_calendars`,
+  `inbase_calendar_events`), så private begivenheder maskeres ("Optaget") i databasen.
+  Adgangen afgøres ét sted: `inbase_calendar_access(kalender)` → 'owner' (egen) eller
+  'read' (alle andre med modulet). Moderation (slette): `inbase_calendar_can_moderate`.
 
 ## Nyt felt – uden at duplikere databasekode
 

@@ -46,7 +46,7 @@ from app.ui.fejl import FEJL, udfoer
 from app.ui.hjaelpere import lav_app_ikon, lav_knap, lav_sidehoved
 from app.ui.indmelding_side import IndmeldingSide
 from app.ui.indstillinger_side import IndstillingerSide
-from app.ui.kalender_side import KalenderSide, alarm_tekst, delt_tekst
+from app.ui.kalender_side import KalenderSide, alarm_tekst
 from app.ui.login_dialog import LoginDialog
 from app.ui.mdm_side import MdmArkivSide, MdmSide
 from app.ui.modul_controller import OffboardingController, OnboardingController
@@ -58,13 +58,14 @@ from app.ui.opgave_oversigt_side import OpgaveOversigtSide
 from app.ui.sag_liste_side import SagListeSide
 from app.ui.sidebar import FORBINDER, INDSTILLINGER, MISTET, ONLINE, Sidebar
 from app.ui.skabelon_side import SkabelonSide
-from app.ui.teamoverblik_side import TeamoverblikSide
 from app.ui.theme import anvend_tema
 
 log = logging.getLogger(__name__)
 
 ON, OFF = OnboardingForloeb.PROCES, Medarbejder.PROCES
 MODUL_FOR_PROCES = {ON: adgang.ONBOARDING, OFF: adgang.OFFBOARDING}
+# Nøgler i _signatur ud over processerne (kun Supabase: inbase_tick, migrering 023).
+INDSTILLINGER_SIG, SKABELONER_SIG = "indstillinger", "skabeloner"
 LAAS = "  🔒"
 
 # Venstremenuen viser hovedområderne; et områdes undersider vises som faner øverst
@@ -75,10 +76,8 @@ LAAS = "  🔒"
 OMRAADER = [
     ("overblik", "Arbejdsoverblik", "overblik", [("dashboard", "Arbejdsoverblik")]),
     ("onboarding", "Onboarding - MERCH", "onboarding", [
-        ("on_team", "Teamoverblik"),
         ("on_oversigt", "Oversigt"),
         ("on_aktive", "Aktive forløb"),
-        ("on_opgaver", "Opgaver og milepæle"),
         ("on_skabeloner", "Skabeloner"),
         ("on_arkiv", "Arkiv og annullerede"),
     ]),
@@ -129,6 +128,7 @@ class LaastSide(QWidget):
 class MainWindow(QMainWindow):
     OPDATERINGS_INTERVAL = 60_000  # 60 sekunder, angivet i millisekunder
     VERSIONS_TJEK = 4 * 3600       # sekunder mellem tjek for en ny version af IN-BASE
+    BAGGRUNDS_TJEK = 5 * 60        # sekunder mellem netværkstjek, mens vinduet er skjult
 
     def __init__(self, tjenester):
         super().__init__()
@@ -167,6 +167,8 @@ class MainWindow(QMainWindow):
         self._generation = 0            # tælles op ved hver lokal ændring/hentning
         self._tikker = False            # et minut-tjek kører i baggrunden
         self._kalender_signatur = None  # kalenderens signatur fra seneste minut-tjek
+        self._paamindelser = None       # påmindelsesskabelonerne fra seneste hentning
+        self._netvaerk_tjekket = None   # time.monotonic() for seneste netværkstjek
 
         self._opbyg_gui()
         self._daglig_backup()
@@ -218,9 +220,6 @@ class MainWindow(QMainWindow):
         self._forbind_action(*self.dashboard.handlingslister())
         self.dashboard.vis_liste.connect(self._vis_filtreret)
         self._tilfoej("dashboard", self.dashboard)
-        self.teamoverblik = TeamoverblikSide()
-        self.teamoverblik.aabn_sag.connect(self.aabn_sag)
-        self._tilfoej("on_team", self.teamoverblik)
         self._opbyg_onboarding()
         self._opbyg_offboarding()
         self.oensker = IndmeldingSide(self.t.indmeldinger, self._aktive_brugernavne)
@@ -229,7 +228,7 @@ class MainWindow(QMainWindow):
         self._tilfoej("telefoner", self.telefoner)
         self.telefoner_arkiv = MdmArkivSide(self.t.mdm)
         self._tilfoej("telefoner_arkiv", self.telefoner_arkiv)
-        self.kalender = KalenderSide(self.t.kalender, self.t.auth.brugere)
+        self.kalender = KalenderSide(self.t.kalender)
         self._tilfoej("kalender", self.kalender)
         self.indstillinger = IndstillingerSide(
             self.t, self._alle_arkiverede, self._alle_aktive, self.notifikationer.vis_besked,
@@ -282,7 +281,8 @@ class MainWindow(QMainWindow):
 
     def _modul_sider(self, prefix, modul, ctrl, opgave_titel, ekstra, knapper, handlinger,
                      skabelon_slags, arkiv_titel):
-        """Bygger et moduls fem undersider ud fra samme fælles komponenter."""
+        """Bygger et moduls undersider ud fra samme fælles komponenter.
+        opgave_titel=None: modulet har ingen opgaveside (onboarding – forenklet flow)."""
         oversigt = ModulOversigtSide(modul)
         self._forbind_action(oversigt.action, oversigt.dag)
 
@@ -300,10 +300,12 @@ class MainWindow(QMainWindow):
         aktive.tabel.doubleClicked.connect(lambda _i: self._paa_valgt(aktive, ctrl.aabn_sag))
         aktive.celle_klik.connect(ctrl.hurtig_status)
 
-        opgaver = OpgaveOversigtSide(f"{modul.navn} – {opgave_titel.lower()}",
-                                     f"Åbne opgaver på tværs af alle aktive {modul.flertal}. "
-                                     "Dobbeltklik for at åbne sagen.", ekstra)
-        opgaver.aabn_sag.connect(self.aabn_sag)
+        opgaver = None
+        if opgave_titel:
+            opgaver = OpgaveOversigtSide(f"{modul.navn} – {opgave_titel.lower()}",
+                                         f"Åbne opgaver på tværs af alle aktive {modul.flertal}. "
+                                         "Dobbeltklik for at åbne sagen.", ekstra)
+            opgaver.aabn_sag.connect(self.aabn_sag)
 
         skabeloner = SkabelonSide(self.t.skabeloner, skabelon_slags, proces=modul.proces,
                                   titel=f"{modul.navn} – skabeloner",
@@ -321,14 +323,15 @@ class MainWindow(QMainWindow):
 
         for navn, side in (("oversigt", oversigt), ("aktive", aktive), ("opgaver", opgaver),
                            ("skabeloner", skabeloner), ("arkiv", arkiv)):
-            self._tilfoej(f"{prefix}_{navn}", side)
+            if side is not None:
+                self._tilfoej(f"{prefix}_{navn}", side)
         return slet
 
     def _opbyg_onboarding(self):
         modul = onboarding_modul(self._omraader)
         ctrl = self.ctrl[ON]
         self.on_slet = self._modul_sider(
-            "on", modul, ctrl, "Opgaver og milepæle", "milepael",
+            "on", modul, ctrl, None, "milepael",
             [("Åbn forløb", ctrl.aabn_sag, None), ("Rediger / status", ctrl.rediger, None),
              ("Arkivér", ctrl.arkiver, "danger")],
             [("Tildel ansvarlig…", lambda sag_id: ctrl.action_handling(ANSVARLIG, sag_id, "")),
@@ -361,36 +364,44 @@ class MainWindow(QMainWindow):
         return self.data[ON][1] + self.data[OFF][1]
 
     def _omraader(self):
-        ind = udfoer(self, self.t.indstillinger.hent)
-        return [] if ind is FEJL else ind["omraader"]
+        """Områdefilteret: fra de indstillinger, vinduet allerede har hentet (_hent) –
+        listerne fyldes ved hver visning, og det må ikke koste et kald hver gang."""
+        return list(self._indstillinger.get("omraader") or [])
 
     def _aktive_brugernavne(self):
         brugere = udfoer(self, self.t.auth.brugere)
         return [] if brugere is FEJL else sorted(
             b["brugernavn"] for b in brugere if b.get("aktiv", True))
 
-    def _hent(self, tving: bool, kendte: dict) -> dict:
+    def _hent(self, tving: bool, kendte: dict, data: dict | None = None,
+              signaturer=None) -> dict:
         """Netværksdelen af en opdatering – kan køre i baggrunden (rører ingen widgets).
 
         Signaturen har en halvdel for aktive og en for arkiverede sager; kun de
-        lister, hvis halvdel er ændret siden sidst, hentes (tving=True: alle). Moduler
-        uden adgang hentes ikke (vises heller ikke på dashboardet). Resultatet lægges
-        ind af _anvend() på UI-tråden.
+        lister, hvis halvdel er ændret siden sidst, hentes (tving=True: alle) – og kun
+        de ændrede sager i dem, når data (proces -> (aktive, arkiv)) er de lister,
+        vinduet har (SagService.opdater_lister). signaturer: fra minut-tjekkets samlede
+        kald (Supabase) – så hentes indstillingerne også kun ved ændring. Moduler uden
+        adgang hentes ikke (vises heller ikke på dashboardet). Resultatet lægges ind af
+        _anvend() på UI-tråden (None = uændret).
         """
         start = time.monotonic()
-        resultat = {"signaturer": {}, "data": {}, "indstillinger": self.t.indstillinger.hent()}
+        resultat = {"signaturer": {}, "data": {}, "indstillinger": None}
+        if signaturer is None or tving or signaturer.indstillinger != kendte.get(INDSTILLINGER_SIG):
+            resultat["indstillinger"] = self.t.indstillinger.hent()
+        if signaturer is not None:
+            resultat["signaturer"][INDSTILLINGER_SIG] = signaturer.indstillinger
         for proces, service in ((ON, self.t.onboarding), (OFF, self.t.offboarding)):
             if not session.har_adgang(MODUL_FOR_PROCES[proces]):
                 resultat["signaturer"][proces] = None
                 resultat["data"][proces] = ([], [])
                 continue
-            signatur = service.signatur()
+            signatur = signaturer.sager.get(proces) if signaturer is not None else None
+            signatur = signatur or service.signatur()
             kendt = None if tving else kendte.get(proces)
             resultat["signaturer"][proces] = signatur
-            resultat["data"][proces] = (
-                service.hent_aktive() if kendt is None or signatur[0] != kendt[0] else None,
-                service.hent_arkiverede() if kendt is None or signatur[1] != kendt[1] else None,
-            )
+            resultat["data"][proces] = service.opdater_lister(
+                kendt, signatur, *(data or {}).get(proces, (None, None)))
         hentet = [f"{proces} {navn} {len(liste)}" for proces, lister in resultat["data"].items()
                   for navn, liste in zip(("aktive", "arkiv"), lister) if liste]
         if hentet:
@@ -404,7 +415,8 @@ class MainWindow(QMainWindow):
             self.data[proces] = (gamle[0] if aktive is None else aktive,
                                  gamle[1] if arkiv is None else arkiv)
         self._signatur = dict(resultat["signaturer"])
-        self._indstillinger = resultat["indstillinger"]
+        if resultat["indstillinger"] is not None:
+            self._indstillinger = resultat["indstillinger"]
 
     def sag_gemt(self, sag) -> None:
         """En sag er netop gemt her: læg den ind i listerne og vis – uden at hente alt
@@ -452,10 +464,19 @@ class MainWindow(QMainWindow):
         self.vis_data()
         self._opdater_aktuel_side()
 
-    def _opdater_aktuel_side(self):
-        """Sider med egne data (skabeloner, indstillinger, ønsker) hentes, når de vises."""
+    def _opdater_aktuel_side(self, gamle: dict | None = None):
+        """Sider med egne data (skabeloner, indstillinger, ønsker) hentes, når de vises.
+
+        gamle: signaturerne før minut-tjekket – så hentes skabelon- og indstillingssiden
+        kun, når deres signatur er ændret (uden signatur, fx JSON: hver gang)."""
+        def aendret(*noegler):
+            return gamle is None or any(n not in self._signatur or self._signatur[n] != gamle.get(n)
+                                        for n in noegler)
+
         aktuel = self.stak.currentWidget()
-        if isinstance(aktuel, (SkabelonSide, IndstillingerSide, IndmeldingSide)):
+        if isinstance(aktuel, IndmeldingSide) \
+                or isinstance(aktuel, SkabelonSide) and aendret(SKABELONER_SIG) \
+                or isinstance(aktuel, IndstillingerSide) and aendret(INDSTILLINGER_SIG, ON, OFF):
             aktuel.opdater()
 
     def vis_data(self):
@@ -470,7 +491,6 @@ class MainWindow(QMainWindow):
         self.dashboard.opdater({ON: self.data[ON][0] + self.data[ON][1],
                                 OFF: self.data[OFF][0] + self.data[OFF][1]}, alarmer, dagens,
                                regler)
-        self.teamoverblik.opdater(self.data[ON][0], regler.naermer_sig_dage)
         for proces, prefix in ((ON, "on"), (OFF, "off")):
             aktive_sager, arkiv = self.data[proces]
             self.sider[f"{prefix}_oversigt"].opdater(
@@ -478,7 +498,8 @@ class MainWindow(QMainWindow):
                 [(s, o) for s, o in dagens if s.PROCES == proces],
             )
             self.sider[f"{prefix}_aktive"].vis(aktive_sager)
-            self.sider[f"{prefix}_opgaver"].opdater(aktive_sager)
+            if f"{prefix}_opgaver" in self.sider:
+                self.sider[f"{prefix}_opgaver"].opdater(aktive_sager)
             self.sider[f"{prefix}_arkiv"].vis(arkiv)
         self.sidebar.saet_lagring(self.t.lagring.offline,
                                   len(self.t.lagring.ventende_aendringer()),
@@ -491,36 +512,70 @@ class MainWindow(QMainWindow):
         if session.bruger() is None:
             return
         self._daglig_backup()   # programmet kan køre i flere døgn i baggrunden
-        self._opdater_i_baggrund()
+        self._opdater_i_baggrund(netvaerk=self._skal_tjekke_netvaerk())
         if self._opdatering_tjekket is None \
                 or time.monotonic() - self._opdatering_tjekket >= self.VERSIONS_TJEK:
             self._tjek_opdatering()
 
-    def _tik(self, kendte: dict, med_paamindelser: bool) -> dict:
+    def _skal_tjekke_netvaerk(self) -> bool:
+        """Er vinduet skjult (ved uret eller minimeret), tjekkes Supabase kun hvert
+        BAGGRUNDS_TJEK sekund – påmindelserne vurderes stadig lokalt hvert minut, og
+        der tjekkes med det samme, når vinduet vises igen (vis_fra_baggrund)."""
+        if self.t.tjek is None or (self.isVisible() and not self.isMinimized()):
+            return True
+        return self._netvaerk_tjekket is None \
+            or time.monotonic() - self._netvaerk_tjekket >= self.BAGGRUNDS_TJEK
+
+    def _tik(self, kendt: dict) -> dict:
         """Baggrundstråd: sessionstjek, de ændrede lister, påmindelsesskabelonerne og
         kalenderen (signatur og påmindelser). En udløbet session eller lukket adgang
-        kaster SessionUdloebetFejl (log ud)."""
-        self.t.auth.kontroller_session()
-        resultat = self._hent(False, kendte)
-        resultat["paamindelser"] = (self.t.skabeloner.aktive(sk.PAAMINDELSE)
-                                    if med_paamindelser else None)
+        kaster SessionUdloebetFejl (log ud).
+
+        I Supabase-tilstand kommer profilen og alle signaturerne i ét kald (inbase_tick),
+        og kun det ændrede hentes. kendt["netvaerk"] False: intet netværk – kun
+        kalenderens påmindelser ud fra det, der allerede er hentet."""
+        kendte, signaturer = kendt["signaturer"], None
+        if not kendt["netvaerk"]:
+            resultat = {"signaturer": dict(kendte), "data": {}, "indstillinger": None}
+        else:
+            if self.t.tjek is not None:
+                signaturer = self.t.tjek.signaturer()
+                self.t.auth.kontroller_profil(signaturer.profil)
+            else:
+                self.t.auth.kontroller_session()
+            resultat = self._hent(False, kendte, kendt["data"], signaturer)
+        resultat["paamindelser"] = None
+        if kendt["med_paamindelser"] and kendt["netvaerk"] and (
+                signaturer is None or kendt["mangler_paamindelser"]
+                or signaturer.skabeloner != kendte.get(SKABELONER_SIG)):
+            resultat["paamindelser"] = self.t.skabeloner.aktive(sk.PAAMINDELSE)
+        if signaturer is not None:
+            resultat["signaturer"][SKABELONER_SIG] = signaturer.skabeloner
         resultat["kalender"] = None
         if session.har_adgang(adgang.KALENDER):
+            kalender = signaturer.kalender if signaturer is not None else \
+                (None if kendt["netvaerk"] else kendt["kalender"])
             try:
-                resultat["kalender"] = self.t.kalender.tjek(datetime.now())
+                resultat["kalender"] = self.t.kalender.tjek(datetime.now(), kalender)
             except SessionUdloebetFejl:
                 raise
             except DataFejl as fejl:     # kalenderen må ikke stoppe resten af minut-tjekket
                 log.warning("Kalenderen kunne ikke tjekkes: %s", fejl)
         return resultat
 
-    def _opdater_i_baggrund(self):
+    def _opdater_i_baggrund(self, netvaerk: bool = True):
         """Minut-tjekket uden at fryse vinduet. Kun ét ad gangen."""
         if self._tikker:
             return
         self._tikker = True
+        if netvaerk:
+            self._netvaerk_tjekket = time.monotonic()
         generation = self._generation
-        koer_i_baggrund(self._tik, dict(self._signatur), self.notifikationer.slaaet_til,
+        kendt = {"signaturer": dict(self._signatur), "data": dict(self.data),
+                 "netvaerk": netvaerk, "med_paamindelser": self.notifikationer.slaaet_til,
+                 "mangler_paamindelser": self._paamindelser is None,
+                 "kalender": self._kalender_signatur}
+        koer_i_baggrund(self._tik, kendt,
                         naar_faerdig=lambda resultat: self._tik_faerdig(resultat, generation),
                         ved_fejl=self._tik_fejl)
 
@@ -531,11 +586,14 @@ class MainWindow(QMainWindow):
         self._kalender_tikket(resultat.get("kalender"))   # påmindelserne er allerede logget
         if generation != self._generation:
             return   # der er gemt/hentet imens – næste tik henter igen
+        gamle = self._signatur
         self._anvend(resultat)
-        self.vis_data()
-        self._opdater_aktuel_side()
         if resultat["paamindelser"] is not None:
-            self._vis_paamindelser_fra(resultat["paamindelser"])
+            self._paamindelser = resultat["paamindelser"]
+        self.vis_data()
+        self._opdater_aktuel_side(gamle)
+        if self._paamindelser is not None:
+            self._vis_paamindelser_fra(self._paamindelser)
 
     def _tik_fejl(self, fejl: Exception):
         self._tikker = False
@@ -548,11 +606,10 @@ class MainWindow(QMainWindow):
             log.error("Minut-tjekket fejlede", exc_info=fejl)
 
     def _kalender_tikket(self, kalender) -> None:
-        """Kalenderens del af minut-tjekket: hent siden igen ved ændringer, vis påmindelser
-        og besked om kalendere, der er delt med brugeren."""
+        """Kalenderens del af minut-tjekket: hent siden igen ved ændringer, vis påmindelser."""
         if kalender is None:
             return
-        signatur, alarmer, nye_delinger = kalender
+        signatur, alarmer = kalender
         if self._kalender_signatur is not None and signatur != self._kalender_signatur \
                 and self.stak.currentWidget() is self.kalender:
             self.kalender.opdater()
@@ -560,8 +617,6 @@ class MainWindow(QMainWindow):
         nu = datetime.now()
         for forekomst in alarmer:
             self.notifikationer.vis_besked(forekomst.titel, alarm_tekst(forekomst, nu))
-        for delt in nye_delinger:
-            self.notifikationer.vis_besked("Ny delt kalender", delt_tekst(delt))
 
     def _vis_paamindelser(self):
         """Windows-notifikationer – kun hvis brugeren har dem slået til."""
@@ -569,6 +624,7 @@ class MainWindow(QMainWindow):
             return
         skabeloner = udfoer(self, self.t.skabeloner.aktive, sk.PAAMINDELSE)
         if skabeloner is not FEJL:
+            self._paamindelser = skabeloner
             self._vis_paamindelser_fra(skabeloner)
 
     def _vis_paamindelser_fra(self, skabeloner):
@@ -634,11 +690,10 @@ class MainWindow(QMainWindow):
         if 0 <= index < len(sider):
             self.vis_side(sider[index][0])
 
-    def _vis_filtreret(self, _maal, filter_):
-        """Et overblikskort på dashboardet: åbn Teamoverblikket med det filter,
-        tallet er talt ud fra (kontrolrum.TEAM)."""
-        self.teamoverblik.vaelg_filter(filter_)
-        self.vis_side("on_team")
+    def _vis_filtreret(self, _maal, _filter):
+        """Et overblikskort på dashboardet: åbn onboardingens aktive forløb
+        (Teamoverblikket med dets filtre er fjernet – forenklet flow)."""
+        self.vis_side("on_aktive")
 
     def vis_side(self, noegle):
         side = self.sider[noegle]
@@ -796,12 +851,12 @@ class MainWindow(QMainWindow):
         self._generation += 1           # et igangværende minut-tjek kasseres
         self._opdatering,self._opdatering_fil, self._opdatering_tjekket = None, None, None
         self._kalender_signatur = None
+        self._paamindelser, self._netvaerk_tjekket = None, None
         self.t.kalender.glem_cache()
         self.sidebar.saet_opdatering(None)
         for side in [self.sider[f"{p}_{n}"] for p in ("on", "off") for n in ("aktive", "arkiv")] \
                 + [self.oensker, self.telefoner, self.telefoner_arkiv, self.kalender]:
             side.ryd()
-        self.teamoverblik.opdater([])
 
     def _session_udloebet(self, fejl):
         """Sessionen er udløbet, eller adgangen er lukket: log ud på en kontrolleret måde.
@@ -855,6 +910,7 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        self._opdater_i_baggrund()   # skjult blev der kun tjekket hvert 5. minut
 
     def afslut(self):
         self._afslutter = True
