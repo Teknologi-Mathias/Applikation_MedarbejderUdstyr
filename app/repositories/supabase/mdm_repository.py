@@ -1,8 +1,14 @@
 """Telefoner (MDM) i Supabase (tabellen og RPC'erne fra migrering 007 og 008).
 
+Styrings-appen til automatisk opdatering udgives med RPC'en fra migrering 026 (ét kald, appen
+som base64).
+
 Læsning direkte fra tabellen (RLS: kun administratorer). Oprettelse og
 ændringer går gennem RPC'erne – flere ændringer kan sendes i ét kald. Sletning direkte.
 """
+import base64
+from typing import Optional
+
 from app.domain.mdm_enhed import INFOFELTER, MdmEnhed
 from app.repositories.fejl import DataFejl
 from app.repositories.supabase import mapping
@@ -19,6 +25,11 @@ class SupabaseMdmRepository:
         raekker = hent_alle(lambda: self.klient.table(TABEL).select("*").order("name"),
                             "hente telefoner")
         return [mapping.mdm_fra_raekke(r) for r in raekker]
+
+    def hent(self, enhed_id: str) -> Optional[MdmEnhed]:
+        with kald("hente telefonen"):
+            svar = self.klient.table(TABEL).select("*").eq("id", enhed_id).execute()
+        return mapping.mdm_fra_raekke(svar.data[0]) if svar.data else None
 
     def opret(self, enhed: MdmEnhed) -> MdmEnhed:
         felter = {"id": enhed.id, **{k: getattr(enhed, k) for k in INFOFELTER}}
@@ -42,3 +53,15 @@ class SupabaseMdmRepository:
         if not svar.data:
             raise DataFejl("Telefonen blev ikke slettet. Kun administratorer kan slette – "
                            "eller den er allerede slettet.")
+
+    def app_info(self) -> dict:
+        with kald("hente den udgivne styrings-app"):
+            svar = self.klient.rpc("inbase_mdm_app_info", {}).execute()
+        return mapping.mdm_app_fra_rpc(svar.data)
+
+    def udgiv_app(self, version_code: int, version_name: str, apk: bytes) -> dict:
+        with kald("udgive styrings-appen"):
+            svar = self.klient.rpc("inbase_mdm_publish_app", {
+                "p_version_code": version_code, "p_version_name": version_name,
+                "p_apk": base64.b64encode(apk).decode("ascii")}).execute()
+        return mapping.mdm_app_fra_rpc(svar.data)

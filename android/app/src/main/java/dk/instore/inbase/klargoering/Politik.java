@@ -168,14 +168,25 @@ class Politik {
         try { rettigheder(ctx); } catch (Exception ex) { fejl.add("Rettigheder: " + ex.getMessage()); }
         try { skjulApps(ctx, false); } catch (Exception ex) { fejl.add("Apps: " + ex.getMessage()); }
         try { begraensninger(ctx); } catch (Exception ex) { fejl.add("Begrænsninger: " + ex.getMessage()); }
+        try {
+            Sporing.forbered(ctx, this);
+            Sporing.nu(ctx);
+        } catch (Exception ex) {
+            fejl.add("Find telefon/oplåsning: " + ex.getMessage());
+        }
         return fejl;
     }
 
     void rettigheder(Context ctx) {
         DevicePolicyManager dpm = dpm(ctx);
         ComponentName admin = AdminReceiver.komponent(ctx);
-        dpm.setPermissionGrantState(admin, ctx.getPackageName(), Manifest.permission.READ_PHONE_STATE,
-                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
+        // Placering kun til Find telefon (Sporing) – én position, når IN-BASE beder om det.
+        for (String r : new String[]{Manifest.permission.READ_PHONE_STATE,
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION}) {
+            dpm.setPermissionGrantState(admin, ctx.getPackageName(), r,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
+        }
         String org = s("organisation");
         if (!org.isEmpty()) dpm.setOrganizationName(admin, org);
         String kontakt = s("kontakt");

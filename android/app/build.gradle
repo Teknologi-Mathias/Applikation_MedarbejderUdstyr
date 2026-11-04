@@ -36,10 +36,17 @@ def masterHash = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256
 def signeringFil = rootProject.file("signering/signering.properties")
 def signering = new Properties()
 if (signeringFil.exists()) signeringFil.withInputStream { signering.load(it) }
+// Find telefon: Supabase-adressen og den OFFENTLIGE nøgle (samme som IN-BASE's) står i samme fil.
+def supabaseUrl = signering.getProperty("supabaseUrl", "")
+def supabaseNoegle = signering.getProperty("supabaseNoegle", "")
 gradle.taskGraph.whenReady { graf ->
     if (!signeringFil.exists() && graf.allTasks.any { it.name == "packageRelease" }) {
         throw new GradleException("Signeringsnøglen mangler. Byg med scripts\\byg_klargoering_apk.ps1 " +
                 "(henter nøglen med dit IN-BASE-administratorlogin).")
+    }
+    if ((supabaseUrl.isEmpty() || supabaseNoegle.isEmpty()) && graf.allTasks.any { it.name == "packageRelease" }) {
+        throw new GradleException("Supabase-adressen mangler i signering.properties (Find telefon). " +
+                "Byg med scripts\\byg_klargoering_apk.ps1.")
     }
 }
 
@@ -51,10 +58,12 @@ android {
         applicationId "dk.instore.inbase.klargoering"
         minSdk 29          // Android 10+: QR-klargøring med GET_PROVISIONING_MODE
         targetSdk 35
-        versionCode 6
-        versionName "6.0"
+        versionCode 8
+        versionName "8.0"
         resValue "string", "reservekode", reservekode
         resValue "string", "master_hash", masterHash
+        resValue "string", "supabase_url", supabaseUrl
+        resValue "string", "supabase_noegle", supabaseNoegle
     }
 
     signingConfigs {

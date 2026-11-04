@@ -33,7 +33,7 @@ from app.services.indstillinger_service import TEMAER
 from app.ui.bruger_side import BrugerSide
 from app.ui.data_side import DataSide
 from app.ui.fejl import FEJL, udfoer
-from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, scroll_side, vis_dato
+from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, med_info, scroll_side, vis_dato
 from app.ui.opdatering_side import OpdateringPanel
 from app.ui.skabelon_side import SkabelonSide
 
@@ -373,13 +373,21 @@ class OrganisationPanel(QWidget):
         self.naermer = QSpinBox()
         self.naermer.setRange(1, 90)
         self.naermer.setSuffix(" dage")
-        form.addRow("Områder", self.omraader)
-        form.addRow("Ansvarlige", self.ansvarlige)
+        form.addRow(med_info("Områder", "De arbejdsområder, en sag kan høre til (vælges ved "
+                             "oprettelse og bruges i filtre og rapporter). Fjernes et område, "
+                             "beholder eksisterende sager det."), self.omraader)
+        form.addRow(med_info("Ansvarlige", "Afdelinger og funktioner, der kan vælges som "
+                             "ansvarlig på en sag – ud over brugerne fra brugerkartoteket."),
+                    self.ansvarlige)
         note = QLabel("Brugerne fra brugerkartoteket kan altid vælges som ansvarlig.")
         note.setObjectName("hjaelpTekst")
         form.addRow("", note)
-        form.addRow("Sag uden aktivitet markeres efter", self.stille)
-        form.addRow("Vis kommende datoer inden for", self.naermer)
+        form.addRow(med_info("Sag uden aktivitet markeres efter",
+                             "En sag, hvor intet er sket i så mange dage, vises som stillestående "
+                             "på forsiden blandt det, der kræver handling."), self.stille)
+        form.addRow(med_info("Vis kommende datoer inden for",
+                             "Opgaver og frister inden for så mange dage vises som 'nærmer sig' "
+                             "på forsiden blandt det, der kræver handling."), self.naermer)
         lag.addLayout(form)
         gem = lav_knap("Gem", "primary")
         gem.clicked.connect(self._gem)

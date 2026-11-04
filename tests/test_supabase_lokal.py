@@ -25,6 +25,7 @@ from unittest import mock
 from app import KRAEVET_SKEMA, session
 from app.domain import historik
 from app.domain import kalender as kl
+from app.domain import mdm_enhed as md
 from app.domain import opdatering as op
 from app.domain.kalender import Begivenhed, Kalender
 from app.domain import skabelon as sk
@@ -38,6 +39,7 @@ from app.repositories.supabase.indmelding_repository import SupabaseIndmeldingRe
 from app.repositories.supabase.kalender_repository import SupabaseKalenderRepository
 from app.repositories.supabase.klient import kald
 from app.repositories.supabase.konto_repository import SupabaseKontoRepository
+from app.repositories.supabase.mdm_repository import SupabaseMdmRepository
 from app.repositories.supabase.opdatering_repository import SupabaseOpdateringRepository
 from app.repositories.supabase.opsaetning_repository import (
     SupabaseIndstillingRepository,
@@ -738,6 +740,105 @@ class SupabaseLokalTest(unittest.TestCase):
         self.service.rpc("test_saet_aktiv", {"p_id": cecilie.id, "p_active": False}).execute()
         self.assertEqual(self.raa(cecilie, kalender.id), "")
         anne.slet_kalender(kalender.id)
+
+
+    # ----- Find telefon (migrering 024) -------------------------------------
+
+    def test_find_telefon_via_telefonens_anonyme_tjek(self):
+        admin = SupabaseMdmRepository(self.admin.klient)
+        navn = f"T{uuid.uuid4().hex[:8].upper()}"
+        enhed = admin.opret(md.MdmEnhed(navn=navn, id=str(uuid.uuid4())))
+        admin.opdater([{"id": enhed.id, "nulstillingskode": "01234567"}])
+        anonym = klient(jwt("anon"))
+
+        def tjek(noegle, position=None):
+            return anonym.rpc("inbase_mdm_phone_checkin", {
+                "p_name": navn.lower(), "p_key": noegle, "p_location": position}).execute().data
+
+        noegle = md.sporingsnoegle("01234567")
+        self.assertFalse(tjek(noegle)["find"])
+        self.assertTrue(admin.hent(enhed.id).senest_set, "tjekket registreres som senest set")
+        admin.opdater([{"id": enhed.id, "find_anmodet": historik.nu()}])
+        self.assertFalse(tjek(md.sporingsnoegle("99999999"))["find"], "forkert nøgle")
+        self.assertTrue(tjek(noegle)["find"])
+        tjek(noegle, {"lat": 55.86, "lng": 9.84, "noejagtighed": 12.4, "batteri": 41,
+                      "ukendt": "x" * 500})
+        efter = admin.hent(enhed.id)
+        self.assertEqual(efter.find_anmodet, "", "anmodningen nulstilles, når telefonen svarer")
+        self.assertEqual((efter.position["lat"], efter.position["noejagtighed"]), (55.86, 12))
+        self.assertNotIn("ukendt", efter.position)
+        self.assertTrue(efter.position["modtaget"])
+        self.assertFalse(tjek(noegle)["find"])
+        with self.assertRaises(DataFejl):          # anon kan ikke læse tabellen
+            SupabaseMdmRepository(anonym).hent_alle()
+        admin.opdater([{"id": enhed.id, "arkiveret": historik.nu()}])
+        admin.slet(enhed.id)
+
+    # ----- Lås skærmlåsen op (migrering 025) --------------------------------
+
+    def test_laas_op_via_telefonens_anonyme_tjek(self):
+        admin = SupabaseMdmRepository(self.admin.klient)
+        navn = f"T{uuid.uuid4().hex[:8].upper()}"
+        enhed = admin.opret(md.MdmEnhed(navn=navn, id=str(uuid.uuid4())))
+        admin.opdater([{"id": enhed.id, "nulstillingskode": "01234567"}])
+        anonym = klient(jwt("anon"))
+        noegle = md.sporingsnoegle("01234567")
+
+        def tjek(**ekstra):
+            svar = anonym.rpc("inbase_mdm_phone_checkin",
+                              {"p_name": navn, "p_key": noegle, **ekstra}).execute().data
+            return {k: svar[k] for k in ("find", "laas_op")}   # "app" afhænger af udgivelser
+
+        self.assertEqual(tjek(p_location=None), {"find": False, "laas_op": False},
+                         "kald som styrings-app 7.0 (uden p_report) virker stadig")
+        tjek(p_report={"laas_op_klar": True})
+        self.assertTrue(admin.hent(enhed.id).laas_op_klar)
+        admin.opdater([{"id": enhed.id, "laas_op_anmodet": historik.nu()}])
+        self.assertEqual(tjek(p_key=md.sporingsnoegle("99999999")),
+                         {"find": False, "laas_op": False}, "forkert nøgle")
+        self.assertEqual(tjek(), {"find": False, "laas_op": True})
+        self.assertEqual(tjek(p_report={"laas_op": {"ok": True}}), {"find": False, "laas_op": False})
+        efter = admin.hent(enhed.id)
+        self.assertEqual(efter.laas_op_anmodet, "", "anmodningen nulstilles, når telefonen svarer")
+        self.assertTrue(efter.laas_op_svar["ok"])
+        self.assertTrue(efter.laas_op_svar["modtaget"])
+        admin.opdater([{"id": enhed.id, "arkiveret": historik.nu()}])
+        admin.slet(enhed.id)
+
+
+    # ----- automatisk opdatering af styrings-appen (migrering 026) ----------
+
+    def test_styrings_app_udgives_og_hentes_med_telefonens_noegle(self):
+        admin = SupabaseMdmRepository(self.admin.klient)
+        navn = f"T{uuid.uuid4().hex[:8].upper()}"
+        enhed = admin.opret(md.MdmEnhed(navn=navn, id=str(uuid.uuid4())))
+        admin.opdater([{"id": enhed.id, "nulstillingskode": "01234567"}])
+        anonym = klient(jwt("anon"))
+        noegle = md.sporingsnoegle("01234567")
+        apk = b"PK\x03\x04" + uuid.uuid4().bytes * 1000
+        version = int(time.time())              # den lokale database deler én udgivelse
+        with self.assertRaises(DataFejl):       # kun med modulet Telefoner
+            SupabaseMdmRepository(self.anne.klient).udgiv_app(version, "9.9", apk)
+        with self.assertRaises(ValideringsFejl):       # ikke en APK
+            admin.udgiv_app(version, "9.9", b"ikke en apk")
+        info = admin.udgiv_app(version, "9.9", apk)
+        self.assertEqual((info["version_kode"], info["sha256"]),
+                         (version, hashlib.sha256(apk).hexdigest()))
+        self.assertEqual(admin.app_info()["udgivet_af"], self.admin.brugernavn)
+        with self.assertRaises(ValideringsFejl):       # samme version igen
+            admin.udgiv_app(version, "9.9", apk)
+
+        svar = anonym.rpc("inbase_mdm_phone_checkin", {
+            "p_name": navn, "p_key": noegle, "p_report": {"version": "8.0"}}).execute().data
+        self.assertEqual(svar["app"], {"version_code": version, "sha256": info["sha256"]})
+        self.assertEqual(admin.hent(enhed.id).app_version, "8.0")
+        hentet = anonym.rpc("inbase_mdm_phone_app", {"p_name": navn, "p_key": noegle}).execute().data
+        self.assertNotIn("\n", hentet)
+        self.assertEqual(base64.b64decode(hentet), apk)
+        self.assertIsNone(anonym.rpc("inbase_mdm_phone_app", {
+            "p_name": navn, "p_key": md.sporingsnoegle("99999999")}).execute().data, "forkert nøgle")
+        admin.opdater([{"id": enhed.id, "arkiveret": historik.nu()}])
+        admin.slet(enhed.id)
 
 
 if __name__ == "__main__":

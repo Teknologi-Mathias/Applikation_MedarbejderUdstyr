@@ -3,6 +3,8 @@
 Gør det samme som RPC'erne i migrering 007/008, men uden databasens
 adgangskontrol (rettigheder kontrolleres kun af MdmService).
 """
+from typing import Optional
+
 from app.domain.historik import nu, nuvaerende_bruger
 from app.domain.mdm_enhed import GEMTE_FELTER, INFOFELTER, MdmEnhed
 from app.infrastructure.stier import MDM_ENHEDER
@@ -23,6 +25,9 @@ class JsonMdmRepository:
 
     def hent_alle(self) -> list[MdmEnhed]:
         return [MdmEnhed.fra_dict(e) for e in self._laes()]
+
+    def hent(self, enhed_id: str) -> Optional[MdmEnhed]:
+        return next((e for e in self.hent_alle() if e.id == enhed_id), None)
 
     def opret(self, enhed: MdmEnhed) -> MdmEnhed:
         self.datakilde.kraev_online("Telefoner")
@@ -55,3 +60,9 @@ class JsonMdmRepository:
     def slet(self, enhed_id: str) -> None:
         self.datakilde.kraev_online("Telefoner")
         self._gem([e for e in self._laes() if e["id"] != enhed_id])
+
+    def app_info(self) -> dict:
+        return {}
+
+    def udgiv_app(self, version_code: int, version_name: str, apk: bytes) -> dict:
+        raise ValideringsFejl("Automatisk opdatering af telefonerne kræver Supabase.")

@@ -55,6 +55,8 @@ $apk = Join-Path $android "app\build\outputs\apk\release\app-release.apk"
 $maal = Join-Path $rod "assets\mdm"
 New-Item -ItemType Directory -Force $maal | Out-Null
 Copy-Item $apk (Join-Path $maal "inbase-klargoering.apk") -Force
+# Versionen (versionCode/versionName) – IN-BASE viser den og bruger den ved "Udgiv til alle telefoner".
+Copy-Item (Join-Path (Split-Path -Parent $apk) "output-metadata.json") (Join-Path $maal "inbase-klargoering.json") -Force
 Copy-Item (Join-Path $android "reservekode.txt") (Join-Path $maal "reservekode.txt") -Force
 $hash = (Get-FileHash (Join-Path $maal "inbase-klargoering.apk") -Algorithm SHA256).Hash
 Write-Host "OK: assets\mdm\inbase-klargoering.apk (SHA-256 $hash)"

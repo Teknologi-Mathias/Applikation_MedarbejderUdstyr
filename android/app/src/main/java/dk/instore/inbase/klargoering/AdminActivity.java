@@ -97,6 +97,11 @@ public class AdminActivity extends Activity {
         } else if (!politik.skaermlaasAendringer().isEmpty()) {
             tekst.setText(politik.skaermlaasAendringer() + "\n\n" + tekst.getText());
         }
+        String senest = Sporing.de(this).getString(Sporing.SENEST_SET, "");
+        tekst.append("\n\nFind telefon: " + (senest.isEmpty() ? "har ikke tjekket ind endnu."
+                : "senest tjekket ind " + senest + ".")
+                + "\nOplåsning fra IN-BASE: " + (LaasOp.klar(this) ? "klar."
+                : "ikke klar endnu – lås telefonen op én gang."));
     }
 
     private void knap(LinearLayout rod, String titel, Runnable handling) {

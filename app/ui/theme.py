@@ -226,6 +226,10 @@ QToolButton#sidebarIkon:checked { background: @PRIMARY; color: white; }
 #feltFejl { color: @DANGER_TEKST; font-size: 12px; }
 #sektionTitel { font-size: 14px; font-weight: 700; padding-top: 6px; }
 #hjaelpTekst { color: @MUTED; font-size: 12px; }
+QToolButton#infoIkon {
+    background: transparent; border: none; color: @MUTED; font-size: 14px; padding: 0 2px;
+}
+QToolButton#infoIkon:hover { color: @PRIMARY; }
 #sagTitel { font-size: 20px; font-weight: 700; }
 #opgaveRaekke { background: @SURFACE; border: 1px solid @BORDER; border-radius: 10px; }
 #opgaveRaekke[fokus="true"] { border: 2px solid @PRIMARY_HOVER; background: @PRIMARY_SOFT; }

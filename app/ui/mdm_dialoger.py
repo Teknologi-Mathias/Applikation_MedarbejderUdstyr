@@ -1,4 +1,5 @@
-"""Dialoger til Telefoner (MDM): oplysninger om en telefon og klargøring med QR-kode.
+"""Dialoger til Telefoner (MDM): oplysninger om en telefon, klargøring med QR-kode, Find telefon
+og Lås skærmlåsen op.
 
 Regler ligger i MdmService – dialogerne viser og indsamler. Klargøringsdialogen
 starter den midlertidige server (app/infrastructure/mdm/lokal_server.py), mens
@@ -7,8 +8,16 @@ den er åben, og stopper den igen, når den lukkes.
 import secrets
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRegularExpression, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QRegularExpressionValidator
+from PySide6.QtCore import QObject, QRegularExpression, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QGuiApplication,
+    QImage,
+    QPainter,
+    QPixmap,
+    QRegularExpressionValidator,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -19,6 +28,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
@@ -29,11 +39,18 @@ from app.domain import mdm_enhed as md
 from app.infrastructure.mdm.lokal_server import KlargoeringsServer, netvaerk
 from app.infrastructure.mdm.qr import qr_matrix
 from app.repositories.fejl import DataFejl, ValideringsFejl
+from app.ui.baggrund import koer_i_baggrund
 from app.ui.fejl import FEJL, udfoer
-from app.ui.hjaelpere import lav_knap
+from app.ui.hjaelpere import lav_info, lav_knap, med_info, vis_dato
 
 QR_STOERRELSE = 460
 WIFI_TYPER = ("WPA", "WEP", "NONE")
+FIND_INTERVAL_MS = 30_000          # Find telefon: hent den ene telefon igen, mens vinduet er åbent
+
+
+def vis_tid(tekst: str) -> str:
+    """"2026-11-04T14:32:10" -> "04-11-2026 14:32"."""
+    return f"{vis_dato(tekst[:10])} {tekst[11:16]}".strip() if tekst else ""
 
 
 def qr_pixmap(tekst: str, stoerrelse: int = QR_STOERRELSE, dpr: float = 1.0) -> QPixmap:
@@ -85,7 +102,10 @@ class TelefonDialog(QDialog):
         self.felter["note"].setTabChangesFocus(True)
         for noegle, etiket in (("navn", "Enhedsnavn (ERP) *"), ("telefonnummer", "Telefonnummer"),
                                ("note", "Note")):
-            form.addRow(etiket, self.felter[noegle])
+            form.addRow(med_info(etiket, "Telefonens navn i ERP, fx ISM589. Vises på låseskærmen "
+                                 "og bruges til Find telefon og oplåsning. Tildeling til en "
+                                 "medarbejder sker i ERP, ikke her.")
+                        if noegle == "navn" else etiket, self.felter[noegle])
             if enhed is not None:
                 felt = self.felter[noegle]
                 (felt.setPlainText if noegle == "note" else felt.setText)(getattr(enhed, noegle))
@@ -215,15 +235,25 @@ class KlargoeringDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Pc'ens netværk", self.netkort)
-        form.addRow("Wi-Fi (SSID)", self.ssid)
+        form.addRow(med_info("Wi-Fi (SSID)", "Netværket, telefonen kobler på under "
+                             "klargøringen. Det skal være samme net som pc'en. Telefonen husker "
+                             "det bagefter."), self.ssid)
         form.addRow("Wi-Fi-kode", kode_raekke)
         form.addRow("Sikkerhed", self.sikkerhed)
-        form.addRow("FL-UPDATE *", kilde_raekke)
+        form.addRow(med_info("FL-UPDATE *", "Frode Laursens installationsapp. Telefonen henter den "
+                             "fra pc'en og installerer den. Bagefter henter FL-UPDATE selv "
+                             "FL-TMS. Filen ændres ikke."), kilde_raekke)
         form.addRow("", fl_raekke)
         form.addRow("Baggrundsbillede", baggrund_raekke)
-        form.addRow("Ekstra apps", self.ekstra_apps)
-        form.addRow("Kontakt (låseskærm)", self.kontakt)
-        form.addRow("", self.mail)
+        form.addRow(med_info("Ekstra apps", "Pakkenavne på apps, der ellers bliver skjult, adskilt "
+                             "med komma, fx com.google.android.apps.photos. Kun apps, der "
+                             "allerede findes på telefonen."), self.ekstra_apps)
+        form.addRow(med_info("Kontakt (låseskærm)", "Vises på låseskærmen og når brugeren rammer "
+                             "en spærret funktion. Skriv hvem der hjælper, og et nummer."),
+                    self.kontakt)
+        form.addRow("", med_info(self.mail, "Gmail-appen bliver synlig, så en IMAP-konto kan "
+                                 "tilføjes. Google-konti er stadig spærret. Kan slås til og fra "
+                                 "senere uden nulstilling (Handling → Slå firma-mail til)."))
 
         self.vis_knap = lav_knap("Vis QR-kode", "primary")
         self.vis_knap.clicked.connect(self._vis_qr)
@@ -396,16 +426,40 @@ class KlargoeringDialog(QDialog):
 
 
 class OpdateringDialog(QDialog):
-    """Opdater telefoner: serverer styrings-appen, så klargjorte telefoner (v4+) kan hente den
-    nye version fra administrator-menuen – uden nulstilling. Serveren kører, mens vinduet er åbent."""
+    """Opdater telefoner.
 
-    def __init__(self, parent, apk: Path):
+    Automatisk (styrings-app 8.0+): "Udgiv til alle telefoner" lægger appen i Supabase
+    (migrering 026), og telefonerne henter og installerer den selv ved deres næste tjek – uden
+    kode og uden pc i nærheden.
+
+    Manuelt (ældre telefoner, én gang): serverer styrings-appen fra denne pc, så klargjorte
+    telefoner (v4+) kan hente den nye version fra administrator-menuen på samme Wi-Fi. Serveren
+    kører, mens vinduet er åbent."""
+
+    def __init__(self, parent, service, apk: Path, enheder=()):
         super().__init__(parent)
         self.setWindowTitle("Opdater telefoner")
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(600)
+        self.service = service
+        self.enheder = list(enheder)
         self._antal = 0
         self._bro = _Bro()
         self._bro.hentet.connect(self._telefon_hentede)
+
+        auto_titel = QLabel("<b>Automatisk</b> – telefoner med styrings-app 8.0 eller nyere")
+        self.auto_status = QLabel("")
+        self.auto_status.setWordWrap(True)
+        self.udgiv = lav_knap("Udgiv til alle telefoner", "primary")
+        self.udgiv.clicked.connect(self._udgiv)
+        udgiv_raekke = QHBoxLayout()
+        udgiv_raekke.addWidget(self.udgiv)
+        udgiv_raekke.addWidget(lav_info(
+            "Appen lægges i Supabase. Hver telefon ser den ved sit næste tjek (oplåsning, lader "
+            "eller senest inden for en time), henter den (ca. 2 MB, også over mobildata) og "
+            "installerer den selv – uden kode. Android installerer kun en app, der er signeret "
+            "med jeres nøgle. Kolonnen App på Telefoner viser, hvilke der er opdateret."))
+        udgiv_raekke.addStretch()
+
         # Ingen telefon melder tilbage her – engangskoden bruges ikke, men skal være hemmelig.
         self.server = KlargoeringsServer(apk, secrets.token_urlsafe(12), lambda _r: None,
                                          paa_hentning=self._bro.hentet.emit)
@@ -424,18 +478,21 @@ class OpdateringDialog(QDialog):
             self.server = None
             self.status.setText(f"Serveren kunne ikke starte ({fejl}). Er port 8765 optaget af "
                                 "et andet IN-BASE-vindue?")
+        manuel_titel = QLabel("<b>Manuelt</b> – ældre telefoner (én gang, derefter automatisk)")
         trin = QLabel(
             "<ol style='margin-left:-20px'>"
             "<li>Telefonen skal være på samme Wi-Fi som denne pc.</li>"
             "<li>Åbn <b>IN-BASE indstillinger</b> på telefonen (eller tast *#*#46227#*#*).</li>"
-            "<li>Indtast telefonens <b>nulstillingskode</b> og pc'ens adresse herunder.</li>"
+            "<li>Indtast telefonens <b>nulstillingskode</b> – eller <b>masterkoden</b>, der virker "
+            "på alle telefoner – og pc'ens adresse herunder.</li>"
             "<li>Vælg <b>Opdater appen fra IN-BASE</b>. Telefonen henter og installerer den nye "
             "version og lægger reglerne på igen.</li>"
             "</ol>")
         trin.setWordWrap(True)
         trin.setTextFormat(Qt.TextFormat.RichText)
         note = QLabel("Virker kun på telefoner klargjort med IN-BASE Klargøring 4.0 eller nyere. "
-                      "Ældre telefoner skal fabriksnulstilles og klargøres igen.")
+                      "Ældre telefoner skal fabriksnulstilles og klargøres igen. Masterkoden står "
+                      "i android/masterkode.txt hos den, der bygger styrings-appen.")
         note.setObjectName("hjaelpTekst")
         note.setWordWrap(True)
         knapper = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -443,12 +500,51 @@ class OpdateringDialog(QDialog):
         knapper.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
+        layout.addWidget(auto_titel)
+        layout.addWidget(self.auto_status)
+        layout.addLayout(udgiv_raekke)
+        layout.addSpacing(16)
+        layout.addWidget(manuel_titel)
         layout.addWidget(trin)
         layout.addWidget(QLabel("Pc'ens adresse (brug den første – pc'ens Wi-Fi):"))
         layout.addWidget(adresse)
         layout.addWidget(self.status)
         layout.addWidget(note)
         layout.addWidget(knapper)
+        try:
+            self._vis_auto(self.service.app_udgivet())
+        except (DataFejl, ValideringsFejl) as fejl:      # fx migrering 026 ikke kørt
+            self.auto_status.setText(f"Automatisk opdatering er ikke tilgængelig: {fejl}")
+            self.udgiv.setEnabled(False)
+
+    def _vis_auto(self, udgivet: dict) -> None:
+        pc = self.service.app_paa_pc()
+        linjer = [f"På denne pc: {pc['version']}." if pc else
+                  "Versionen af styrings-appen på denne pc kendes ikke – byg den igen."]
+        if udgivet:
+            opdateret = sum(1 for e in self.enheder if e.app_version == udgivet["version"])
+            linjer.append(f"Udgivet til telefonerne: {udgivet['version']} "
+                          f"({vis_tid(udgivet['udgivet'])}, {udgivet['udgivet_af']}). "
+                          f"{opdateret} af {len(self.enheder)} telefoner har den.")
+        else:
+            linjer.append("Ingen version er udgivet endnu.")
+        self.auto_status.setText(" ".join(linjer))
+        nyere = bool(pc) and pc["version_kode"] > udgivet.get("version_kode", 0)
+        self.udgiv.setEnabled(nyere)
+        self.udgiv.setText(f"Udgiv {pc['version']} til alle telefoner" if nyere
+                           else "Den nyeste version er udgivet")
+
+    def _udgiv(self) -> None:
+        pc = self.service.app_paa_pc()
+        if QMessageBox.question(
+                self, "Udgiv til alle telefoner",
+                f"Udgive styrings-app {pc.get('version', '')} til alle telefoner?\n\n"
+                "Telefonerne installerer den selv ved deres næste tjek. Afprøv den først på en "
+                "testtelefon (manuelt herunder).") != QMessageBox.StandardButton.Yes:
+            return
+        udgivet = udfoer(self, self.service.udgiv_app)
+        if udgivet is not FEJL:
+            self._vis_auto(udgivet)
 
     def _telefon_hentede(self, sti: str):
         if sti == "/inbase-klargoering.apk":
@@ -460,3 +556,171 @@ class OpdateringDialog(QDialog):
             self.server.stop()
             self.server = None
         super().done(resultat)
+
+
+class _AnmodningDialog(QDialog):
+    """Fælles for Find telefon og Lås skærmlåsen op: venter på telefonens svar.
+
+    Telefonen kan ikke kaldes udefra – den svarer ved sit næste tjek (forkert mønster, oplåsning,
+    lader/pc, nettet tilbage eller én gang i timen). Mens vinduet er åbent, hentes kun den ene
+    telefon hvert 30. sekund. Lukkes vinduet, står anmodningen fortsat.
+
+    Underklasser sætter FELT (anmodningen på MdmEnhed) og ANMOD/ANNULLER (MdmService-metoder),
+    tilføjer egne knapper i self.raekke og viser resultatet i _vis()."""
+    FELT = ANMOD = ANNULLER = ""
+
+    def __init__(self, parent, service, enhed, titel: str, note: str):
+        super().__init__(parent)
+        self.service = service
+        self.enhed = enhed
+        self.setWindowTitle(f"{titel} – {enhed.navn}")
+        self.setMinimumWidth(520)
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.igen = lav_knap("Prøv igen")
+        self.igen.clicked.connect(self._anmod_igen)
+        self.annuller = lav_knap("Annullér anmodning")
+        self.annuller.clicked.connect(self._annuller)
+        note_label = QLabel(note)
+        note_label.setObjectName("hjaelpTekst")
+        note_label.setWordWrap(True)
+        knapper = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        knapper.button(QDialogButtonBox.StandardButton.Close).setText("Luk")
+        knapper.rejected.connect(self.reject)
+        self.raekke = QHBoxLayout()
+        self.raekke.addWidget(self.igen)
+        self.raekke.addWidget(self.annuller)
+        self.raekke.addStretch()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.addWidget(self.status)
+        layout.addLayout(self.raekke)
+        layout.addWidget(note_label)
+        layout.addWidget(knapper)
+        self._timer = QTimer(self)
+        self._timer.setInterval(FIND_INTERVAL_MS)
+        self._timer.timeout.connect(self._hent)
+        self._timer.start()
+
+    @property
+    def anmodet(self) -> str:
+        return getattr(self.enhed, self.FELT)
+
+    def _vis(self) -> None:
+        self.annuller.setVisible(bool(self.anmodet))
+        self.igen.setVisible(not self.anmodet)
+
+    def _vis_linjer(self, linjer: list[str]) -> None:
+        if self.enhed.senest_set:
+            linjer.append(f"Senest set: {vis_tid(self.enhed.senest_set)}.")
+        self.status.setText("<br><br>".join(linjer) or "Ingen anmodning.")
+
+    def _hent(self) -> None:
+        if not self.anmodet:
+            return
+        koer_i_baggrund(self.service.hent, self.enhed, naar_faerdig=self._hentet,
+                        ved_fejl=lambda fejl: None)     # prøver igen om 30 sekunder
+
+    def _hentet(self, enhed) -> None:
+        if enhed is not None and self.isVisible():
+            self.enhed = enhed
+            self._vis()
+
+    def _anmod_igen(self) -> None:
+        enhed = udfoer(self, getattr(self.service, self.ANMOD), self.enhed)
+        if enhed is not FEJL:
+            self.enhed = enhed
+            self._vis()
+
+    def _annuller(self) -> None:
+        if udfoer(self, getattr(self.service, self.ANNULLER), self.enhed) is not FEJL:
+            self.enhed = md.MdmEnhed.fra_dict({**self.enhed.til_dict(), self.FELT: ""})
+            self._vis()
+
+    def done(self, resultat):
+        self._timer.stop()
+        super().done(resultat)
+
+
+class FindTelefonDialog(_AnmodningDialog):
+    """Find telefon: venter på telefonens svar og viser positionen."""
+    FELT, ANMOD, ANNULLER = "find_anmodet", "find_telefon", "annuller_find"
+
+    def __init__(self, parent, service, enhed):
+        super().__init__(
+            parent, service, enhed, "Find telefon",
+            "Telefonen svarer, når skærmen tændes, når den kommer på nettet igen, eller senest "
+            "inden for ca. en time. Ligger den slukket eller uden dækning, svarer den, så snart "
+            "den er tilbage. Kræver IN-BASE Klargøring 7.0.")
+        self.igen.setText("Find igen")
+        self.kort = lav_knap("Åbn i kort", "primary")
+        self.kort.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._link())))
+        self.kopier = lav_knap("Kopiér link")
+        self.kopier.clicked.connect(lambda: QGuiApplication.clipboard().setText(self._link()))
+        self.raekke.insertWidget(0, self.kort)
+        self.raekke.insertWidget(1, self.kopier)
+        self._vis()
+
+    def _link(self) -> str:
+        return md.kortlink(self.enhed.position)
+
+    def _vis(self) -> None:
+        super()._vis()
+        e, pos = self.enhed, self.enhed.position
+        linjer = []
+        if e.find_anmodet:
+            linjer.append(f"<b>Venter på {e.navn}</b> – anmodet {vis_tid(e.find_anmodet)}.")
+        if pos.get("fejl"):
+            linjer.append(f"Telefonen svarede {vis_tid(pos.get('modtaget', ''))}, men fandt "
+                          f"ingen position: {pos['fejl']}")
+        elif self._link():
+            hvornaar = "Seneste kendte position" if e.find_anmodet else "Position"
+            detaljer = ", ".join(d for d in (
+                f"±{pos['noejagtighed']} m" if pos.get("noejagtighed") is not None else "",
+                f"batteri {pos['batteri']} %" if pos.get("batteri") is not None else "") if d)
+            linjer.append(f"<b>{hvornaar}</b> {vis_tid(pos.get('modtaget', ''))}: "
+                          f"{pos['lat']:.5f}, {pos['lng']:.5f}"
+                          + (f" ({detaljer})" if detaljer else ""))
+        self._vis_linjer(linjer)
+        self.kort.setEnabled(bool(self._link()))
+        self.kopier.setEnabled(bool(self._link()))
+
+
+class LaasOpDialog(_AnmodningDialog):
+    """Lås skærmlåsen op (glemt mønster): telefonen sætter skærmlåskoden som midlertidig PIN."""
+    FELT, ANMOD, ANNULLER = "laas_op_anmodet", "laas_op", "annuller_laas_op"
+
+    def __init__(self, parent, service, enhed, pin: str):
+        super().__init__(
+            parent, service, enhed, "Lås skærmlåsen op",
+            "Telefonen skal have mobildata eller et kendt Wi-Fi. Kræver IN-BASE Klargøring 8.0, "
+            "og at telefonen er låst op én gang efter opdateringen (så melder den klar).")
+        self.pin = pin
+        self._vis()
+
+    def _vis(self) -> None:
+        super()._vis()
+        e, svar = self.enhed, self.enhed.laas_op_svar
+        linjer = []
+        if not e.laas_op_klar:
+            linjer.append(f"⚠ {e.navn} har ikke meldt klar til oplåsning. Den er måske ikke "
+                          "opdateret til version 8.0 eller ikke låst op siden opdateringen – så "
+                          "virker det ikke.")
+        if e.laas_op_anmodet:
+            linjer.append(
+                f"<b>Venter på {e.navn}</b> – anmodet {vis_tid(e.laas_op_anmodet)}.<br>"
+                "Bed brugeren om at <b>tegne et forkert mønster</b> eller <b>sætte telefonen i "
+                "laderen eller en pc</b>. Så tjekker den med det samme – ellers inden for en time.")
+        elif svar.get("ok"):
+            linjer.append(
+                f"<b>✔ {e.navn} er låst op</b> {vis_tid(svar.get('modtaget', ''))}.<br>"
+                f"Skærmlåsen er nu PIN-koden <b>{self.pin}</b>.<br><br>"
+                "Sæt standardmønsteret igen:<br>"
+                f"1. Lås op med PIN-koden {self.pin}.<br>"
+                "2. Åbn <b>IN-BASE indstillinger</b> og indtast samme kode.<br>"
+                "3. Vælg <b>Skift skærmlås (godkendt)</b> og tegn standardmønsteret.")
+        elif svar.get("fejl"):
+            linjer.append(f"Telefonen svarede {vis_tid(svar.get('modtaget', ''))}, men kunne "
+                          f"ikke låses op: {svar['fejl']}")
+        self._vis_linjer(linjer)

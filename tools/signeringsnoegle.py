@@ -11,6 +11,8 @@ fra deres egen pc. Bruges af scripts\\byg_klargoering_apk.ps1:
 hent: logger på med IN-BASE-brugernavn og adgangskode og skriver android/signering/
       (nøglefil + signering.properties) og android/reservekode.txt. Findes der endnu
       ingen nøgle, laves én med keytool og gemmes – det sker kun første gang.
+      signering.properties får også Supabase-adressen og den offentlige nøgle, som
+      telefonen bruger til Find telefon (migrering 024).
 ryd:  sletter android/signering/ igen, så nøglen ikke bliver liggende på pc'en.
 """
 import argparse
@@ -72,6 +74,8 @@ def hent(keytool: str) -> None:
         if not raekker:
             raise Stop("Nøglen kunne ikke gemmes i Supabase. Er migrering 012 kørt?")
     noegle = raekker[0]
+    from app.infrastructure.database.config import hent_konfiguration
+    konfig = hent_konfiguration()           # kun den offentlige nøgle (tjekket af config)
     SIGNERING.mkdir(parents=True, exist_ok=True)
     (SIGNERING / NOEGLEFIL).write_bytes(base64.b64decode(noegle["keystore_base64"]))
     (SIGNERING / "signering.properties").write_text(

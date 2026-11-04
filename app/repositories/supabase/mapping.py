@@ -518,8 +518,12 @@ def aendring_fra_raekke(raekke: dict) -> Aendring:
 
 
 # ---------------------------------------------------------------------------
-# Telefoner (mdm_devices, migrering 007-013)
+# Telefoner (mdm_devices, migrering 007-026)
 # ---------------------------------------------------------------------------
+
+# Telefonens svar (location, unlock_result): modtaget er databasens tidspunkt – til lokal tid.
+SVAR = (lambda v: dict(v or {}),
+        lambda v: {**v, "modtaget": fra_tidspunkt(v.get("modtaget"))} if v else {})
 
 MDM_FELTER = (
     ("id", "id", ID),
@@ -536,6 +540,13 @@ MDM_FELTER = (
     ("nulstillingskode", "reset_code", TEKST),
     ("mail", "mail", BOOL),
     ("arkiveret", "archived_at", TIDSPUNKT),
+    ("find_anmodet", "locate_requested_at", TIDSPUNKT),
+    ("senest_set", "last_checkin_at", TIDSPUNKT),
+    ("position", "location", SVAR),
+    ("laas_op_anmodet", "unlock_requested_at", TIDSPUNKT),
+    ("laas_op_klar", "unlock_ready", BOOL),
+    ("laas_op_svar", "unlock_result", SVAR),
+    ("app_version", "app_version", TEKST),
     ("oprettet_af", "created_by_username", TEKST),
     ("oprettet", "created_at", TIDSPUNKT),
     ("opdateret", "updated_at", TIDSPUNKT),
@@ -545,6 +556,17 @@ _MDM_KOLONNE = {noegle: (kolonne, konv) for noegle, kolonne, konv in MDM_FELTER}
 
 def mdm_fra_raekke(raekke: dict) -> MdmEnhed:
     return MdmEnhed.fra_dict(_fra_raekke(raekke, MDM_FELTER))
+
+
+def mdm_app_fra_rpc(data) -> dict:
+    """Den udgivne styrings-app (migrering 026) -> {"version_kode", "version", "udgivet", …}."""
+    if not isinstance(data, dict) or not data:
+        return {}
+    return {"version_kode": int(data.get("version_code") or 0),
+            "version": data.get("version_name") or "", "sha256": data.get("sha256") or "",
+            "stoerrelse": int(data.get("size_bytes") or 0),
+            "udgivet": fra_tidspunkt(data.get("published_at")),
+            "udgivet_af": data.get("published_by") or ""}
 
 
 def mdm_til_rpc(felter: dict) -> dict:

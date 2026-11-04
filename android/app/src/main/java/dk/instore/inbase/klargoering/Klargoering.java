@@ -86,6 +86,7 @@ class Klargoering {
         trin("Skjuler apps, der ikke skal bruges", this::skjulApps);
         trin("Henter og installerer FL-UPDATE", this::flUpdate);
         trin("Låser indstillinger", () -> politik.begraensninger(ctx));
+        trin("Find telefon og oplåsning", () -> Sporing.forbered(ctx, politik));
         trin("Melder tilbage til IN-BASE", this::meldTilbage);
         return fejl.length() == 0;
     }

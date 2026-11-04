@@ -8,10 +8,16 @@ import android.util.Log;
 /**
  * Lægger de gemte regler på igen, når telefonen starter, og når denne app er opdateret.
  * Fanger fx apps, der dukker op efter en Android-opdatering, og nye regler i en ny app-version.
+ * Før første oplåsning (LOCKED_BOOT_COMPLETED) kan reglerne ikke læses – der tjekkes kun med
+ * IN-BASE (Sporing), fx om skærmlåsen skal låses op.
  */
 public class OpstartReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(intent.getAction())) {
+            Sporing.nu(context);
+            return;
+        }
         Politik politik = Politik.hent(context);
         if (politik == null) return;   // klargjort før de gemte regler (v3) – rør intet
         PendingResult svar = goAsync();

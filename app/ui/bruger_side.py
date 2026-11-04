@@ -33,7 +33,7 @@ from app.domain.opdatering import PILOT, STABIL
 from app.repositories.fejl import DataFejl, ValideringsFejl
 from app.services.auth_service import ROLLE_ADMIN, ROLLE_BRUGER, ROLLER
 from app.ui.fejl import FEJL, udfoer
-from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, vis_dato
+from app.ui.hjaelpere import lav_info, lav_knap, lav_kort, lav_sidehoved, med_info, vis_dato
 
 BETA_TEKST = (
     "BETA – Adgangskoder er IKKE sikkert gemt. Brugerfilen ligger i datamappen "
@@ -81,7 +81,10 @@ class KodeDialog(QDialog):
         if ny:
             form.addRow("Brugernavn", self.brugernavn_input)
             form.addRow("Navn", self.navn_input)
-            form.addRow("Rolle", self.rolle_input)
+            form.addRow(med_info("Rolle", "Administrator: alt, inkl. brugere, skabeloner, data, "
+                                 "telefoner og sletning. Bruger: arbejder med sager, rykkere og "
+                                 "arkiv. Ekstra moduler (fx Telefoner) gives bagefter under "
+                                 "Moduladgang."), self.rolle_input)
         form.addRow("Midlertidig kode" if auth.MIDLERTIDIG_KODE else "Adgangskode", self.kode_input)
         form.addRow("Gentag kode", self.gentag_input)
 
@@ -228,6 +231,13 @@ class BrugerSide(QWidget):
         knapper.addStretch()
         for knap in (opret, kode, rolle, moduler, afdelinger, pilot, self.aktiv_knap, slet):
             knapper.addWidget(knap)
+        knapper.addWidget(lav_info(
+            "Moduladgang: hvilke moduler brugeren ser ud over sagerne (fx Telefoner). "
+            "Afdelinger: bruges af 'Min afdeling' i Teamoverblik – alle kan stadig behandle "
+            "alle sager. "
+            "Pilotkanal: brugeren får nye versioner af IN-BASE før alle andre. "
+            "Deaktivér: brugeren kan ikke logge på, men alt bevares og kan aktiveres igen. "
+            "Slet: fjerner brugeren permanent – brug hellere Deaktivér."))
         layout.addLayout(knapper)
 
         kort = lav_kort(skygge=False)

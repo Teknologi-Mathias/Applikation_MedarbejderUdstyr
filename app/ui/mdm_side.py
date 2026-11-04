@@ -12,14 +12,17 @@ from PySide6.QtWidgets import QFileDialog, QLabel, QMenu, QMessageBox, QToolButt
 
 from app.domain import mdm_enhed as md
 from app.ui.fejl import FEJL, udfoer
-from app.ui.hjaelpere import lav_knap, vis_dato
-from app.ui.mdm_dialoger import KlargoeringDialog, OpdateringDialog, TelefonDialog
+from app.ui.hjaelpere import lav_knap
+from app.ui.mdm_dialoger import (
+    FindTelefonDialog,
+    KlargoeringDialog,
+    LaasOpDialog,
+    OpdateringDialog,
+    TelefonDialog,
+    vis_tid,
+)
 from app.ui.sag_liste_side import Filtervalg, Kolonne, SagListeSide
 from app.ui.theme import status_stil
-
-
-def _tid(tekst: str) -> str:
-    return f"{vis_dato(tekst[:10])} {tekst[11:16]}".strip() if tekst else ""
 
 
 def _handlingsknap(menu: QMenu) -> QToolButton:
@@ -47,8 +50,10 @@ class _MdmListeSide(SagListeSide):
             Kolonne("Model", 170, lambda e: e.visningsmodel),
             Kolonne("Serienr.", 140, lambda e: e.serienummer, tooltip=lambda e: e.imei),
             Kolonne("Android", 80, lambda e: e.android_version),
+            Kolonne("App", 60, lambda e: e.app_version,
+                    tooltip=lambda e: "Styrings-appens version (meldt af telefonen)"),
             *ekstra_kolonner,
-            Kolonne("Klargjort", 0, lambda e: _tid(e.klargjort), sortering=lambda e: e.klargjort),
+            Kolonne("Klargjort", 0, lambda e: vis_tid(e.klargjort), sortering=lambda e: e.klargjort),
         ]
         filtre = [Filtervalg("Status", lambda: list(md.STATUSSER), lambda e: e.status)]
         super().__init__(titel, undertitel, kolonner, filtre=filtre, sorter_efter=0,
@@ -193,8 +198,8 @@ class _MdmListeSide(SagListeSide):
             "1. Åbn \"IN-BASE indstillinger\" (eller tast *#*#46227#*#*).\n"
             "2. Indtast koden og vælg \"Skift skærmlås (godkendt)\".\n"
             "3. Tegn standardmønsteret – advarslen nulstilles.\n\n"
-            "Er låsen glemt, og telefonen er låst: fabriksnulstil og klargør den igen. "
-            "Kræver IN-BASE Klargøring 6.0 eller nyere på telefonen.")
+            "Er mønsteret glemt, og telefonen er låst: Handling → Lås skærmlåsen op… "
+            "Kræver IN-BASE Klargøring 6.0 eller nyere på telefonen (oplåsning: 8.0).")
 
 
 class MdmSide(_MdmListeSide):
@@ -202,7 +207,11 @@ class MdmSide(_MdmListeSide):
         super().__init__(
             service, "Telefoner (MDM)",
             "Driftstelefoner registreret ved enhedsnavn fra ERP (fx ISM589) og klargjort med "
-            "QR-kode direkte fra IN-BASE. Kun basale apps, FL-UPDATE og FL-TMS.", parent=parent)
+            "QR-kode direkte fra IN-BASE. Kun basale apps, FL-UPDATE og FL-TMS.",
+            [Kolonne("Senest set", 130, lambda e: vis_tid(e.senest_set),
+                     sortering=lambda e: e.senest_set,
+                     tooltip=lambda e: "Venter på position (Find telefon)" if e.find_anmodet
+                     else "")], parent=parent)
 
         self.mangler_label = QLabel("")
         self.mangler_label.setObjectName("advarsel")
@@ -214,8 +223,8 @@ class MdmSide(_MdmListeSide):
         klargoer = lav_knap("Klargør (QR-kode)…")
         klargoer.clicked.connect(lambda: self._paa_valgt(self.klargoer))
         opdater = lav_knap("Opdater telefoner…")
-        opdater.setToolTip("Klargjorte telefoner henter den nyeste styrings-app fra denne pc – "
-                           "uden nulstilling.")
+        opdater.setToolTip("Udgiv en ny styrings-app til alle telefoner (de opdaterer selv), eller "
+                           "opdater ældre telefoner fra denne pc – uden nulstilling.")
         opdater.clicked.connect(self.opdater_telefoner)
         self._tilfoej_knapper(ny, klargoer, opdater, self._eksportknap())
         self._tilfoej_menu((("Ret oplysninger…", self.rediger),
@@ -225,6 +234,9 @@ class MdmSide(_MdmListeSide):
                             (None, None),
                             ("Slå firma-mail til…", lambda e: self.skift_mail(e, True)),
                             ("Slå firma-mail fra…", lambda e: self.skift_mail(e, False)),
+                            (None, None),
+                            ("Find telefon…", self.find_telefon),
+                            ("Lås skærmlåsen op…", self.laas_op),
                             (None, None),
                             ("Markér som udgået", self.udgaaet), (None, None),
                             ("Fjern fra listen (til Arkiv)…", self.arkiver)))
@@ -290,10 +302,36 @@ class MdmSide(_MdmListeSide):
             if udfoer(self, self.service.saet_mail, enhed, til) is not FEJL:
                 self.opdater()
 
+    def find_telefon(self, enhed) -> None:
+        """Beder telefonen om sin position (eller viser svaret, hvis den allerede er bedt)."""
+        if not enhed.find_anmodet and not enhed.position:
+            enhed = udfoer(self, self.service.find_telefon, enhed)
+            if enhed is FEJL:
+                return
+        FindTelefonDialog(self, self.service, enhed).exec()
+        self.opdater()
+
+    def laas_op(self, enhed) -> None:
+        """Glemt mønster: telefonen sætter skærmlåskoden som midlertidig PIN."""
+        pin = md.aendringskode(enhed.nulstillingskode, md.SKAERMLAAS)
+        if not enhed.laas_op_anmodet:
+            if not self._bekraeft(
+                    "Lås skærmlåsen op",
+                    f"Skal {enhed.navn}s skærmlås nulstilles til PIN-koden {pin}?\n\n"
+                    "Telefonen gør det, næste gang den tjekker ind – med det samme, når "
+                    "nogen tegner et forkert mønster eller sætter den i laderen eller en pc."):
+                return
+            enhed = udfoer(self, self.service.laas_op, enhed)
+            if enhed is FEJL:
+                return
+        LaasOpDialog(self, self.service, enhed, pin).exec()
+        self.opdater()
+
     def opdater_telefoner(self) -> None:
         apk = udfoer(self, self.service.opdaterings_apk)
         if apk is not FEJL:
-            OpdateringDialog(self, apk).exec()
+            OpdateringDialog(self, self.service, apk, self._sager).exec()
+            self.opdater()
 
     def udgaaet(self, enhed) -> None:
         if self._bekraeft("Markér som udgået", f"Markér {enhed.navn} som udgået?"):
@@ -316,7 +354,7 @@ class MdmArkivSide(_MdmListeSide):
             service, "Arkiv",
             "Telefoner fjernet fra Telefoner (MDM). De er ikke slettet – nulstillingskoder mm. "
             "er bevaret, og telefonerne kan gendannes.",
-            [Kolonne("Arkiveret", 130, lambda e: _tid(e.arkiveret),
+            [Kolonne("Arkiveret", 130, lambda e: vis_tid(e.arkiveret),
                      sortering=lambda e: e.arkiveret)], parent=parent)
         self._tilfoej_knapper(self._eksportknap())
         self._tilfoej_menu((("Vis nulstillingskode…", self.vis_kode),

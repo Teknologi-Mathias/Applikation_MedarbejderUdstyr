@@ -5,6 +5,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.UserHandle;
+import android.os.UserManager;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -22,6 +23,8 @@ public class AdminReceiver extends DeviceAdminReceiver {
      */
     @Override
     public void onPasswordChanged(Context context, Intent intent, UserHandle user) {
+        // Før første oplåsning (LaasOp) kan reglerne ikke læses – ændringen registreres ikke.
+        if (!context.getSystemService(UserManager.class).isUserUnlocked()) return;
         Politik politik = Politik.hent(context);
         if (politik == null) return;
         try {
@@ -31,5 +34,17 @@ public class AdminReceiver extends DeviceAdminReceiver {
         } catch (Exception ex) {
             // Registreringen er kun til information – telefonen virker uændret.
         }
+    }
+
+    /** Telefonen er låst op: Find telefon tjekker, om IN-BASE har bedt om positionen. */
+    @Override
+    public void onPasswordSucceeded(Context context, Intent intent, UserHandle user) {
+        Sporing.nu(context);
+    }
+
+    /** Forkert mønster – fx en finder eller tyv. Tjekker også. */
+    @Override
+    public void onPasswordFailed(Context context, Intent intent, UserHandle user) {
+        Sporing.nu(context);
     }
 }

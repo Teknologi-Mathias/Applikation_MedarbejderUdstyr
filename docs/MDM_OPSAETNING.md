@@ -49,6 +49,9 @@ klargøringen. Alternativt kan du angive et https-link. APK'en ændres ikke.
    2. `app/infrastructure/database/migrations/009_mdm_nulstillingskode.sql`
    3. `app/infrastructure/database/migrations/012_mdm_mail_og_signering.sql` (efter 010 og 011)
    4. `app/infrastructure/database/migrations/013_mdm_arkiv.sql` (Arkiv under Telefoner)
+   5. `app/infrastructure/database/migrations/024_mdm_find_telefon.sql` (Find telefon, efter 023)
+   6. `app/infrastructure/database/migrations/025_mdm_laas_op.sql` (Lås skærmlåsen op)
+   7. `app/infrastructure/database/migrations/026_mdm_app_opdatering.sql` (automatisk opdatering)
 
    007 skal være kørt først, og det er den allerede.
 2. Styrings-appen ligger færdigbygget i `assets/mdm/inbase-klargoering.apk` og følger med
@@ -108,7 +111,7 @@ klargøres igen én gang. Menuen kræver altid en kode fra IN-BASE:
 |---|---|---|
 | Ændringskode (fx *Slå firma-mail til…*) | kun den ene handling på den ene telefon | ja |
 | Supportkode (Chrome) | vise og skjule Chrome | ja |
-| Skærmlåskode (*Vis skærmlåskode…*, v6+) | skifte skærmlåsen godkendt og nulstille advarslen om ændringer | kun ved support |
+| Skærmlåskode (*Vis skærmlåskode…*, v6+) | skifte skærmlåsen godkendt og nulstille advarslen om ændringer. Er også den midlertidige PIN efter *Lås skærmlåsen op…* | kun ved support |
 | Nulstillingskode | alt, også opdatering og fabriksnulstilling | nej |
 
 **Firma-mail ved forfremmelse.**
@@ -127,19 +130,83 @@ nulstil telefonen og klargør den igen.
 gælder standardmønsteret måske ikke længere. Sæt det igen med skærmlåskoden: **Skift
 skærmlås (godkendt)** → tegn standardmønsteret. Advarslen nulstilles.
 
+**Glemt mønster (telefonen er låst).** Kræver IN-BASE Klargøring 8.0 og migrering 025.
+1. Vælg telefonen i IN-BASE → **Handling → Lås skærmlåsen op…**, og bekræft. IN-BASE viser
+   den midlertidige PIN-kode. Det er skærmlåskoden.
+2. Bed brugeren om at **tegne et forkert mønster** eller **sætte telefonen i laderen eller en
+   pc**. Så tjekker telefonen med det samme, ellers inden for en time. Telefonen skal have
+   mobildata eller et kendt Wi-Fi.
+3. Når IN-BASE viser "✔ låst op", låser brugeren op med PIN-koden.
+4. **IN-BASE indstillinger** → samme kode → **Skift skærmlås (godkendt)** → tegn
+   standardmønsteret.
+
+Telefonen kan kun låses op fra IN-BASE, når den har meldt **klar**. Det gør den efter én
+almindelig oplåsning, når den er opdateret til 8.0. IN-BASE advarer, hvis den ikke er klar,
+og admin-menuen på telefonen viser det også. Det virker også efter en genstart, hvor telefonen
+ikke er låst op endnu. Pc'en låser ikke telefonen op over USB, for det tillader Android ikke.
+Stikket får kun telefonen til at tjekke ind.
+
 **Anvend regler igen** i menuen lægger reglerne på med det samme. Det sker også automatisk,
 når telefonen genstarter.
 
-**Opdater styrings-appen uden nulstilling.**
-1. En administrator bygger den nye version (se "Byg styrings-appen") og udgiver den med
-   IN-BASE. Det kan ske fra en hvilken som helst pc.
-2. IN-BASE → Telefoner → **Opdater telefoner…**. Vinduet viser pc'ens adresse og skal være
+**Opdater styrings-appen – automatisk (telefoner med 8.0 eller nyere).** Kræver migrering 026.
+1. En administrator bygger den nye version (se "Byg styrings-appen"). Afprøv den på én
+   testtelefon (manuelt, herunder).
+2. IN-BASE → Telefoner → **Opdater telefoner…** → **Udgiv 8.x til alle telefoner**.
+3. Hver telefon ser den nye version ved sit næste tjek: når den låses op, sættes i laderen,
+   eller senest inden for en time. Den henter appen (ca. 2 MB, over Wi-Fi eller mobildata),
+   tjekker kontrolsummen og installerer den selv. Der skal ingen kode eller pc i nærheden.
+   Android installerer kun en app, der er signeret med jeres nøgle.
+4. Kolonnen **App** på Telefoner og vinduet **Opdater telefoner** viser, hvor mange der er
+   opdateret.
+
+Trafik: ca. 2 MB pr. telefon pr. udgivelse, dvs. ca. 200 MB for 100 telefoner. Udgiv derfor
+samlet, ikke hver build. Mislykkes en installation, prøver telefonen samme version igen efter
+6 timer.
+
+**Opdater styrings-appen – manuelt (ældre telefoner, én gang).** Telefoner med 7.0 eller
+ældre kan ikke opdatere sig selv. De skal have 8.0 én gang på denne måde, og derefter
+opdaterer de automatisk.
+1. IN-BASE → Telefoner → **Opdater telefoner…**. Vinduet viser pc'ens adresse og skal være
    åbent under opdateringen.
-3. På telefonen (samme Wi-Fi): **IN-BASE indstillinger** → nulstillingskoden → ret adressen
-   om nødvendigt → **Opdater appen fra IN-BASE**. Reglerne lægges på igen bagefter.
+2. På telefonen (samme Wi-Fi): **IN-BASE indstillinger** → nulstillingskoden eller
+   **masterkoden** → ret adressen om nødvendigt → **Opdater appen fra IN-BASE**. Reglerne
+   lægges på igen bagefter.
+
+Masterkoden virker på alle telefoner fra version 5. Det er altså én kode til alle, ikke en ny
+kode for hver telefon. Den står i `android/masterkode.txt` hos den, der bygger styrings-appen.
 
 Når reglerne lægges på igen, skjules kun systemapps. FL-UPDATE, FL-TMS og andre apps, der er
 installeret efter klargøringen, røres ikke.
+
+## Find en bortkommen telefon
+
+Kræver IN-BASE Klargøring 7.0 på telefonen (**Opdater telefoner**) og migrering 024.
+
+1. Vælg telefonen i IN-BASE → **Handling → Find telefon…**.
+2. Lad vinduet stå åbent, eller luk det og åbn det igen senere. Anmodningen står, til telefonen
+   svarer.
+3. Når positionen kommer, viser vinduet koordinater, nøjagtighed, tidspunkt og batteri. Vælg
+   **Åbn i kort** eller **Kopiér link**.
+
+Telefonen kan ikke kaldes fra IN-BASE. På mobildata deler den IP-adresse med operatørens
+andre kunder, og Googles push-tjeneste bruges ikke. Telefonen spørger derfor selv IN-BASE
+(Supabase), om dens position ønskes:
+
+| Hvornår | Svartid |
+|---|---|
+| Telefonen låses op, eller nogen tegner et forkert mønster | få sekunder (højst ét tjek pr. 10 min) |
+| Telefonen kommer på nettet igen eller genstartes | få sekunder |
+| Ellers én gang i timen | op til ca. 1 time, længere i dyb dvale |
+
+Hvert tjek er en lille forespørgsel på ca. 5 KB, i alt ca. 4 MB pr. telefon pr. måned.
+Supabase får kun en skrivning, når telefonen svarer, og "Senest set" højst én gang i timen.
+Kolonnen **Senest set** viser, at en telefon tjekker ind. Telefonens administrator-menu viser
+det også.
+
+Er placering slået fra, slår telefonen den til for at finde positionen og bagefter fra igen
+(Android 11+). Positionen kommer fra GPS, ellers fra mobilmasten eller Wi-Fi. Telefonen gemmer
+ingen historik, og IN-BASE gemmer kun det seneste svar.
 
 ## Fabriksnulstilling
 
@@ -196,18 +263,33 @@ Den virker kun på telefoner uden egen kode.
 - [ ] Skærmlåsen kan ikke sættes til *Ingen* eller *Stryg*. Ændres mønsteret i
   Indstillinger, viser administrator-menuen advarslen; *Skift skærmlås (godkendt)* nulstiller den.
 - [ ] En PDF åbnes fra Gmail og fra FL-TMS. Notér PDF-læserens pakkenavn.
+- [ ] **Find telefon** på en telefon med kun data og uden Wi-Fi: positionen kommer få sekunder
+  efter, at telefonen låses op, og inden for ca. 1 time, når den ligger låst og urørt. Kolonnen
+  **Senest set** opdateres. Gælder det også for en telefon, der er opdateret fra version 6
+  (ikke klargjort på ny), efter en genstart?
+- [ ] **Lås skærmlåsen op**: IN-BASE viser telefonen som klar efter én oplåsning. Skift mønsteret
+  uden kode, lås telefonen, og vælg *Lås skærmlåsen op…*. PIN-koden virker få sekunder efter et
+  forkert mønster. Gentag ved at sætte telefonen i en pc, og efter en genstart uden oplåsning.
+- [ ] **Automatisk opdatering**: byg en version med højere `versionCode`, og vælg *Udgiv til alle
+  telefoner*. En testtelefon med 8.0 installerer den selv inden for en time, også på kun
+  mobildata, og kolonnen **App** viser den nye version.
 
   Skjules en app, der skal bruges, så skriv pakkenavnet under **Ekstra apps** og klargør igen.
 
 ## Begrænsninger
 
-- Der er ingen fjernstyring. En telefon kan ikke låses eller spærres på afstand. Ændringer
+- De eneste fjernhandlinger er **Find telefon** og **Lås skærmlåsen op**, og telefonen svarer
+  først ved sit næste tjek (se "Find en bortkommen telefon"). En telefon kan ikke låses eller
+  spærres på afstand. Ændringer
   sker med en kode i telefonens menu (firma-mail, Chrome), og nye regler kommer med en ny
-  version af styrings-appen (**Opdater telefoner**). Telefoner med version 3 eller ældre skal
+  version af styrings-appen (**Opdater telefoner**). Fra 8.0 installerer telefonerne den selv. Telefoner med version 3 eller ældre skal
   nulstilles og klargøres igen én gang.
 - Skjulte Google-apps (fx Play-butikken) opdateres ikke længere automatisk. Android-
   systemopdateringer kommer stadig.
 - Skærmlåsen kan ikke spærres for ændring (Android har ingen regel til det) og kan ikke
   sættes af appen. Ændringer registreres kun på telefonen – IN-BASE får ikke besked.
 - Låsen fjernes kun ved at nulstille med nulstillingskoden (`*#*#46227#*#*`). Koden ligger kun
-  i IN-BASE og kan kun ses af administratorer.
+  i IN-BASE og kan kun ses af administratorer. Et glemt mønster erstattes med en PIN med
+  **Lås skærmlåsen op…** (v8+).
+- Nulstilles skærmlåsen før første oplåsning efter en genstart, registreres det som en ændring
+  uden kode. *Skift skærmlås (godkendt)* nulstiller advarslen.

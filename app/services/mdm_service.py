@@ -8,11 +8,17 @@ oprettelse, rettelser og når en telefon melder sig klargjort.
 Kun brugere med modulet Telefoner (og administratorer) bruger det – håndhæves af
 RLS i migrering 010; her gives blot en pæn besked først.
 
+Find telefon (migrering 024): telefonen kan ikke kaldes udefra, så IN-BASE gemmer en
+anmodning, som telefonen ser ved sit næste tjek, og den svarer med én position. Lås skærmlåsen
+op (migrering 025) går samme vej. Nye versioner af styrings-appen udgives til Supabase
+(migrering 026), og telefonerne henter dem selv.
+
 Telefoner, der fjernes fra listen, arkiveres (migrering 013) – nulstillingskoden
 bevares, og telefonen kan gendannes. Alle telefoner og deres koder kan eksporteres
 til en CSV-fil, der kan ligge offline.
 """
 import csv
+import json
 import logging
 import re
 import secrets
@@ -35,6 +41,7 @@ log = logging.getLogger(__name__)
 
 INGEN_ADGANG = "Du har ikke adgang til Telefoner. Kontakt en administrator."
 APK = stier.ASSETS_MAPPE / "mdm" / "inbase-klargoering.apk"
+APP_VERSION = APK.with_suffix(".json")   # Gradles output-metadata.json (byggescriptet)
 # Standardværdier i klargøringsvinduet. Wi-Fi og baggrund forudfyldes altid med dem
 # (kan ændres pr. klargøring); de øvrige felter huskes på denne pc.
 STANDARD = {
@@ -197,6 +204,47 @@ class MdmService:
         self.repo.opdater([{"id": enhed.id, "arkiveret": ""}])
         log.info("Telefon %s gendannet fra arkivet", enhed.navn)
 
+    ### ----- find telefon (migrering 024) ------------------------------------
+
+    def find_telefon(self, enhed: MdmEnhed) -> MdmEnhed:
+        """Beder telefonen om sin position. Den svarer ved sit næste tjek (skærmen tændes,
+        nettet kommer tilbage eller én gang i timen) – anmodningen står, til den svarer."""
+        self._kraev_admin()
+        if not enhed.nulstillingskode:
+            raise ValideringsFejl(f"{enhed.navn} er ikke klargjort og kan ikke findes.")
+        tid = nu()
+        self.repo.opdater([{"id": enhed.id, "find_anmodet": tid}])
+        log.info("Telefon %s: position anmodet", enhed.navn)
+        return MdmEnhed.fra_dict({**enhed.til_dict(), "find_anmodet": tid})
+
+    def annuller_find(self, enhed: MdmEnhed) -> None:
+        self._kraev_admin()
+        self.repo.opdater([{"id": enhed.id, "find_anmodet": ""}])
+
+    ### ----- lås skærmlåsen op (migrering 025) ------------------------------
+
+    def laas_op(self, enhed: MdmEnhed) -> MdmEnhed:
+        """Beder telefonen om at sætte skærmlåskoden som midlertidig PIN (glemt mønster). Den
+        svarer, når nogen tegner et forkert mønster, når den sættes i laderen/pc'en eller
+        senest inden for en time."""
+        self._kraev_admin()
+        if not enhed.nulstillingskode:
+            raise ValideringsFejl(f"{enhed.navn} har ingen nulstillingskode og kan ikke låses op "
+                                  "herfra.")
+        tid = nu()
+        self.repo.opdater([{"id": enhed.id, "laas_op_anmodet": tid}])
+        log.info("Telefon %s: oplåsning anmodet", enhed.navn)
+        return MdmEnhed.fra_dict({**enhed.til_dict(), "laas_op_anmodet": tid})
+
+    def annuller_laas_op(self, enhed: MdmEnhed) -> None:
+        self._kraev_admin()
+        self.repo.opdater([{"id": enhed.id, "laas_op_anmodet": ""}])
+
+    def hent(self, enhed: MdmEnhed) -> Optional[MdmEnhed]:
+        """Henter én telefon igen (fx for at se, om den har svaret på Find telefon)."""
+        self._kraev_admin()
+        return self.repo.hent(enhed.id)
+
     def slet(self, enhed: MdmEnhed) -> None:
         """Sletter permanent – kun fra arkivet."""
         self._kraev_admin()
@@ -243,6 +291,38 @@ class MdmService:
         if mangler:
             raise ValideringsFejl(mangler)
         return APK
+
+    ### ----- automatisk opdatering (migrering 026) ---------------------------
+
+    def app_paa_pc(self) -> dict:
+        """Versionen af styrings-appen i assets/mdm ({"version_kode", "version"} – {} hvis den
+        mangler). Byggescriptet lægger Gradles output-metadata.json ved siden af APK'en."""
+        try:
+            element = json.loads(APP_VERSION.read_text(encoding="utf-8"))["elements"][0]
+            return {"version_kode": int(element["versionCode"]),
+                    "version": str(element["versionName"])}
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            return {}
+
+    def app_udgivet(self) -> dict:
+        """Den version, telefonerne henter selv ({} = intet udgivet)."""
+        self._kraev_admin()
+        return self.repo.app_info()
+
+    def udgiv_app(self) -> dict:
+        """Udgiver styrings-appen fra assets/mdm. Telefonerne (8.0+) henter og installerer den
+        ved deres næste tjek – uden kode."""
+        self._kraev_admin()
+        mangler = self.klargoering_mangler()
+        if mangler:
+            raise ValideringsFejl(mangler)
+        version = self.app_paa_pc()
+        if not version:
+            raise ValideringsFejl(f"Versionen af styrings-appen kendes ikke ({APP_VERSION} mangler). "
+                                  "Byg den med scripts\\byg_klargoering_apk.ps1.")
+        info = self.repo.udgiv_app(version["version_kode"], version["version"], APK.read_bytes())
+        log.info("Styrings-app %s udgivet til telefonerne", version["version"])
+        return info
 
     def reservekode(self) -> str:
         """Kode til telefoner klargjort uden egen nulstillingskode (styrings-app v1)."""

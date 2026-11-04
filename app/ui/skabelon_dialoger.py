@@ -28,7 +28,7 @@ from app.domain import arbejdsspor as sp
 from app.domain import skabelon as sk
 from app.domain.behov import BETINGELSER
 from app.domain.onboarding import OnboardingForloeb
-from app.ui.hjaelpere import lav_knap, lav_kort
+from app.ui.hjaelpere import lav_knap, lav_kort, med_info
 
 
 def _gem_annuller(dialog):
@@ -128,9 +128,13 @@ class MailSkabelonDialog(QDialog):
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(10)
         form.addRow("Navn", self.navn_input)
-        form.addRow("Kategori", self.kategori_input)
-        form.addRow("Tone", self.tone_input)
-        form.addRow("Standardfrist", self.frist_input)
+        form.addRow(med_info("Kategori", "Hvilken rykker skabelonen er: første påmindelse, "
+                             "anden eller sidste rykker. Rykkerne foreslås i den rækkefølge."),
+                    self.kategori_input)
+        form.addRow(med_info("Tone", "Kun til at finde den rigtige skabelon – teksten skriver du "
+                             "selv herunder."), self.tone_input)
+        form.addRow(med_info("Standardfrist", "Den svarfrist, rykkeren foreslår (kan ændres, når "
+                             "rykkeren sendes)."), self.frist_input)
         form.addRow("", self.aktiv_input)
         form.addRow("Emne", self.emne_input)
 
@@ -272,9 +276,12 @@ class PaamindelseDialog(QDialog):
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(10)
         form.addRow("Navn", self.navn_input)
-        form.addRow("Regel", self.regel_input)
+        form.addRow(med_info("Regel", "Hvornår påmindelsen vises. X i reglen er antallet af dage "
+                             "herunder."), self.regel_input)
         form.addRow("X =", self.dage_input)
-        form.addRow("Gentag efter", self.gentag_input)
+        form.addRow(med_info("Gentag efter", "Påmindelsen vises igen efter så mange dage, hvis "
+                             "situationen ikke er løst. 'Kun én gang' viser den én gang."),
+                    self.gentag_input)
         form.addRow("", self.aktiv_input)
         form.addRow("Titel", self.titel_input)
         form.addRow("Tekst", self.tekst_input)
@@ -436,7 +443,8 @@ class SagSkabelonDialog(QDialog):
                 self.stilling_felter[stilling] = felt
                 raekke.addWidget(felt)
             raekke.addStretch()
-            form.addRow("Stillinger", raekke)
+            form.addRow(med_info("Stillinger", "Skabelonen foreslås ved oprettelse af en "
+                                 "onboarding for de valgte stillinger. Ingen valgt: alle."), raekke)
         form.addRow("", self.aktiv_input)
 
         version = self.skabelon.get("version", 1)

@@ -3,8 +3,10 @@
 Farver kommer altid fra temaet (objectName + stylesheet eller FARVER), så
 temaskift virker overalt.
 """
+from html import escape
+
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QColor, QCursor, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
@@ -15,6 +17,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QScrollArea,
+    QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -62,6 +66,33 @@ def lav_knap(tekst, variant=None, tooltip=None):
     if tooltip:
         knap.setToolTip(tooltip)
     return knap
+
+
+def lav_info(tekst: str) -> QToolButton:
+    """ⓘ ved et felt eller en knap: forklaringen vises ved hover og ved klik (så den også kan
+    læses uden at holde musen stille). Teksten ombrydes."""
+    knap = QToolButton()
+    knap.setObjectName("infoIkon")
+    knap.setText("ⓘ")
+    knap.setCursor(Qt.CursorShape.WhatsThisCursor)
+    knap.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    html = f"<p style='white-space:normal'>{escape(tekst)}</p>"   # rich text ombrydes
+    knap.setToolTip(html)
+    knap.clicked.connect(lambda: QToolTip.showText(QCursor.pos(), html, knap))
+    return knap
+
+
+def med_info(widget_eller_tekst, tekst: str) -> QWidget:
+    """Etiket eller widget (fx et afkrydsningsfelt) med ⓘ til højre – til QFormLayout.addRow."""
+    raekke = QWidget()
+    lag = QHBoxLayout(raekke)
+    lag.setContentsMargins(0, 0, 0, 0)
+    lag.setSpacing(4)
+    lag.addWidget(QLabel(widget_eller_tekst) if isinstance(widget_eller_tekst, str)
+                  else widget_eller_tekst)
+    lag.addWidget(lav_info(tekst))
+    lag.addStretch()
+    return raekke
 
 
 def lav_kort(skygge=True):

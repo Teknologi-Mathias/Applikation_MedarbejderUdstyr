@@ -31,7 +31,7 @@ from app.domain import opdatering as op
 from app.infrastructure import stier
 from app.ui.baggrund import koer_i_baggrund
 from app.ui.fejl import FEJL, udfoer, vis_fejl
-from app.ui.hjaelpere import lav_knap, lav_kort, lav_sidehoved, vis_dato
+from app.ui.hjaelpere import lav_info, lav_knap, lav_kort, lav_sidehoved, vis_dato
 
 _KOLONNER = ("Version", "Kanal", "Andel", "Status", "Størrelse", "Udgivet", "Af", "Commit", "Noter")
 
@@ -168,6 +168,9 @@ class OpdateringPanel(QWidget):
         self.fremdrift.setRange(0, 0)                  # upload: ukendt varighed
         raekke = QHBoxLayout()
         raekke.addWidget(self.tvungen_input)
+        raekke.addWidget(lav_info(
+            "Påkrævet: brugerne kan ikke arbejde videre, før de har opdateret. Brug det kun ved "
+            "fejlrettelser og ændringer i databasen – ellers kan de vælge at opdatere senere."))
         raekke.addStretch()
         raekke.addWidget(self.udgiv_knap)
         for widget in (self.pakke_label, self.advarsel_label, self.noter_input):
@@ -195,6 +198,11 @@ class OpdateringPanel(QWidget):
         ryd.clicked.connect(self._ryd)
         for knap in (frigiv, minimum, ryd):
             knapper.addWidget(knap)
+        knapper.addWidget(lav_info(
+            "Frigiv til alle: versionen går fra pilotbrugerne til alle. Kræv som mindste "
+            "version: ældre klienter skal opdatere, før de kan arbejde videre. Træk tilbage: "
+            "klienterne går selv tilbage til den nyeste gyldige version. Ryd gamle installere: "
+            "sletter filer, der ikke længere bruges, så Storage ikke fyldes op."))
         knapper.addStretch()
         knapper.addWidget(tilbage)
         lag.addLayout(knapper)

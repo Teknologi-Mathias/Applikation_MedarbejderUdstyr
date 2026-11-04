@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Find telefon: én position, når IN-BASE beder om det (Sporing). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <!-- Eneste ikon på startskærmen: "IN-BASE indstillinger" (administrator-menuen). -->
     <application
@@ -17,8 +21,11 @@
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
+        <!-- directBootAware: AdminReceiver, SporingJob og OpstartReceiver virker også før første
+             oplåsning efter en genstart (Lås skærmlåsen op – glemt mønster). -->
         <receiver
             android:name=".AdminReceiver"
+            android:directBootAware="true"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
@@ -29,6 +36,9 @@
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
                 <!-- Skærmlåsen er sat/ændret: indstillingen låses (AdminReceiver). -->
                 <action android:name="android.app.action.ACTION_PASSWORD_CHANGED" />
+                <!-- Telefonen låses op / forkert mønster: Find telefon tjekker (Sporing). -->
+                <action android:name="android.app.action.ACTION_PASSWORD_SUCCEEDED" />
+                <action android:name="android.app.action.ACTION_PASSWORD_FAILED" />
             </intent-filter>
         </receiver>
 
@@ -79,12 +89,21 @@
         <!-- Lægger de gemte regler på igen ved opstart og efter en opdatering af appen. -->
         <receiver
             android:name=".OpstartReceiver"
+            android:directBootAware="true"
             android:exported="false">
             <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- Find telefon: spørger IN-BASE (Supabase), om positionen ønskes – se Sporing. -->
+        <service
+            android:name=".SporingJob"
+            android:directBootAware="true"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <receiver
             android:name=".HemmeligKodeReceiver"

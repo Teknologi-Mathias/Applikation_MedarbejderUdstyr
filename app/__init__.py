@@ -7,14 +7,14 @@ import re
 # (installer/IN-BASE.iss via scripts/build_windows.ps1) og buildrapporten.
 ### Skriv: ( .\scripts\build_windows.ps1  )
 
-__version__ = "0.9.8"
+__version__ = "0.9.9"
 
 VERSION = f"V{__version__}"   # visning i programmet, fx "V0.7.1"
 
 # Den databaseskemaversion, klienten kræver (schema_migrations, migrering 019).
 # Hæves, når klienten afhænger af en ny migrering – ellers forsvinder nye felter
 # lydløst i en ældre database. Se docs/RELEASE.md.
-KRAEVET_SKEMA = 23
+KRAEVET_SKEMA = 26
 
 APP_NAVN = "IN-BASE"
 APP_SLOGAN = "Administrationsværktøj, prototype."
