@@ -2,6 +2,7 @@ package dk.instore.inbase.klargoering;
 
 import android.app.Activity;
 import android.app.admin.DevicePolicyManager;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,17 +12,28 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Sidste trin i opsætningsguiden. Viser fremdriften, mens Klargoering arbejder.
  * Returnerer ALTID RESULT_OK – ellers afbryder Android opsætningen og nulstiller telefonen.
  */
 public class KlargoeringActivity extends Activity {
+    private static final String FAERDIG = "klargoering_faerdig";
+    /** Android kan starte aktiviteten to gange (ADMIN_POLICY_COMPLIANCE og PROVISIONING_SUCCESSFUL). */
+    private static final AtomicBoolean koerer = new AtomicBoolean();
     private TextView log;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        SharedPreferences prefs = getSharedPreferences(AdminActivity.PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean(FAERDIG, false) || !koerer.compareAndSet(false, true)) {
+            setResult(RESULT_OK);
+            finish();
+            return;
+        }
         LinearLayout rod = new LinearLayout(this);
         rod.setOrientation(LinearLayout.VERTICAL);
         rod.setPadding(48, 96, 48, 48);
@@ -43,6 +55,7 @@ public class KlargoeringActivity extends Activity {
         Klargoering klargoering = new Klargoering(this, ekstra, this::skriv);
         new Thread(() -> {
             boolean ok = klargoering.koer();
+            prefs.edit().putBoolean(FAERDIG, true).commit();
             skriv(ok ? "\nFærdig. Telefonen er klar til drift." :
                     "\nFærdig med fejl – se ovenfor. Telefonen er låst, men tjek den i IN-BASE.");
             ui.postDelayed(() -> {

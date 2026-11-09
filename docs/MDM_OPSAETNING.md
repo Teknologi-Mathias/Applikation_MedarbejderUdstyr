@@ -299,3 +299,6 @@ Den virker kun på telefoner uden egen kode.
   **Lås skærmlåsen op…** (v8+).
 - Nulstilles skærmlåsen før første oplåsning efter en genstart, registreres det som en ændring
   uden kode. *Skift skærmlås (godkendt)* nulstiller advarslen.
+- Android 10-11 (fx Motorola E20) kræver styrings-app 8.2+. Ældre versioner bliver Device Owner,
+  men klargøringen (regler, FL-UPDATE, baggrund, tilbagemelding) starter aldrig. Den slags
+  telefoner skal fabriksnulstilles og klargøres igen.

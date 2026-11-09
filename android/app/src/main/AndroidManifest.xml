@@ -53,13 +53,20 @@
             </intent-filter>
         </activity>
 
-        <!-- Kører til sidst i opsætningsguiden: her klargøres telefonen. -->
+        <!-- Kører til sidst i opsætningsguiden: her klargøres telefonen.
+             ADMIN_POLICY_COMPLIANCE: Android 12+. PROVISIONING_SUCCESSFUL: Android 10-11
+             (fx Motorola E20), hvor QR-klargøringen ikke starter ADMIN_POLICY_COMPLIANCE.
+             Kommer begge, klargøres kun én gang (KlargoeringActivity). -->
         <activity
             android:name=".KlargoeringActivity"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <intent-filter>
                 <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.app.action.PROVISIONING_SUCCESSFUL" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
