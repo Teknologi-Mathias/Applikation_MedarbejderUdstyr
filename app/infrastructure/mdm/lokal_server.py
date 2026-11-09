@@ -4,6 +4,7 @@ Telefonen (på samme Wi-Fi) henter herfra:
   GET  /inbase-klargoering.apk   styrings-appen (kontrolsummen står i QR-koden)
   GET  /baggrund                 baggrundsbilledet (valgfrit)
   GET  /fl-update.apk            FL-UPDATE, når den er valgt som fil på pc'en (valgfrit)
+  GET  /ekstra-1.apk, -2 …       ekstra apps, der installeres under klargøringen (valgfrit)
   POST /api/klargjort            telefonens rapport, når den er færdig
                                  (kræver headeren X-Inbase-Token = engangskoden)
 
@@ -18,13 +19,14 @@ import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from app.infrastructure.mdm.qr import APK_STI
 
 log = logging.getLogger(__name__)
 
 MAKS_RAPPORT = 64 * 1024
+EKSTRA_APK_STI = "/ekstra-{}.apk"      # nr. 1, 2 … – telefonen får kun antallet i QR-koden
 
 
 def lokal_ip() -> str:
@@ -68,7 +70,7 @@ def netvaerk() -> list[tuple[str, str]]:
 class KlargoeringsServer:
     def __init__(self, apk: Path, token: str, paa_rapport: Callable[[dict], None],
                  baggrund: Optional[Path] = None, fl_update: Optional[Path] = None,
-                 port: int = 8765, vaert: str = "",
+                 ekstra_apk: Sequence[Path] = (), port: int = 8765, vaert: str = "",
                  paa_hentning: Optional[Callable[[str], None]] = None):
         """paa_rapport og paa_hentning (stien til en fil, telefonen har hentet) kaldes fra
         serverens tråd – brugerfladen skal selv skifte tråd."""
@@ -78,6 +80,7 @@ class KlargoeringsServer:
         self.paa_hentning = paa_hentning
         self.baggrund = baggrund
         self.fl_update = fl_update
+        self.filer = {EKSTRA_APK_STI.format(nr): fil for nr, fil in enumerate(ekstra_apk, 1)}
         self._port = port
         self._vaert = vaert
         self._server = None
@@ -132,7 +135,8 @@ class KlargoeringsServer:
                     tekst = "IN-BASE klargøringsserver kører.\n" + "\n".join(
                         f"{sti}  {'findes' if fil and fil.is_file() else 'MANGLER'}"
                         for sti, fil in ((APK_STI, server.apk), ("/baggrund", server.baggrund),
-                                         ("/fl-update.apk", server.fl_update)))
+                                         ("/fl-update.apk", server.fl_update),
+                                         *server.filer.items()))
                     data = tekst.encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -143,6 +147,8 @@ class KlargoeringsServer:
                     self._fil(server.apk, "application/vnd.android.package-archive")
                 elif self.path == "/fl-update.apk":
                     self._fil(server.fl_update, "application/vnd.android.package-archive")
+                elif self.path in server.filer:
+                    self._fil(server.filer[self.path], "application/vnd.android.package-archive")
                 elif self.path == "/baggrund":
                     fil = server.baggrund
                     self._fil(fil, (mimetypes.guess_type(fil.name)[0] if fil else None)

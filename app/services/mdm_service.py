@@ -50,10 +50,11 @@ STANDARD = {
     "baggrund": str(stier.ASSETS_MAPPE / "INSTORE_LOCK.png"),
     "kontakt": "Kontakt din IT-administrator (Mathias – +45 8764 6576)",
 }
-HUSKEDE = ("wifi_type", "fl_kilde", "fl_fil", "fl_link", "ekstra_apps", "kontakt")
+HUSKEDE = ("wifi_type", "fl_kilde", "fl_fil", "fl_link", "ekstra_apps", "ekstra_apk", "kontakt")
 INDSTILLINGER = HUSKEDE + ("wifi_ssid", "baggrund")
 FL_FIL, FL_LINK = "fil", "link"        # hvor FL-UPDATE kommer fra
 MAKS_APK = 200 * 1024 * 1024
+MAKS_EKSTRA_APK = 10
 PAKKENAVN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
 # Sti på klargøringsserveren, når FL-UPDATE er valgt som fil på pc'en.
 FL_UPDATE_STI = "/fl-update.apk"
@@ -87,6 +88,7 @@ class Klargoering:
     apk: Path = field(default=APK)
     # Problemer, der ikke stopper klargøringen (fx manglende FL-UPDATE) – vises ved QR-koden.
     advarsler: list[str] = field(default_factory=list)
+    ekstra_apk: list[Path] = field(default_factory=list)   # apps, der installeres fra pc'en
 
     @property
     def fl_update_fil(self) -> Optional[Path]:
@@ -106,6 +108,9 @@ class Klargoering:
             "nulstillingskode": self.nulstillingskode, "kontakt": self.kontakt,
             "tilladte": ",".join(p.strip() for p in self.ekstra_apps.split(",") if p.strip()),
         }
+        if self.ekstra_apk:
+            # Kun antallet – telefonen henter /ekstra-1.apk, /ekstra-2.apk … fra pc'en.
+            ekstra["ekstra_apk"] = str(len(self.ekstra_apk))
         return byg_qr_payload(server, apk_kontrolsum(self.apk), ekstra, self.wifi_ssid,
                               self.wifi_kode, self.wifi_type)
 
@@ -341,7 +346,7 @@ class MdmService:
 
     def ny_klargoering(self, enhed: MdmEnhed, indstillinger: dict) -> Klargoering:
         """indstillinger: wifi_ssid, wifi_kode, wifi_type, fl_kilde (fil/link), fl_fil, fl_link,
-        baggrund, ekstra_apps, kontakt, mail.
+        baggrund, ekstra_apps, ekstra_apk (APK-filer på pc'en, én pr. linje), kontakt, mail.
 
         Kun manglende adgang/styrings-app stopper klargøringen. Fejl i FL-UPDATE, baggrund og
         ekstra apps bliver til advarsler – så QR-koden altid kan vises og telefonen testes."""
@@ -364,6 +369,8 @@ class MdmService:
             advarsler.append(
                 f"\"{', '.join(ugyldige)}\" er ikke et pakkenavn og springes over. Ekstra apps "
                 "angives som pakkenavne, fx com.google.android.apps.photos (Google Fotos).")
+        ekstra_apk = self._ekstra_apk(v["ekstra_apk"], advarsler)
+        v["ekstra_apk"] = "\n".join(str(f) for f in ekstra_apk)
         baggrund = v["baggrund"]
         if baggrund and not Path(baggrund).is_file():
             advarsler.append(f"Baggrundsbilledet findes ikke og springes over: {baggrund}")
@@ -382,7 +389,23 @@ class MdmService:
                            str(indstillinger.get("wifi_kode") or ""), v["wifi_type"] or "WPA",
                            fl, baggrund, ",".join(p for p in apps if p not in ugyldige),
                            bool(indstillinger.get("mail")), v["kontakt"], kode,
-                           advarsler=advarsler)
+                           ekstra_apk=ekstra_apk, advarsler=advarsler)
+
+    @staticmethod
+    def _ekstra_apk(tekst: str, advarsler: list[str]) -> list[Path]:
+        """De ekstra APK-filer, der findes og er APK'er. Resten bliver til advarsler."""
+        filer = []
+        for linje in dict.fromkeys(t.strip() for t in tekst.splitlines() if t.strip()):
+            fil = Path(linje)
+            if not fil.is_file():
+                advarsler.append(f"Ekstra app findes ikke og springes over: {fil}")
+            elif not er_apk(fil.read_bytes()[:4]):
+                advarsler.append(f"Ekstra app er ikke en Android-app (APK) og springes over: {fil}")
+            elif len(filer) == MAKS_EKSTRA_APK:
+                advarsler.append(f"Højst {MAKS_EKSTRA_APK} ekstra apps – {fil.name} springes over.")
+            else:
+                filer.append(fil)
+        return filer
 
     def _fl_update(self, v: dict) -> str:
         """Sti til FL-UPDATE på pc'en (linket hentes først) – ValideringsFejl ved problemer."""

@@ -37,6 +37,7 @@ nulstilling (se "Ændringer på en klargjort telefon").
 | Skærmlås | Kræves altid og kan ikke fjernes (v6+). Standardmønsteret tegnes ved klargøringen. Android kan ikke forhindre, at mønsteret ændres – ændringer uden skærmlåskode registreres og vises øverst i administrator-menuen. |
 | PDF-læser | Telefonens egen PDF-læser skjules aldrig (v6+), så briefs fra Gmail og FL-TMS kan åbnes. Findes der ingen, melder klargøringen det som fejl. |
 | FL-UPDATE | Installeres automatisk og kan ikke afinstalleres. |
+| Installér apps (valgfrit) | Op til 10 andre APK-filer fra pc'en installeres på samme måde og kan ikke afinstalleres (v8.1+). |
 | Firma-mail (valgfrit) | Gmail-appen bliver synlig, og der kan tilføjes en IMAP-konto. Google-konti er stadig spærret. |
 
 FL-UPDATE vælges som APK-fil på pc'en. Telefonen henter den så fra IN-BASE under
@@ -83,6 +84,11 @@ Uden nøglen nægter Gradle at bygge.
    - **Wi-Fi**: det netværk, pc'en er på. Telefon og pc skal være på samme net.
    - **FL-UPDATE** (påkrævet): vælg FL-UPDATE.apk på pc'en, eller angiv et https-link.
    - **Baggrundsbillede** (valgfrit): et JPG- eller PNG-billede på pc'en.
+   - **Installér apps** (valgfrit): tryk **+ Tilføj APK…** for hver app, der skal installeres
+     ud over FL-UPDATE. **Fjern** tager den af listen igen. Kræver IN-BASE Klargøring 8.1.
+     Telefonen installerer dem efter FL-UPDATE. Fejler én app, installeres de andre alligevel,
+     og IN-BASE viser bagefter, hvor mange der kom på. Er en app i forvejen på telefonen, så
+     brug **Ekstra apps** (pakkenavnet) i stedet.
 
    - **Firma-mail (IMAP)**: sæt flueben for fastansatte med firma-mail. Kan også slås til
      senere uden nulstilling.

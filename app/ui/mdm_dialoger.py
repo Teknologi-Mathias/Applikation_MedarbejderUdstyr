@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from app.domain import mdm_enhed as md
@@ -222,6 +223,18 @@ class KlargoeringDialog(QDialog):
         self.ekstra_apps.setToolTip("Apps, der skal kunne ses ud over Telefon, SMS, Kontakter, "
                                     "Kamera, Galleri, Ur, Lommeregner og Indstillinger "
                                     "(fx com.android.chrome).")
+        # Ekstra APK'er: én række pr. fil (+ tilføjer, Fjern fjerner).
+        self._ekstra_apk: list[QLineEdit] = []
+        self.ekstra_apk_raekker = QVBoxLayout()
+        self.ekstra_apk_raekker.setContentsMargins(0, 0, 0, 0)
+        tilfoej_apk = QPushButton("+ Tilføj APK…")
+        tilfoej_apk.clicked.connect(self._vaelg_ekstra_apk)
+        ekstra_apk = QVBoxLayout()
+        ekstra_apk.setContentsMargins(0, 0, 0, 0)
+        ekstra_apk.addLayout(self.ekstra_apk_raekker)
+        ekstra_apk.addWidget(tilfoej_apk, 0, Qt.AlignmentFlag.AlignLeft)
+        for fil in husk["ekstra_apk"].splitlines():
+            self._tilfoej_ekstra_apk(fil)
         self.kontakt = QLineEdit(husk["kontakt"])
         self.kontakt.setMaxLength(120)
         self.kontakt.setToolTip("Vises på telefonens låseskærm og når brugeren rammer en spærret "
@@ -245,6 +258,9 @@ class KlargoeringDialog(QDialog):
                              "FL-TMS. Filen ændres ikke."), kilde_raekke)
         form.addRow("", fl_raekke)
         form.addRow("Baggrundsbillede", baggrund_raekke)
+        form.addRow(med_info("Installér apps", "Andre APK-filer på pc'en, som telefonen henter og "
+                             "installerer under klargøringen, ligesom FL-UPDATE. De kan ikke "
+                             "afinstalleres bagefter. Filerne ændres ikke."), ekstra_apk)
         form.addRow(med_info("Ekstra apps", "Pakkenavne på apps, der ellers bliver skjult, adskilt "
                              "med komma, fx com.google.android.apps.photos. Kun apps, der "
                              "allerede findes på telefonen."), self.ekstra_apps)
@@ -336,12 +352,41 @@ class KlargoeringDialog(QDialog):
         if fil:
             felt.setText(fil)
 
+    def _vaelg_ekstra_apk(self):
+        filer, _ = QFileDialog.getOpenFileNames(self, "Vælg apps til telefonen", "",
+                                                "Android-app (*.apk)")
+        valgte = {f.text() for f in self._ekstra_apk}
+        for fil in filer:
+            if fil not in valgte:
+                self._tilfoej_ekstra_apk(fil)
+
+    def _tilfoej_ekstra_apk(self, fil: str):
+        if not fil.strip():
+            return
+        felt = QLineEdit(fil)
+        felt.setReadOnly(True)
+        fjern = QPushButton("Fjern")
+        raekke = QWidget()
+        lag = QHBoxLayout(raekke)
+        lag.setContentsMargins(0, 0, 0, 0)
+        lag.addWidget(felt, 1)
+        lag.addWidget(fjern)
+
+        def fjern_raekke():
+            self._ekstra_apk.remove(felt)
+            raekke.deleteLater()
+
+        fjern.clicked.connect(fjern_raekke)
+        self._ekstra_apk.append(felt)
+        self.ekstra_apk_raekker.addWidget(raekke)
+
     def indstillinger(self) -> dict:
         return {"wifi_ssid": self.ssid.text(), "wifi_kode": self.kode.text(),
                 "wifi_type": self.sikkerhed.currentText(),
                 "fl_kilde": "fil" if self.fl_som_fil.isChecked() else "link",
                 "fl_fil": self.fl_fil.text(), "fl_link": self.fl_link.text(),
                 "baggrund": self.baggrund.text(), "ekstra_apps": self.ekstra_apps.text(),
+                "ekstra_apk": "\n".join(f.text() for f in self._ekstra_apk),
                 "kontakt": self.kontakt.text(), "mail": self.mail.isChecked()}
 
     def _vis_qr(self):
@@ -356,7 +401,7 @@ class KlargoeringDialog(QDialog):
             k = self.klargoering
             self.server = KlargoeringsServer(k.apk, k.token, self._bro.rapport.emit,
                                              baggrund=Path(k.baggrund) if k.baggrund else None,
-                                             fl_update=k.fl_update_fil,
+                                             fl_update=k.fl_update_fil, ekstra_apk=k.ekstra_apk,
                                              vaert=self.netkort.currentData(),
                                              paa_hentning=self._bro.hentet.emit)
             url = self.server.start()
@@ -396,6 +441,8 @@ class KlargoeringDialog(QDialog):
         tekst = {"/inbase-klargoering.apk": "Telefonen har hentet styrings-appen …",
                  "/baggrund": "Telefonen har hentet baggrundsbilledet …",
                  "/fl-update.apk": "Telefonen har hentet FL-UPDATE …"}.get(sti)
+        if sti.startswith("/ekstra-"):
+            tekst = f"Telefonen har hentet ekstra app {sti[8:].removesuffix('.apk')} …"
         if tekst and not self.klargjort:
             self.status.setText(self.status.text() + "\n✔ " + tekst)
 
@@ -411,6 +458,15 @@ class KlargoeringDialog(QDialog):
             tekst += f"\nFL-UPDATE installeret ({rapport['fl_update']})."
         else:
             tekst += "\n\n⚠ FL-UPDATE blev IKKE installeret – se fejlen nedenfor og klargør igen."
+        if self.klargoering.ekstra_apk:
+            installeret = rapport.get("ekstra_apk")
+            if installeret is None:
+                tekst += ("\n\n⚠ Ekstra apps blev ikke installeret – styrings-appen er for gammel "
+                          "(kræver IN-BASE Klargøring 8.1).")
+            else:
+                tekst += (f"\nEkstra apps installeret: {len(installeret)} af "
+                          f"{len(self.klargoering.ekstra_apk)}"
+                          + (f" ({', '.join(map(str, installeret))})." if installeret else "."))
         if fejl:
             tekst += "\n\nTelefonen meldte fejl:\n• " + "\n• ".join(str(f) for f in fejl)
         self.status.setText(tekst)

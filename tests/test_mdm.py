@@ -45,13 +45,18 @@ class ServerTest(unittest.TestCase):
     def test_apk_hentes_og_kun_rigtig_token_kan_melde_tilbage(self):
         modtaget = []
         server = KlargoeringsServer(Path(__file__), "hemmelig", modtaget.append, port=0,
-                                    vaert="127.0.0.1", fl_update=MIGRERING_008)
+                                    vaert="127.0.0.1", fl_update=MIGRERING_008,
+                                    ekstra_apk=[MIGRERING_025])
         url = server.start()
         try:
             with urllib.request.urlopen(url + "/inbase-klargoering.apk", timeout=5) as svar:
                 self.assertEqual(svar.read(), Path(__file__).read_bytes())
             with urllib.request.urlopen(url + "/fl-update.apk", timeout=5) as svar:
                 self.assertEqual(svar.read(), MIGRERING_008.read_bytes())
+            with urllib.request.urlopen(url + "/ekstra-1.apk", timeout=5) as svar:
+                self.assertEqual(svar.read(), MIGRERING_025.read_bytes())
+            with self.assertRaises(urllib.error.HTTPError):
+                urllib.request.urlopen(url + "/ekstra-2.apk", timeout=5)
 
             def post(token):
                 anm = urllib.request.Request(url + "/api/klargjort", data=b'{"enhed_id": "x"}',
@@ -200,6 +205,27 @@ class MdmServiceTest(TjenesteTest):
         self.assertEqual(md.supportkode("12345678"), "483606")
         self.assertNotEqual(md.supportkode(k.nulstillingskode), k.nulstillingskode[:6])
         self.assertEqual(ekstra["nulstillingskode"], k.nulstillingskode)
+
+
+    @unittest.skipUnless(Path("assets/mdm/inbase-klargoering.apk").is_file(), "APK ikke bygget")
+    def test_ekstra_apk_valideres_huskes_og_kun_antallet_er_i_qr_koden(self):
+        enhed = self.s.opret({"navn": "ISM589"})
+        apps = [self.central / "a.apk", self.central / "b.apk"]
+        for fil in apps:
+            fil.write_bytes(APK_DATA)
+        ikke_apk = self.central / "tekst.apk"
+        ikke_apk.write_bytes(b"hej")
+        k = self.s.ny_klargoering(enhed, {"ekstra_apk": "\n".join(
+            [str(apps[0]), str(apps[1]), str(apps[0]), str(ikke_apk), "C:/findes/ikke.apk"])})
+        self.assertEqual(k.ekstra_apk, apps, "dubletter og fejl springes over")
+        self.assertEqual(len(k.advarsler), 3, "ikke-APK, manglende fil og FL-UPDATE")
+        ekstra = json.loads(k.qr_tekst("http://pc:8765"))[E + "PROVISIONING_ADMIN_EXTRAS_BUNDLE"]
+        self.assertEqual(ekstra["ekstra_apk"], "2")
+        self.assertEqual(self.s.huskede_indstillinger()["ekstra_apk"].splitlines(),
+                         [str(f) for f in apps])
+        uden = self.s.ny_klargoering(enhed, {})
+        ekstra = json.loads(uden.qr_tekst("http://pc:8765"))[E + "PROVISIONING_ADMIN_EXTRAS_BUNDLE"]
+        self.assertNotIn("ekstra_apk", ekstra)
 
 
 class AendringskodeTest(unittest.TestCase):

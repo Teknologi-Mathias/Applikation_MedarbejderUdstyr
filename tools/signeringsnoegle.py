@@ -80,8 +80,12 @@ def hent(keytool: str) -> None:
     (SIGNERING / NOEGLEFIL).write_bytes(base64.b64decode(noegle["keystore_base64"]))
     (SIGNERING / "signering.properties").write_text(
         f"storeFile={NOEGLEFIL}\nstorePassword={noegle['store_password']}\n"
-        f"keyAlias={noegle['key_alias']}\nkeyPassword={noegle['store_password']}\n",
+        f"keyAlias={noegle['key_alias']}\nkeyPassword={noegle['store_password']}\n"
+        f"supabaseUrl={konfig.url}\nsupabaseNoegle={konfig.anon_noegle}\n",
         encoding="utf-8")
+    if not konfig.er_konfigureret:
+        raise Stop("Supabase-adressen eller den offentlige nøgle mangler i IN-BASE's "
+                   "konfiguration (INBASE_SUPABASE_URL / INBASE_SUPABASE_ANON_KEY).")
     if noegle.get("reserve_code"):
         RESERVEKODE.write_text(noegle["reserve_code"], encoding="utf-8")
     print("Signeringsnøglen er hentet.")

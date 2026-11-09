@@ -26,6 +26,7 @@ import java.util.function.Consumer;
  *   token          engangskode, så kun den rigtige telefon kan melde tilbage
  *   enhed_id, navn telefonens id og ERP-enhedsnavn (fx ISM589)
  *   fl_update_url  hvor FL-UPDATE.apk hentes (mx.fl-it.net)
+ *   ekstra_apk     antal ekstra apps, der hentes fra <server>/ekstra-1.apk, -2 … (valgfri, 8.1+)
  *   baggrund       "1" = hent baggrundsbillede fra IN-BASE
  *   nulstillingskode  kode til administrator-menuen (*#*#46227#*#*) – fabriksnulstilling
  *   mail           "1" = firma-mail: Gmail-appen synlig, IMAP-konti tilladt, Google-konti spærret
@@ -85,6 +86,7 @@ class Klargoering {
         if ("1".equals(e("baggrund"))) trin("Baggrundsbillede", this::baggrund);
         trin("Skjuler apps, der ikke skal bruges", this::skjulApps);
         trin("Henter og installerer FL-UPDATE", this::flUpdate);
+        if (!e("ekstra_apk").isEmpty()) trin("Henter og installerer ekstra apps", this::ekstraApps);
         trin("Låser indstillinger", () -> politik.begraensninger(ctx));
         trin("Find telefon og oplåsning", () -> Sporing.forbered(ctx, politik));
         trin("Melder tilbage til IN-BASE", this::meldTilbage);
@@ -155,6 +157,28 @@ class Klargoering {
         rapport.put("fl_update", pakke);
         log.accept("  installeret (" + pakke + ")");
         apk.delete();
+    }
+
+    /** Hver app for sig: fejler én, installeres resten alligevel. */
+    private void ekstraApps() throws Exception {
+        int antal = Integer.parseInt(e("ekstra_apk"));
+        JSONArray installeret = new JSONArray();
+        rapport.put("ekstra_apk", installeret);
+        for (int nr = 1; nr <= antal; nr++) {
+            File apk = new File(ctx.getCacheDir(), "ekstra-" + nr + ".apk");
+            try {
+                Installer.hent(e("server") + "/ekstra-" + nr + ".apk", apk);
+                String pakke = Installer.installer(ctx, apk);
+                if (!pakke.isEmpty()) dpm.setUninstallBlocked(admin, pakke, true);
+                installeret.put(pakke);
+                log.accept("  " + nr + "/" + antal + " installeret (" + pakke + ")");
+            } catch (Exception ex) {
+                fejl.put("Ekstra app " + nr + ": " + ex.getMessage());
+                log.accept("  " + nr + "/" + antal + " FEJL – " + ex.getMessage());
+            } finally {
+                apk.delete();
+            }
+        }
     }
 
     private void meldTilbage() throws Exception {
