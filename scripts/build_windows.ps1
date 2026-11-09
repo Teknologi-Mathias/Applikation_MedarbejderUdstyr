@@ -150,7 +150,7 @@ try {
     try { $Version = "$(Invoke-Native { & $Python -c 'import app; app.version_tupel(); print(app.__version__)' })".Trim() }
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0 -or $Version -notmatch '^\d+\.\d+\.\d+$') {
-        Stop-Build "Versionsnummeret i app\__init__.py er ugyldigt ('$Version'). Brug MAJOR.MINOR.PATCH, fx 1.0.0."
+        Stop-Build "Versionsnummeret i app\__init__.py er ugyldigt ('$Version'). Brug MAJOR.MINOR.PATCH (tre tal adskilt af punktum)."
     }
     $InstallerNavn = "IN-BASE-Setup-v$Version.exe"
     $Installer = Join-Path $ReleaseMappe $InstallerNavn
