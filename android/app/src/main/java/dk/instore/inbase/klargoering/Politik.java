@@ -6,6 +6,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
@@ -13,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PersistableBundle;
 import android.os.UserManager;
+import android.provider.MediaStore;
 import android.provider.Telephony;
 import android.telecom.TelecomManager;
 
@@ -60,6 +62,10 @@ class Politik {
             "com.google.android.calculator", "com.android.calculator2",
             "com.motorola.camera3", "com.motorola.camera2", "com.motorola.camera",
             "com.android.camera2", "com.google.android.GoogleCamera",
+            // Nyere/billige Motorola (fx Moto G05, Moto E14 – Android Go): andre kamera-apps.
+            // Kameraet findes også ud fra, hvad telefonen kan (kameraApps).
+            "com.motorola.camera5", "com.motorola.cameraone", "com.android.camera",
+            "com.google.android.apps.cameralite",
             // Galleri – ellers kan de billeder, kameraet tager, ikke ses.
             "com.google.android.apps.photos", "com.google.android.apps.photosgo",
             "com.motorola.gallery", "com.android.gallery3d",
@@ -167,6 +173,7 @@ class Politik {
         List<String> fejl = new ArrayList<>();
         try { rettigheder(ctx); } catch (Exception ex) { fejl.add("Rettigheder: " + ex.getMessage()); }
         try { skjulApps(ctx, false); } catch (Exception ex) { fejl.add("Apps: " + ex.getMessage()); }
+        try { kameraRettighed(ctx); } catch (Exception ex) { fejl.add("Kamera: " + ex.getMessage()); }
         try { begraensninger(ctx); } catch (Exception ex) { fejl.add("Begrænsninger: " + ex.getMessage()); }
         try {
             Sporing.forbered(ctx, this);
@@ -226,6 +233,9 @@ class Politik {
         for (String p : s("tilladte").split(",")) if (!p.trim().isEmpty()) tilladte.add(p.trim());
         // PDF-læseren må aldrig skjules – briefs fra Gmail og FL-TMS åbnes i den.
         for (String p : pdfLaesere(pm)) if (!CHROME.equals(p) || chrome()) tilladte.add(p);
+        // Kameraet må aldrig skjules – FL-TMS tager billeder gennem det. Findes ud fra, hvad
+        // telefonen kan, så også kamera-apps uden for STANDARD_TILLADTE (andre modeller) ses.
+        tilladte.addAll(kameraApps(pm));
         TelecomManager tc = (TelecomManager) ctx.getSystemService(Context.TELECOM_SERVICE);
         if (tc != null && tc.getDefaultDialerPackage() != null) tilladte.add(tc.getDefaultDialerPackage());
         String sms = Telephony.Sms.getDefaultSmsPackage(ctx);
@@ -277,6 +287,45 @@ class Politik {
             }
         }
         return laesere;
+    }
+
+    /** Systemapps, der kan tage billeder eller video (også skjulte fra en ældre klargøring). */
+    static Set<String> kameraApps(PackageManager pm) {
+        Set<String> kameraer = new HashSet<>();
+        for (String handling : new String[]{MediaStore.ACTION_IMAGE_CAPTURE,
+                MediaStore.ACTION_VIDEO_CAPTURE, MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA}) {
+            for (ResolveInfo r : pm.queryIntentActivities(new Intent(handling),
+                    PackageManager.MATCH_ALL | PackageManager.MATCH_UNINSTALLED_PACKAGES)) {
+                if ((r.activityInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+                    kameraer.add(r.activityInfo.packageName);
+                }
+            }
+        }
+        return kameraer;
+    }
+
+    /**
+     * Apps installeret efter klargøringen (FL-TMS, FL-UPDATE, ekstra apps), der beder om kameraet,
+     * får det. Ellers kan en afvist forespørgsel ikke rettes – DISALLOW_APPS_CONTROL spærrer
+     * app-indstillingerne. Kører ved hver opstart og app-opdatering, så også senere apps får det.
+     */
+    void kameraRettighed(Context ctx) {
+        DevicePolicyManager dpm = dpm(ctx);
+        ComponentName admin = AdminReceiver.komponent(ctx);
+        for (PackageInfo p : ctx.getPackageManager().getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
+            if (p.applicationInfo == null || p.requestedPermissions == null
+                    || (p.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                    || ctx.getPackageName().equals(p.packageName)) {
+                continue;
+            }
+            for (String r : p.requestedPermissions) {
+                if (Manifest.permission.CAMERA.equals(r)) {
+                    dpm.setPermissionGrantState(admin, p.packageName, r,
+                            DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
+                    break;
+                }
+            }
+        }
     }
 
     void begraensninger(Context ctx) {
