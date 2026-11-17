@@ -14,6 +14,15 @@ public class SporingJob extends JobService {
         int job = params.getJobId();
         new Thread(() -> {
             boolean igen = false;
+            if (job == Sporing.JOB_TIME) {
+                // Uafhængigt af net og IN-BASE: FL-TMS, som FL-UPDATE installerer efter
+                // klargøringen, får kameraet inden for en time – uden genstart.
+                try {
+                    Politik.kamera(this);
+                } catch (Exception ex) {
+                    Log.w("IN-BASE", "Kamera: " + ex.getMessage());
+                }
+            }
             try {
                 Sporing.tjek(this, job != Sporing.JOB_TIME);
             } catch (Exception ex) {

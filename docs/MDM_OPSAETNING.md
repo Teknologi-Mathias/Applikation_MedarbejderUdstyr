@@ -302,3 +302,7 @@ Den virker kun på telefoner uden egen kode.
 - Android 10-11 (fx Motorola E20) kræver styrings-app 8.2+. Ældre versioner bliver Device Owner,
   men klargøringen (regler, FL-UPDATE, baggrund, tilbagemelding) starter aldrig. Den slags
   telefoner skal fabriksnulstilles og klargøres igen.
+- Kamera og galleri (8.3+): kamera- og galleri-apps skjules aldrig (findes ud fra, hvad
+  telefonen kan – også nye Motorola-modeller som G05/E14), og apps, der beder om kamera- eller
+  billedrettigheder (FL-TMS), får dem automatisk (klargøring, opstart, app-opdatering og hver
+  time). Ældre telefoner rettes ved at opdatere styrings-appen – ingen nulstilling.

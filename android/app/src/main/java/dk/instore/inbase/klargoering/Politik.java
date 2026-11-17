@@ -22,6 +22,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -173,7 +174,7 @@ class Politik {
         List<String> fejl = new ArrayList<>();
         try { rettigheder(ctx); } catch (Exception ex) { fejl.add("Rettigheder: " + ex.getMessage()); }
         try { skjulApps(ctx, false); } catch (Exception ex) { fejl.add("Apps: " + ex.getMessage()); }
-        try { kameraRettighed(ctx); } catch (Exception ex) { fejl.add("Kamera: " + ex.getMessage()); }
+        try { kamera(ctx); } catch (Exception ex) { fejl.add("Kamera: " + ex.getMessage()); }
         try { begraensninger(ctx); } catch (Exception ex) { fejl.add("Begrænsninger: " + ex.getMessage()); }
         try {
             Sporing.forbered(ctx, this);
@@ -231,6 +232,8 @@ class Politik {
             dpm.setApplicationRestrictions(admin, CHROME, chromePolitik);
         }
         for (String p : s("tilladte").split(",")) if (!p.trim().isEmpty()) tilladte.add(p.trim());
+        // Galleriet må aldrig skjules – ellers kan billederne fra kameraet ikke ses.
+        tilladte.addAll(gallerier(pm));
         // PDF-læseren må aldrig skjules – briefs fra Gmail og FL-TMS åbnes i den.
         for (String p : pdfLaesere(pm)) if (!CHROME.equals(p) || chrome()) tilladte.add(p);
         // Kameraet må aldrig skjules – FL-TMS tager billeder gennem det. Findes ud fra, hvad
@@ -289,7 +292,11 @@ class Politik {
         return laesere;
     }
 
-    /** Systemapps, der kan tage billeder eller video (også skjulte fra en ældre klargøring). */
+    /**
+     * Systemapps, der kan tage billeder eller video (også skjulte fra en ældre klargøring).
+     * Reserve: systemapps med "camera" i pakkenavnet – hvis en model ikke melder sig på
+     * kamera-handlingerne, mens den er skjult. Kun apps med ikon skjules, så de øvrige er uden betydning.
+     */
     static Set<String> kameraApps(PackageManager pm) {
         Set<String> kameraer = new HashSet<>();
         for (String handling : new String[]{MediaStore.ACTION_IMAGE_CAPTURE,
@@ -301,28 +308,60 @@ class Politik {
                 }
             }
         }
+        for (ApplicationInfo a : pm.getInstalledApplications(PackageManager.MATCH_UNINSTALLED_PACKAGES)) {
+            if ((a.flags & ApplicationInfo.FLAG_SYSTEM) != 0 && a.packageName.contains(".camera")) {
+                kameraer.add(a.packageName);
+            }
+        }
         return kameraer;
     }
 
+    /** Galleri-apps på telefonen (også skjulte fra en ældre klargøring), fx Motorola-galleriet. */
+    static Set<String> gallerier(PackageManager pm) {
+        Set<String> gallerier = new HashSet<>();
+        Intent galleri = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_GALLERY);
+        for (ResolveInfo r : pm.queryIntentActivities(galleri,
+                PackageManager.MATCH_ALL | PackageManager.MATCH_UNINSTALLED_PACKAGES)) {
+            if ((r.activityInfo.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+                gallerier.add(r.activityInfo.packageName);
+            }
+        }
+        return gallerier;
+    }
+
+    /** Det, en app skal have for at tage billeder og se/vedhæfte dem (Android 10-15). */
+    private static final Set<String> KAMERA_RETTIGHEDER = new HashSet<>(Arrays.asList(
+            Manifest.permission.CAMERA,
+            Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE));
+
     /**
-     * Apps installeret efter klargøringen (FL-TMS, FL-UPDATE, ekstra apps), der beder om kameraet,
-     * får det. Ellers kan en afvist forespørgsel ikke rettes – DISALLOW_APPS_CONTROL spærrer
-     * app-indstillingerne. Kører ved hver opstart og app-opdatering, så også senere apps får det.
+     * Kamera og billeder skal altid virke – FL-TMS tager billeder gennem kameraet:
+     * 1) kamera- og galleri-apps, der er skjult (fx fra klargøring med en ældre version), vises igen;
+     * 2) apps installeret efter klargøringen (FL-TMS, FL-UPDATE, ekstra apps) får kamera- og
+     *    billedrettighederne, de beder om – så et fejltryk på "Afvis" aldrig stopper kameraet.
+     * Kører ved klargøring, opstart, app-opdatering og hver time (SporingJob), så også apps,
+     * FL-UPDATE installerer senere, får kameraet uden genstart. Bruger ikke de gemte regler.
      */
-    void kameraRettighed(Context ctx) {
+    static void kamera(Context ctx) {
         DevicePolicyManager dpm = dpm(ctx);
         ComponentName admin = AdminReceiver.komponent(ctx);
-        for (PackageInfo p : ctx.getPackageManager().getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
+        PackageManager pm = ctx.getPackageManager();
+        Set<String> synlige = kameraApps(pm);
+        synlige.addAll(gallerier(pm));
+        for (String pakke : synlige) {
+            if (dpm.isApplicationHidden(admin, pakke)) dpm.setApplicationHidden(admin, pakke, false);
+        }
+        for (PackageInfo p : pm.getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
             if (p.applicationInfo == null || p.requestedPermissions == null
                     || (p.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0
                     || ctx.getPackageName().equals(p.packageName)) {
                 continue;
             }
             for (String r : p.requestedPermissions) {
-                if (Manifest.permission.CAMERA.equals(r)) {
+                if (KAMERA_RETTIGHEDER.contains(r)) {
                     dpm.setPermissionGrantState(admin, p.packageName, r,
                             DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED);
-                    break;
                 }
             }
         }

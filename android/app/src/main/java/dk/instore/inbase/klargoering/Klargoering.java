@@ -87,6 +87,7 @@ class Klargoering {
         trin("Skjuler apps, der ikke skal bruges", this::skjulApps);
         trin("Henter og installerer FL-UPDATE", this::flUpdate);
         if (!e("ekstra_apk").isEmpty()) trin("Henter og installerer ekstra apps", this::ekstraApps);
+        trin("Kamera", () -> Politik.kamera(ctx));
         trin("Låser indstillinger", () -> politik.begraensninger(ctx));
         trin("Find telefon og oplåsning", () -> Sporing.forbered(ctx, politik));
         trin("Melder tilbage til IN-BASE", this::meldTilbage);
